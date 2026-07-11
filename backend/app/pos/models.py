@@ -167,6 +167,7 @@ class Order(db.Model):
     subtotal = db.Column(db.Numeric(15, 2), nullable=False, default=0)
     discount_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
     total_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    amount_paid = db.Column(db.Numeric(15, 2), nullable=False, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -179,15 +180,20 @@ class Order(db.Model):
 
     def to_dict(self):
         f = lambda v: float(v) if v is not None else None
+        total = float(self.total_amount or 0)
+        paid = float(self.amount_paid or 0)
         return {
             "id": self.id,
             "order_number": self.order_number,
             "venue_id": self.venue_id,
             "status": self.status,
             "customer_name": self.customer_name,
+            "customer_phone": self.customer_phone,
             "subtotal": f(self.subtotal),
             "discount_amount": f(self.discount_amount),
-            "total_amount": f(self.total_amount),
+            "total_amount": total,
+            "amount_paid": paid,
+            "amount_due": round(total - paid, 2),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "items": [i.to_dict() for i in self.items],
             "payments": [p.to_dict() for p in self.payments],
@@ -235,6 +241,7 @@ class Payment(db.Model):
     status = db.Column(db.String(10), nullable=False, default="pending")  # pending|paid|failed
     reference = db.Column(db.String(100))
     confirmed_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    shift_id = db.Column(db.Integer, db.ForeignKey("shifts.id"))
     paid_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -246,6 +253,7 @@ class Payment(db.Model):
             "amount": float(self.amount),
             "status": self.status,
             "reference": self.reference,
+            "shift_id": self.shift_id,
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
         }
 

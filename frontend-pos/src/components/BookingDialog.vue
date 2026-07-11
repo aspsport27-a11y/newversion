@@ -90,6 +90,17 @@ function add() {
       </div>
 
       <template v-else>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          <div>
+            <label class="block text-sm text-slate-600 mb-1">Nama Customer</label>
+            <input v-model="pos.customerName" placeholder="Nama pemesan" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label class="block text-sm text-slate-600 mb-1">No. HP</label>
+            <input v-model="pos.customerPhone" placeholder="opsional" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+          </div>
+        </div>
+
         <label class="block text-sm text-slate-600 mb-1">Lapangan</label>
         <select v-model="facilityId" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 mb-3 outline-none focus:border-brand-500">
           <option v-for="f in pos.facilities" :key="f.id" :value="f.id">

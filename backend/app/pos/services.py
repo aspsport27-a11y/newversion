@@ -211,9 +211,18 @@ PROVIDERS = {
 }
 
 
-def pay_order(order: Order, cashier_id: int, data: dict) -> Payment:
-    if order.status != "open":
+def pay_order(order: Order, shift: Shift, cashier_id: int, data: dict) -> Payment:
+    """Terima pembayaran (penuh, DP, atau pelunasan) pada order.
+
+    `data.amount` opsional: jika kosong = bayar seluruh sisa. Jika < sisa = DP.
+    Pembayaran dicatat pada `shift` yang menerimanya (bisa beda dari shift order).
+    """
+    if order.status not in ("open", "partial"):
         raise PosError("Order sudah tidak bisa dibayar", "order_not_open")
+
+    remaining = _D(order.total_amount) - _D(order.amount_paid)
+    if remaining <= 0:
+        raise PosError("Order sudah lunas", "already_paid")
 
     method = data.get("method")
     if method not in VALID_METHODS:
@@ -222,32 +231,54 @@ def pay_order(order: Order, cashier_id: int, data: dict) -> Payment:
     if provider not in PROVIDERS:
         raise PosError(f"Provider tidak dikenal: {provider}", "bad_provider")
 
+    amt_in = data.get("amount")
+    amount = remaining if amt_in in (None, "", 0, "0") else _D(amt_in)
+    if amount <= 0 or amount > remaining:
+        raise PosError(
+            f"Jumlah bayar harus antara 1 dan {remaining} (sisa tagihan)", "bad_amount"
+        )
+
     payment = Payment(
-        order_id=order.id,
-        method=method,
-        provider=provider,
-        amount=order.total_amount,
-        status="pending",
-        reference=(data.get("reference") or None),
-        confirmed_by=cashier_id,
+        order_id=order.id, method=method, provider=provider, amount=amount,
+        status="pending", reference=(data.get("reference") or None),
+        confirmed_by=cashier_id, shift_id=shift.id,
     )
     db.session.add(payment)
 
     PROVIDERS[provider](order, payment, data=data)
 
     if payment.status == "paid":
-        _finalize_paid(order, payment, cashier_id)
+        _apply_payment(order, payment, shift, cashier_id)
 
     db.session.commit()
     return payment
 
 
-def _finalize_paid(order: Order, payment: Payment, cashier_id: int) -> None:
-    """Order lunas: kurangi stok + update total shift."""
-    order.status = "paid"
+def _apply_payment(order: Order, payment: Payment, shift: Shift, cashier_id: int) -> None:
+    """Terapkan pembayaran lunas: akumulasi shift + update status order + stok."""
+    amt = _D(payment.amount)
+
+    # akuntansi pada shift yang MENERIMA pembayaran ini (DP & pelunasan terpisah)
+    shift.total_sales = _D(shift.total_sales) + amt
+    if payment.method == "cash":
+        shift.total_cash_sales = _D(shift.total_cash_sales) + amt
+    elif payment.method == "qris":
+        shift.total_qris_sales = _D(shift.total_qris_sales) + amt
+
+    was_paid = order.status == "paid"
+    order.amount_paid = _D(order.amount_paid) + amt
     order.updated_at = datetime.utcnow()
 
-    # kurangi stok produk yang dilacak
+    if order.amount_paid >= _D(order.total_amount):
+        order.status = "paid"
+        if not was_paid:
+            _deduct_stock(order, cashier_id)
+    else:
+        order.status = "partial"
+
+
+def _deduct_stock(order: Order, cashier_id: int) -> None:
+    """Kurangi stok produk (sekali, saat order lunas penuh)."""
     for item in order.items:
         if item.item_type == "product" and item.product_id:
             product = db.session.get(Product, item.product_id)
@@ -256,25 +287,11 @@ def _finalize_paid(order: Order, payment: Payment, cashier_id: int) -> None:
                 product.stock_qty -= qty
                 db.session.add(
                     StockMovement(
-                        product_id=product.id,
-                        venue_id=order.venue_id,
-                        type="sale",
-                        quantity=-qty,
-                        balance_after=product.stock_qty,
-                        reference=order.order_number,
-                        created_by=cashier_id,
+                        product_id=product.id, venue_id=order.venue_id, type="sale",
+                        quantity=-qty, balance_after=product.stock_qty,
+                        reference=order.order_number, created_by=cashier_id,
                     )
                 )
-
-    # update akumulasi shift
-    shift = db.session.get(Shift, order.shift_id)
-    if shift:
-        amt = order.total_amount
-        shift.total_sales = _D(shift.total_sales) + amt
-        if payment.method == "cash":
-            shift.total_cash_sales = _D(shift.total_cash_sales) + amt
-        elif payment.method == "qris":
-            shift.total_qris_sales = _D(shift.total_qris_sales) + amt
 
 
 # ------------------------------------------------------------------

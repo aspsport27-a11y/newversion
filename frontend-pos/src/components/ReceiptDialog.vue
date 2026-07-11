@@ -37,8 +37,15 @@ function print() {
         <div v-if="order.discount_amount > 0" class="flex justify-between"><span>Diskon</span><span>-{{ rupiah(order.discount_amount) }}</span></div>
         <div class="flex justify-between font-bold text-base"><span>TOTAL</span><span>{{ rupiah(order.total_amount) }}</span></div>
         <div class="flex justify-between text-xs mt-1">
-          <span>{{ payment.method.toUpperCase() }}</span>
-          <span>{{ payment.status === 'paid' ? 'LUNAS' : 'PENDING' }}</span>
+          <span>Dibayar ({{ payment.method.toUpperCase() }})</span>
+          <span>{{ rupiah(payment.amount) }}</span>
+        </div>
+        <div v-if="order.amount_due > 0" class="flex justify-between text-xs">
+          <span>Sisa</span><span>{{ rupiah(order.amount_due) }}</span>
+        </div>
+        <div class="flex justify-between text-xs font-bold mt-0.5">
+          <span>STATUS</span>
+          <span>{{ order.status === 'paid' ? 'LUNAS' : (order.status === 'partial' ? 'DP / BELUM LUNAS' : payment.status.toUpperCase()) }}</span>
         </div>
         <div class="border-t border-dashed border-slate-300 my-2"></div>
         <p class="text-center text-xs">Terima kasih 🙏</p>

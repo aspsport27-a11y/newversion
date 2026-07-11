@@ -294,53 +294,54 @@ def report_sales():
     d_from, d_to = _date_range()
     vid = request.args.get("venue_id", type=int)
 
-    base = Order.query.filter(Order.status == "paid")
-    base = base.filter(func.date(Order.created_at).between(d_from, d_to))
-    if vid:
-        base = base.filter(Order.venue_id == vid)
-
-    order_ids = [o.id for o in base.with_entities(Order.id).all()]
-    total_revenue = float(
-        base.with_entities(func.coalesce(func.sum(Order.total_amount), 0)).scalar() or 0
+    # --- basis kas: pembayaran yang DITERIMA dalam rentang (DP + pelunasan) ---
+    pay_q = (
+        db.session.query(Payment)
+        .join(Order, Payment.order_id == Order.id)
+        .filter(Payment.status == "paid")
+        .filter(func.date(Payment.paid_at).between(d_from, d_to))
     )
-    order_count = len(order_ids)
+    if vid:
+        pay_q = pay_q.filter(Order.venue_id == vid)
 
-    by_method, by_type, daily = [], [], []
-    if order_ids:
-        # per metode bayar
-        for method, amt in (
-            db.session.query(Payment.method, func.coalesce(func.sum(Payment.amount), 0))
-            .filter(Payment.order_id.in_(order_ids), Payment.status == "paid")
-            .group_by(Payment.method)
-            .all()
-        ):
-            by_method.append({"method": method, "amount": float(amt)})
-        # per jenis item
-        for itype, amt in (
-            db.session.query(OrderItem.item_type, func.coalesce(func.sum(OrderItem.line_total), 0))
-            .filter(OrderItem.order_id.in_(order_ids))
-            .group_by(OrderItem.item_type)
-            .all()
-        ):
-            by_type.append({"item_type": itype, "amount": float(amt)})
-        # harian
-        for day, amt, cnt in (
-            db.session.query(
-                func.date(Order.created_at),
-                func.coalesce(func.sum(Order.total_amount), 0),
-                func.count(Order.id),
-            )
-            .filter(Order.id.in_(order_ids))
-            .group_by(func.date(Order.created_at))
-            .order_by(func.date(Order.created_at))
-            .all()
-        ):
-            daily.append({"date": str(day), "revenue": float(amt), "orders": int(cnt)})
+    total_received = float(
+        pay_q.with_entities(func.coalesce(func.sum(Payment.amount), 0)).scalar() or 0
+    )
+    payment_count = pay_q.count()
+
+    by_method = [
+        {"method": m, "amount": float(a)}
+        for m, a in pay_q.with_entities(
+            Payment.method, func.coalesce(func.sum(Payment.amount), 0)
+        ).group_by(Payment.method).all()
+    ]
+    daily = [
+        {"date": str(day), "revenue": float(a)}
+        for day, a in pay_q.with_entities(
+            func.date(Payment.paid_at), func.coalesce(func.sum(Payment.amount), 0)
+        ).group_by(func.date(Payment.paid_at)).order_by(func.date(Payment.paid_at)).all()
+    ]
+
+    # --- komposisi jenis: dari order LUNAS dibuat dalam rentang ---
+    ord_q = Order.query.filter(
+        Order.status == "paid", func.date(Order.created_at).between(d_from, d_to)
+    )
+    if vid:
+        ord_q = ord_q.filter(Order.venue_id == vid)
+    paid_ids = [o.id for o in ord_q.with_entities(Order.id).all()]
+    by_type = []
+    if paid_ids:
+        by_type = [
+            {"item_type": t, "amount": float(a)}
+            for t, a in db.session.query(
+                OrderItem.item_type, func.coalesce(func.sum(OrderItem.line_total), 0)
+            ).filter(OrderItem.order_id.in_(paid_ids)).group_by(OrderItem.item_type).all()
+        ]
 
     return jsonify(
         range={"from": d_from, "to": d_to},
-        total_revenue=total_revenue,
-        order_count=order_count,
+        total_revenue=total_received,
+        order_count=payment_count,
         by_method=by_method,
         by_item_type=by_type,
         daily=daily,
@@ -399,8 +400,55 @@ def bookings_list():
         row = fb.to_dict()
         row["facility_name"] = fac.name
         row["venue_id"] = fb.venue_id
+        row["order_id"] = order.id if order else None
         row["order_number"] = order.order_number if order else None
         row["customer_name"] = order.customer_name if order else None
-        row["order_status"] = order.status if order else None
+        row["customer_phone"] = order.customer_phone if order else None
+        if order:
+            total = float(order.total_amount or 0)
+            paid = float(order.amount_paid or 0)
+            row["order_total"] = total
+            row["order_paid"] = paid
+            row["order_due"] = round(total - paid, 2)
+            row["payment_status"] = order.status  # open|partial|paid|void
+        else:
+            row["order_total"] = row["order_paid"] = row["order_due"] = None
+            row["payment_status"] = None
         rows.append(row)
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), bookings=rows), 200
+
+
+@admin_bp.get("/orders/<int:order_id>")
+@jwt_required()
+@VIEW
+def order_detail(order_id):
+    """Detail order + riwayat pembayaran (DP, pelunasan)."""
+    order = db.session.get(Order, order_id)
+    if not order:
+        return _err("Order tidak ditemukan", "not_found", 404)
+    return jsonify(order=order.to_dict()), 200
+
+
+@admin_bp.get("/reports/outstanding")
+@jwt_required()
+@VIEW
+def report_outstanding():
+    """Piutang: order status 'partial' (DP belum lunas)."""
+    vid = request.args.get("venue_id", type=int)
+    q = Order.query.filter(Order.status == "partial")
+    if vid:
+        q = q.filter(Order.venue_id == vid)
+    orders = q.order_by(Order.created_at.desc()).all()
+    rows, total_due = [], 0.0
+    for o in orders:
+        total = float(o.total_amount or 0)
+        paid = float(o.amount_paid or 0)
+        due = round(total - paid, 2)
+        total_due += due
+        rows.append({
+            "id": o.id, "order_number": o.order_number, "venue_id": o.venue_id,
+            "customer_name": o.customer_name, "customer_phone": o.customer_phone,
+            "total": total, "paid": paid, "due": due,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        })
+    return jsonify(count=len(rows), total_due=round(total_due, 2), orders=rows), 200

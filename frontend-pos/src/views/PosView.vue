@@ -6,6 +6,7 @@ import PaymentDialog from '../components/PaymentDialog.vue'
 import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
 import BookingDialog from '../components/BookingDialog.vue'
+import SettlementDialog from '../components/SettlementDialog.vue'
 
 const pos = usePosStore()
 const router = useRouter()
@@ -17,6 +18,7 @@ const showPayment = ref(false)
 const showReceipt = ref(false)
 const showClose = ref(false)
 const showBooking = ref(false)
+const showSettle = ref(false)
 const lastResult = ref(null)
 const toast = ref('')
 
@@ -53,7 +55,10 @@ async function submitOpenShift() {
 
 async function onPay(payload) {
   try {
-    const result = await pos.checkout(payload.method, { reference: payload.reference })
+    const result = await pos.checkout(payload.method, {
+      amount: payload.amount,
+      reference: payload.reference,
+    })
     lastResult.value = result
     showPayment.value = false
     showReceipt.value = true
@@ -63,6 +68,13 @@ async function onPay(payload) {
   } catch (e) {
     flash(e?.response?.data?.message || 'Pembayaran gagal')
   }
+}
+
+async function onSettlePaid(result) {
+  lastResult.value = result
+  showSettle.value = false
+  showReceipt.value = true
+  await pos.fetchMe()
 }
 
 async function onCloseShift(payload) {
@@ -120,10 +132,16 @@ function logout() {
     <div v-else class="flex-1 flex flex-col lg:flex-row min-h-0">
       <!-- Produk -->
       <div class="flex-1 overflow-auto p-3">
-        <button @click="showBooking = true"
-          class="w-full mb-3 py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
-          🏟️ Booking Lapangan
-        </button>
+        <div class="grid grid-cols-2 gap-2 mb-3">
+          <button @click="showBooking = true"
+            class="py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
+            🏟️ Booking
+          </button>
+          <button @click="showSettle = true"
+            class="py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium border border-amber-100 flex items-center justify-center gap-2">
+            💰 Pelunasan
+          </button>
+        </div>
         <p v-if="pos.products.length === 0" class="text-center text-slate-400 mt-6 text-sm">
           Belum ada produk. Gunakan tombol booking di atas.
         </p>
@@ -195,6 +213,7 @@ function logout() {
       :terminal="pos.terminal" @close="showReceipt = false" />
     <CloseShiftDialog v-if="showClose" :shift="pos.openShift" @close="showClose = false" @submit="onCloseShift" />
     <BookingDialog v-if="showBooking" @close="showBooking = false" @added="flash('Booking ditambahkan ke keranjang')" />
+    <SettlementDialog v-if="showSettle" @close="showSettle = false" @paid="onSettlePaid" />
 
     <!-- Toast -->
     <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">

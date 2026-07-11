@@ -11,6 +11,8 @@ export const usePosStore = defineStore('pos', {
     facilities: [],
     cart: [], // {uid, item_type, name, unit_price, quantity, ...}
     discount: 0,
+    customerName: '',
+    customerPhone: '',
   }),
   getters: {
     isAuthenticated: (s) => !!s.token,
@@ -103,11 +105,14 @@ export const usePosStore = defineStore('pos', {
     clearCart() {
       this.cart = []
       this.discount = 0
+      this.customerName = ''
+      this.customerPhone = ''
     },
     async checkout(method, extra = {}) {
       const payload = {
         discount_amount: Number(this.discount) || 0,
-        customer_name: extra.customer_name || null,
+        customer_name: this.customerName || null,
+        customer_phone: this.customerPhone || null,
         items: this.cart.map((i) =>
           i.item_type === 'booking'
             ? {
@@ -123,9 +128,22 @@ export const usePosStore = defineStore('pos', {
       const { data: created } = await client.post('/orders', payload)
       const { data: paid } = await client.post(`/orders/${created.order.id}/pay`, {
         method,
+        amount: extra.amount ?? null,
         reference: extra.reference || null,
       })
       return paid // { order, payment }
+    },
+    async fetchOutstanding() {
+      const { data } = await client.get('/orders/outstanding')
+      return data.orders
+    },
+    async settle(orderId, method, amount, reference) {
+      const { data } = await client.post(`/orders/${orderId}/pay`, {
+        method,
+        amount: amount ?? null,
+        reference: reference || null,
+      })
+      return data // { order, payment }
     },
     logout() {
       this.$reset()

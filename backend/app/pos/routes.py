@@ -228,6 +228,21 @@ def order_create():
     return jsonify(order=order.to_dict()), 201
 
 
+@pos_bp.get("/orders/outstanding")
+@jwt_required()
+def orders_outstanding():
+    """Booking/order yang belum lunas (DP) di venue terminal — untuk pelunasan."""
+    from .models import Order
+
+    terminal = _current_terminal()
+    orders = (
+        Order.query.filter_by(venue_id=terminal.venue_id, status="partial")
+        .order_by(Order.created_at.desc())
+        .all()
+    )
+    return jsonify(count=len(orders), orders=[o.to_dict() for o in orders]), 200
+
+
 @pos_bp.get("/orders/<int:order_id>")
 @jwt_required()
 def order_get(order_id):
@@ -244,9 +259,13 @@ def order_get(order_id):
 def order_pay(order_id):
     from .models import Order
 
+    terminal = _current_terminal()
+    shift = _current_open_shift(terminal.id)
     order = db.session.get(Order, order_id)
     if order is None:
         raise PosError("Order tidak ditemukan", "not_found", 404)
+    if order.venue_id != terminal.venue_id:
+        raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
     data = request.get_json(silent=True) or {}
-    payment = pay_order(order, int(get_jwt_identity()), data)
+    payment = pay_order(order, shift, int(get_jwt_identity()), data)
     return jsonify(order=order.to_dict(), payment=payment.to_dict()), 200
