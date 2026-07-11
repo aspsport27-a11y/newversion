@@ -7,6 +7,8 @@ export const usePosStore = defineStore('pos', {
     cashier: JSON.parse(localStorage.getItem('pos_cashier') || 'null'),
     terminal: JSON.parse(localStorage.getItem('pos_terminal') || 'null'),
     openShift: null,
+    venue: null,
+    bookingEnabled: true, // false = mode tiketing (venue tanpa lapangan, mis. waterpark)
     products: [],
     facilities: [],
     cart: [], // {uid, item_type, name, unit_price, quantity, ...}
@@ -39,6 +41,8 @@ export const usePosStore = defineStore('pos', {
     async fetchMe() {
       const { data } = await client.get('/me')
       this.terminal = data.terminal
+      this.venue = data.venue
+      this.bookingEnabled = data.booking_enabled
       this.openShift = data.open_shift
     },
     async fetchProducts() {
@@ -79,7 +83,7 @@ export const usePosStore = defineStore('pos', {
           item_type: 'product',
           product_id: p.id,
           name: p.name,
-          unit_price: p.price,
+          unit_price: p.effective_price ?? p.price, // pakai harga promo bila ada
           quantity: 1,
           stock_qty: p.stock_qty,
           track_stock: p.track_stock,

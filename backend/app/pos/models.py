@@ -43,6 +43,7 @@ class Product(db.Model):
         db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False
     )
     price = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    promo_price = db.Column(db.Numeric(15, 2))
     unit = db.Column(db.String(20), default="pcs")
     track_stock = db.Column(db.Boolean, default=True)
     stock_qty = db.Column(db.Integer, default=0)
@@ -50,13 +51,23 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
 
+    @property
+    def effective_price(self):
+        """Harga jual: promo bila valid (0 < promo < harga normal), selain itu harga normal."""
+        p = float(self.price or 0)
+        promo = float(self.promo_price) if self.promo_price is not None else None
+        return promo if (promo is not None and 0 < promo < p) else p
+
     def to_dict(self):
+        promo = float(self.promo_price) if self.promo_price is not None else None
         return {
             "id": self.id,
             "sku": self.sku,
             "name": self.name,
             "category_id": self.category_id,
             "price": float(self.price or 0),
+            "promo_price": promo,
+            "effective_price": self.effective_price,
             "unit": self.unit,
             "track_stock": self.track_stock,
             "stock_qty": self.stock_qty,

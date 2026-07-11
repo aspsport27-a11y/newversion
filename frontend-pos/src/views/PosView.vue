@@ -132,7 +132,8 @@ function logout() {
     <div v-else class="flex-1 flex flex-col lg:flex-row min-h-0">
       <!-- Produk -->
       <div class="flex-1 overflow-auto p-3">
-        <div class="grid grid-cols-2 gap-2 mb-3">
+        <!-- Mode booking lapangan (venue punya lapangan) -->
+        <div v-if="pos.bookingEnabled" class="grid grid-cols-2 gap-2 mb-3">
           <button @click="showBooking = true"
             class="py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
             🏟️ Booking
@@ -142,8 +143,12 @@ function logout() {
             💰 Pelunasan
           </button>
         </div>
+        <!-- Mode tiketing (venue tanpa lapangan, mis. waterpark) -->
+        <div v-else class="mb-3 py-2.5 rounded-xl bg-brand-50 text-brand-700 font-medium border border-brand-100 text-center">
+          🎟️ Penjualan Tiket — pilih tiket di bawah
+        </div>
         <p v-if="pos.products.length === 0" class="text-center text-slate-400 mt-6 text-sm">
-          Belum ada produk. Gunakan tombol booking di atas.
+          {{ pos.bookingEnabled ? 'Belum ada produk untuk venue ini.' : 'Belum ada tiket/produk. Tambahkan di admin (menu Produk).' }}
         </p>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           <button
@@ -154,7 +159,11 @@ function logout() {
             class="bg-white rounded-xl border p-3 text-left hover:border-brand-400 active:scale-95 transition disabled:opacity-40"
           >
             <p class="font-medium text-slate-800 text-sm leading-tight">{{ p.name }}</p>
-            <p class="text-brand-700 font-bold mt-1">{{ rupiah(p.price) }}</p>
+            <p v-if="p.promo_price" class="mt-1">
+              <span class="text-brand-700 font-bold">{{ rupiah(p.effective_price) }}</span>
+              <span class="text-[11px] text-slate-400 line-through ml-1">{{ rupiah(p.price) }}</span>
+            </p>
+            <p v-else class="text-brand-700 font-bold mt-1">{{ rupiah(p.price) }}</p>
             <p v-if="p.track_stock" class="text-[11px] text-slate-400 mt-0.5">stok: {{ p.stock_qty }}</p>
           </button>
         </div>

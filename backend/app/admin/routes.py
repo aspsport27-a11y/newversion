@@ -51,6 +51,14 @@ def _D(v, default=0):
         return default
 
 
+def _promo(v):
+    """Harga promo: None jika kosong/0."""
+    try:
+        return float(v) if v not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        return None
+
+
 # ==================================================================
 # VENUES
 # ==================================================================
@@ -175,7 +183,8 @@ def products_create():
         cat_id = cat.id
     p = Product(
         sku=d["sku"], name=d["name"], venue_id=d["venue_id"], category_id=cat_id,
-        price=_D(d.get("price")), unit=d.get("unit", "pcs"),
+        price=_D(d.get("price")), promo_price=_promo(d.get("promo_price")),
+        unit=d.get("unit", "pcs"),
         track_stock=bool(d.get("track_stock", True)), stock_qty=int(d.get("stock_qty", 0) or 0),
         is_active=bool(d.get("is_active", True)),
     )
@@ -196,6 +205,8 @@ def products_update(pid):
         p.name = d["name"]
     if "price" in d:
         p.price = _D(d["price"])
+    if "promo_price" in d:
+        p.promo_price = _promo(d["promo_price"])
     if "unit" in d:
         p.unit = d["unit"]
     if "track_stock" in d:

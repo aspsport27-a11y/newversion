@@ -39,13 +39,13 @@ watch(venueId, loadProducts)
 
 function openCreate() {
   editing.value = null
-  form.value = { sku: '', name: '', price: 0, unit: 'pcs', stock_qty: 0, track_stock: true, category: '' }
+  form.value = { sku: '', name: '', price: 0, promo_price: null, unit: 'pcs', stock_qty: 0, track_stock: true, category: '' }
   error.value = ''
   showForm.value = true
 }
 function openEdit(p) {
   editing.value = p
-  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, track_stock: p.track_stock, is_active: p.is_active }
+  form.value = { name: p.name, price: p.price, promo_price: p.promo_price, stock_qty: p.stock_qty, track_stock: p.track_stock, is_active: p.is_active }
   error.value = ''
   showForm.value = true
 }
@@ -102,7 +102,13 @@ async function save() {
             <tr v-for="p in products" :key="p.id" class="border-t hover:bg-slate-50">
               <td class="px-4 py-3 font-mono text-slate-500">{{ p.sku }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ p.name }}</td>
-              <td class="px-4 py-3 text-right">{{ rupiah(p.price) }}</td>
+              <td class="px-4 py-3 text-right">
+                <template v-if="p.promo_price">
+                  <span class="text-emerald-600 font-medium">{{ rupiah(p.effective_price) }}</span>
+                  <span class="text-xs text-slate-400 line-through ml-1">{{ rupiah(p.price) }}</span>
+                </template>
+                <span v-else>{{ rupiah(p.price) }}</span>
+              </td>
               <td class="px-4 py-3 text-right">{{ p.track_stock ? p.stock_qty : '—' }}</td>
               <td class="px-4 py-3 text-center">
                 <span :class="p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5">
@@ -132,9 +138,16 @@ async function save() {
           </template>
           <input v-model="form.name" placeholder="Nama produk" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           <div class="grid grid-cols-2 gap-2">
-            <input v-model.number="form.price" type="number" placeholder="Harga" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
-            <input v-model.number="form.stock_qty" type="number" placeholder="Stok" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">Harga normal</label>
+              <input v-model.number="form.price" type="number" placeholder="Harga" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">Harga promo (opsional)</label>
+              <input v-model.number="form.promo_price" type="number" placeholder="kosongkan bila tak ada" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            </div>
           </div>
+          <input v-model.number="form.stock_qty" type="number" placeholder="Stok" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           <label class="flex items-center gap-2 text-sm text-slate-600">
             <input v-model="form.track_stock" type="checkbox" /> Lacak stok
           </label>

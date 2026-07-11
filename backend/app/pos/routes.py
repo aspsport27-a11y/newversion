@@ -10,7 +10,7 @@ from flask_jwt_extended import (
 )
 
 from ..extensions import db
-from ..models import User
+from ..models import User, Venue
 from ..security import verify_password
 from .models import Facility, FacilityBooking, PosTerminal, Product, Shift
 from .services import (
@@ -100,10 +100,19 @@ def pos_login():
 def pos_me():
     terminal = _current_terminal()
     shift = Shift.query.filter_by(terminal_id=terminal.id, status="open").first()
+    venue = db.session.get(Venue, terminal.venue_id)
+    has_facility = (
+        db.session.query(Facility.id)
+        .filter_by(venue_id=terminal.venue_id, is_active=True)
+        .first()
+        is not None
+    )
     return jsonify(
         cashier_id=int(get_jwt_identity()),
         username=_claims().get("username"),
         terminal=terminal.to_dict(),
+        venue={"id": venue.id, "code": venue.code, "name": venue.name, "type": venue.type} if venue else None,
+        booking_enabled=has_facility,  # True = mode booking lapangan; False = mode tiketing
         open_shift=shift.to_dict() if shift else None,
     ), 200
 
