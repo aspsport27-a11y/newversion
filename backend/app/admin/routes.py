@@ -62,6 +62,82 @@ def venues():
     return jsonify(venues=[v.to_dict() for v in vs]), 200
 
 
+def _cap(v):
+    try:
+        return int(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+@admin_bp.post("/venues")
+@jwt_required()
+@MANAGE
+def venues_create():
+    d = request.get_json(silent=True) or {}
+    for f in ("code", "name", "type"):
+        if not d.get(f):
+            return _err(f"{f} wajib diisi")
+    if Venue.query.filter_by(code=d["code"]).first():
+        return _err("Kode venue sudah dipakai", "duplicate", 409)
+    v = Venue(
+        code=d["code"], name=d["name"], type=d["type"], address=d.get("address"),
+        city=d.get("city"), phone=d.get("phone"), email=d.get("email"),
+        capacity=_cap(d.get("capacity")), active=bool(d.get("active", True)),
+    )
+    db.session.add(v)
+    db.session.commit()
+    return jsonify(venue=v.to_dict()), 201
+
+
+@admin_bp.put("/venues/<int:vid>")
+@jwt_required()
+@MANAGE
+def venues_update(vid):
+    v = db.session.get(Venue, vid)
+    if not v:
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    d = request.get_json(silent=True) or {}
+    if "code" in d and d["code"] != v.code:
+        if Venue.query.filter_by(code=d["code"]).first():
+            return _err("Kode venue sudah dipakai", "duplicate", 409)
+        v.code = d["code"]
+    for f in ("name", "type", "address", "city", "phone", "email"):
+        if f in d:
+            setattr(v, f, d[f])
+    if "capacity" in d:
+        v.capacity = _cap(d["capacity"])
+    if "active" in d:
+        v.active = bool(d["active"])
+    v.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(venue=v.to_dict()), 200
+
+
+@admin_bp.delete("/venues/<int:vid>")
+@jwt_required()
+@MANAGE
+def venues_delete(vid):
+    v = db.session.get(Venue, vid)
+    if not v:
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    deps = {
+        "order": Order.query.filter_by(venue_id=vid).count(),
+        "produk": Product.query.filter_by(venue_id=vid).count(),
+        "lapangan": Facility.query.filter_by(venue_id=vid).count(),
+        "terminal": PosTerminal.query.filter_by(venue_id=vid).count(),
+    }
+    blocking = {k: c for k, c in deps.items() if c > 0}
+    if blocking:
+        detail = ", ".join(f"{k} ({c})" for k, c in blocking.items())
+        return _err(
+            f"Venue punya data terkait: {detail}. Nonaktifkan saja (jangan hapus).",
+            "has_dependencies", 409,
+        )
+    db.session.delete(v)
+    db.session.commit()
+    return jsonify(message="Venue dihapus"), 200
+
+
 # ==================================================================
 # PRODUCTS
 # ==================================================================

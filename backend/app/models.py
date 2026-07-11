@@ -40,7 +40,10 @@ class Venue(db.Model):
             "code": self.code,
             "name": self.name,
             "type": self.type,
+            "address": self.address,
             "city": self.city,
+            "phone": self.phone,
+            "email": self.email,
             "capacity": self.capacity,
             "active": self.active,
         }
