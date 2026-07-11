@@ -19,6 +19,7 @@ from ..security import (
 )
 from ..pos.models import (
     Facility,
+    FacilityBooking,
     Order,
     OrderItem,
     Payment,
@@ -365,3 +366,41 @@ def report_shifts():
         row["cashier"] = users.get(s.cashier_id)
         rows.append(row)
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), shifts=rows), 200
+
+
+@admin_bp.get("/bookings")
+@jwt_required()
+@VIEW
+def bookings_list():
+    """Daftar booking lapangan + info order (customer)."""
+    from datetime import timedelta
+
+    today = date.today()
+    d_from = request.args.get("from") or today.isoformat()
+    d_to = request.args.get("to") or (today + timedelta(days=30)).isoformat()
+    vid = request.args.get("venue_id", type=int)
+    fid = request.args.get("facility_id", type=int)
+
+    q = (
+        db.session.query(FacilityBooking, Facility, Order)
+        .join(Facility, FacilityBooking.facility_id == Facility.id)
+        .outerjoin(OrderItem, FacilityBooking.order_item_id == OrderItem.id)
+        .outerjoin(Order, OrderItem.order_id == Order.id)
+        .filter(FacilityBooking.booking_date.between(d_from, d_to))
+    )
+    if vid:
+        q = q.filter(FacilityBooking.venue_id == vid)
+    if fid:
+        q = q.filter(FacilityBooking.facility_id == fid)
+    q = q.order_by(FacilityBooking.booking_date, FacilityBooking.start_time)
+
+    rows = []
+    for fb, fac, order in q.all():
+        row = fb.to_dict()
+        row["facility_name"] = fac.name
+        row["venue_id"] = fb.venue_id
+        row["order_number"] = order.order_number if order else None
+        row["customer_name"] = order.customer_name if order else None
+        row["order_status"] = order.status if order else None
+        rows.append(row)
+    return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), bookings=rows), 200

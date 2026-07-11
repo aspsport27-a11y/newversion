@@ -25,6 +25,7 @@ const nav = [
   { name: 'venues', label: 'Venue', icon: '🏟️' },
   { name: 'products', label: 'Produk', icon: '📦' },
   { name: 'facilities', label: 'Lapangan', icon: '⚽' },
+  { name: 'bookings', label: 'Booking', icon: '📅' },
   { name: 'reports', label: 'Laporan', icon: '📈' },
   { name: 'setup', label: 'Setup Kasir', icon: '⚙️' },
 ]
