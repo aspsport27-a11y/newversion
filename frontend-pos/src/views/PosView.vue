@@ -159,11 +159,12 @@ function logout() {
             class="bg-white rounded-xl border p-3 text-left hover:border-brand-400 active:scale-95 transition disabled:opacity-40"
           >
             <p class="font-medium text-slate-800 text-sm leading-tight">{{ p.name }}</p>
-            <p v-if="p.promo_price" class="mt-1">
+            <p v-if="p.promo && p.effective_price < p.price" class="mt-1">
               <span class="text-brand-700 font-bold">{{ rupiah(p.effective_price) }}</span>
               <span class="text-[11px] text-slate-400 line-through ml-1">{{ rupiah(p.price) }}</span>
             </p>
             <p v-else class="text-brand-700 font-bold mt-1">{{ rupiah(p.price) }}</p>
+            <p v-if="p.promo" class="text-[10px] text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 mt-1 inline-block">🎉 {{ p.promo.label }}</p>
             <p v-if="p.track_stock" class="text-[11px] text-slate-400 mt-0.5">stok: {{ p.stock_qty }}</p>
           </button>
         </div>
@@ -187,6 +188,7 @@ function logout() {
                 <template v-if="it.item_type === 'booking'">{{ it.quantity }} jam × {{ rupiah(it.unit_price) }}</template>
                 <template v-else>{{ rupiah(it.unit_price) }}</template>
               </p>
+              <p v-if="it.promo" class="text-[10px] text-amber-600">🎉 {{ it.promo.label }}</p>
             </div>
             <div v-if="it.item_type === 'product'" class="flex items-center gap-1.5">
               <button @click="pos.decQty(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-600 font-bold">−</button>
@@ -194,7 +196,7 @@ function logout() {
               <button @click="pos.incQty(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-600 font-bold">+</button>
             </div>
             <button v-else @click="pos.removeItem(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-400 shrink-0">✕</button>
-            <span class="w-16 text-right text-sm font-medium">{{ rupiah(it.unit_price * it.quantity) }}</span>
+            <span class="w-16 text-right text-sm font-medium">{{ rupiah(pos.lineTotal(it)) }}</span>
           </div>
         </div>
 

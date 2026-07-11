@@ -124,12 +124,14 @@ def pos_me():
 @jwt_required()
 def pos_products():
     terminal = _current_terminal()
+    from .promos import product_public
+
     products = (
         Product.query.filter_by(venue_id=terminal.venue_id, is_active=True)
         .order_by(Product.name)
         .all()
     )
-    return jsonify(count=len(products), products=[p.to_dict() for p in products]), 200
+    return jsonify(count=len(products), products=[product_public(p) for p in products]), 200
 
 
 # ------------------------------------------------------------------

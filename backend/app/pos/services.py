@@ -117,11 +117,14 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
                     f"Stok '{product.name}' kurang (sisa {product.stock_qty})",
                     "insufficient_stock",
                 )
-            eff = _D(product.effective_price)  # harga promo bila ada
+            from .promos import active_promo, compute_line, promo_label
+
+            promo = active_promo(product.id)
+            unit, line_total = compute_line(product, qty, promo)
+            pname = f"{product.name} ({promo_label(promo)})" if promo else product.name
             oi = OrderItem(
-                item_type="product", product_id=product.id, name_snapshot=product.name[:120],
-                unit_price=eff, quantity=qty,
-                line_total=(eff * qty).quantize(Decimal("0.01")),
+                item_type="product", product_id=product.id, name_snapshot=pname[:120],
+                unit_price=unit, quantity=qty, line_total=line_total,
             )
 
         elif item_type == "booking":

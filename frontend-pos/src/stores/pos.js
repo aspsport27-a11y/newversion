@@ -19,7 +19,20 @@ export const usePosStore = defineStore('pos', {
   getters: {
     isAuthenticated: (s) => !!s.token,
     cartCount: (s) => s.cart.reduce((n, i) => n + i.quantity, 0),
-    subtotal: (s) => s.cart.reduce((sum, i) => sum + i.unit_price * i.quantity, 0),
+    // total per baris, memperhitungkan promo BELI-X-GRATIS-Y
+    lineTotal: () => (i) => {
+      const promo = i.promo
+      let paid = i.quantity
+      if (promo && promo.type === 'bogo' && promo.buy_qty && promo.get_qty) {
+        const group = promo.buy_qty + promo.get_qty
+        const free = Math.floor(i.quantity / group) * promo.get_qty
+        paid = i.quantity - free
+      }
+      return i.unit_price * paid
+    },
+    subtotal() {
+      return this.cart.reduce((s, i) => s + this.lineTotal(i), 0)
+    },
     total() {
       return Math.max(0, this.subtotal - (Number(this.discount) || 0))
     },
@@ -83,7 +96,8 @@ export const usePosStore = defineStore('pos', {
           item_type: 'product',
           product_id: p.id,
           name: p.name,
-          unit_price: p.effective_price ?? p.price, // pakai harga promo bila ada
+          unit_price: p.effective_price ?? p.price, // harga setelah promo price/percent
+          promo: p.promo || null, // untuk BOGO di keranjang
           quantity: 1,
           stock_qty: p.stock_qty,
           track_stock: p.track_stock,

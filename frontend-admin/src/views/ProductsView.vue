@@ -39,13 +39,13 @@ watch(venueId, loadProducts)
 
 function openCreate() {
   editing.value = null
-  form.value = { sku: '', name: '', price: 0, promo_price: null, unit: 'pcs', stock_qty: 0, track_stock: true, category: '' }
+  form.value = { sku: '', name: '', price: 0, unit: 'pcs', stock_qty: 0, track_stock: true, category: '' }
   error.value = ''
   showForm.value = true
 }
 function openEdit(p) {
   editing.value = p
-  form.value = { name: p.name, price: p.price, promo_price: p.promo_price, stock_qty: p.stock_qty, track_stock: p.track_stock, is_active: p.is_active }
+  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, track_stock: p.track_stock, is_active: p.is_active }
   error.value = ''
   showForm.value = true
 }
@@ -103,11 +103,12 @@ async function save() {
               <td class="px-4 py-3 font-mono text-slate-500">{{ p.sku }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ p.name }}</td>
               <td class="px-4 py-3 text-right">
-                <template v-if="p.promo_price">
+                <template v-if="p.promo && p.effective_price < p.price">
                   <span class="text-emerald-600 font-medium">{{ rupiah(p.effective_price) }}</span>
                   <span class="text-xs text-slate-400 line-through ml-1">{{ rupiah(p.price) }}</span>
                 </template>
                 <span v-else>{{ rupiah(p.price) }}</span>
+                <div v-if="p.promo" class="text-[10px] text-amber-600">🎉 {{ p.promo.label }}</div>
               </td>
               <td class="px-4 py-3 text-right">{{ p.track_stock ? p.stock_qty : '—' }}</td>
               <td class="px-4 py-3 text-center">
@@ -139,15 +140,15 @@ async function save() {
           <input v-model="form.name" placeholder="Nama produk" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label class="block text-xs text-slate-500 mb-1">Harga normal</label>
+              <label class="block text-xs text-slate-500 mb-1">Harga</label>
               <input v-model.number="form.price" type="number" placeholder="Harga" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
             </div>
             <div>
-              <label class="block text-xs text-slate-500 mb-1">Harga promo (opsional)</label>
-              <input v-model.number="form.promo_price" type="number" placeholder="kosongkan bila tak ada" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+              <label class="block text-xs text-slate-500 mb-1">Stok</label>
+              <input v-model.number="form.stock_qty" type="number" placeholder="Stok" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
             </div>
           </div>
-          <input v-model.number="form.stock_qty" type="number" placeholder="Stok" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          <p class="text-xs text-slate-400">Promo diatur di menu <span class="font-medium text-slate-500">Promo</span>.</p>
           <label class="flex items-center gap-2 text-sm text-slate-600">
             <input v-model="form.track_stock" type="checkbox" /> Lacak stok
           </label>

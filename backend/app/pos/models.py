@@ -51,26 +51,50 @@ class Product(db.Model):
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
 
-    @property
-    def effective_price(self):
-        """Harga jual: promo bila valid (0 < promo < harga normal), selain itu harga normal."""
-        p = float(self.price or 0)
-        promo = float(self.promo_price) if self.promo_price is not None else None
-        return promo if (promo is not None and 0 < promo < p) else p
-
     def to_dict(self):
-        promo = float(self.promo_price) if self.promo_price is not None else None
         return {
             "id": self.id,
             "sku": self.sku,
             "name": self.name,
             "category_id": self.category_id,
             "price": float(self.price or 0),
-            "promo_price": promo,
-            "effective_price": self.effective_price,
             "unit": self.unit,
             "track_stock": self.track_stock,
             "stock_qty": self.stock_qty,
+            "is_active": self.is_active,
+        }
+
+
+class Promo(db.Model):
+    __tablename__ = "promos"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    product_id = db.Column(
+        db.Integer, db.ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+    type = db.Column(db.String(10), nullable=False, default="price")  # price|percent|bogo
+    promo_price = db.Column(db.Numeric(15, 2))
+    percent = db.Column(db.Numeric(5, 2))
+    buy_qty = db.Column(db.Integer)
+    get_qty = db.Column(db.Integer)
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "product_id": self.product_id,
+            "type": self.type,
+            "promo_price": float(self.promo_price) if self.promo_price is not None else None,
+            "percent": float(self.percent) if self.percent is not None else None,
+            "buy_qty": self.buy_qty,
+            "get_qty": self.get_qty,
+            "start_date": self.start_date.isoformat() if self.start_date else None,
+            "end_date": self.end_date.isoformat() if self.end_date else None,
             "is_active": self.is_active,
         }
 

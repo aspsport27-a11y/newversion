@@ -26,6 +26,7 @@ from ..pos.models import (
     PosTerminal,
     Product,
     ProductCategory,
+    Promo,
     Shift,
 )
 
@@ -157,8 +158,10 @@ def products_list():
     vid = request.args.get("venue_id", type=int)
     if vid:
         q = q.filter_by(venue_id=vid)
+    from ..pos.promos import product_public
+
     items = q.order_by(Product.venue_id, Product.name).all()
-    return jsonify(count=len(items), products=[p.to_dict() for p in items]), 200
+    return jsonify(count=len(items), products=[product_public(p) for p in items]), 200
 
 
 @admin_bp.post("/products")
@@ -218,6 +221,96 @@ def products_update(pid):
     p.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(product=p.to_dict()), 200
+
+
+# ==================================================================
+# PROMOS
+# ==================================================================
+def _pdate(s):
+    try:
+        return date.fromisoformat(s) if s else None
+    except (TypeError, ValueError):
+        return None
+
+
+@admin_bp.get("/promos")
+@jwt_required()
+@VIEW
+def promos_list():
+    vid = request.args.get("venue_id", type=int)
+    q = db.session.query(Promo, Product).join(Product, Promo.product_id == Product.id)
+    if vid:
+        q = q.filter(Product.venue_id == vid)
+    q = q.order_by(Promo.id.desc())
+    rows = []
+    for promo, prod in q.all():
+        d = promo.to_dict()
+        d["product_name"] = prod.name
+        d["venue_id"] = prod.venue_id
+        rows.append(d)
+    return jsonify(count=len(rows), promos=rows), 200
+
+
+def _promo_from_data(promo, d):
+    promo.name = d.get("name") or promo.name
+    promo.type = d.get("type", promo.type or "price")
+    promo.promo_price = _promo(d.get("promo_price"))
+    promo.percent = _promo(d.get("percent"))
+    promo.buy_qty = int(d["buy_qty"]) if d.get("buy_qty") else None
+    promo.get_qty = int(d["get_qty"]) if d.get("get_qty") else None
+    promo.start_date = _pdate(d.get("start_date"))
+    promo.end_date = _pdate(d.get("end_date"))
+    if "is_active" in d:
+        promo.is_active = bool(d["is_active"])
+
+
+@admin_bp.post("/promos")
+@jwt_required()
+@MANAGE
+def promos_create():
+    d = request.get_json(silent=True) or {}
+    if not d.get("name") or not d.get("product_id"):
+        return _err("name & product_id wajib diisi")
+    if not db.session.get(Product, d["product_id"]):
+        return _err("Produk tidak ditemukan", "not_found", 404)
+    t = d.get("type", "price")
+    if t not in ("price", "percent", "bogo"):
+        return _err("type harus price|percent|bogo")
+    if t == "price" and not d.get("promo_price"):
+        return _err("Harga promo wajib untuk tipe price")
+    if t == "percent" and not d.get("percent"):
+        return _err("Persen wajib untuk tipe percent")
+    if t == "bogo" and (not d.get("buy_qty") or not d.get("get_qty")):
+        return _err("buy_qty & get_qty wajib untuk tipe bogo")
+    promo = Promo(product_id=d["product_id"], is_active=True)
+    _promo_from_data(promo, d)
+    db.session.add(promo)
+    db.session.commit()
+    return jsonify(promo=promo.to_dict()), 201
+
+
+@admin_bp.put("/promos/<int:pid>")
+@jwt_required()
+@MANAGE
+def promos_update(pid):
+    promo = db.session.get(Promo, pid)
+    if not promo:
+        return _err("Promo tidak ditemukan", "not_found", 404)
+    _promo_from_data(promo, request.get_json(silent=True) or {})
+    db.session.commit()
+    return jsonify(promo=promo.to_dict()), 200
+
+
+@admin_bp.delete("/promos/<int:pid>")
+@jwt_required()
+@MANAGE
+def promos_delete(pid):
+    promo = db.session.get(Promo, pid)
+    if not promo:
+        return _err("Promo tidak ditemukan", "not_found", 404)
+    db.session.delete(promo)
+    db.session.commit()
+    return jsonify(message="Promo dihapus"), 200
 
 
 # ==================================================================

@@ -24,6 +24,7 @@ const nav = [
   { name: 'dashboard', label: 'Dashboard', icon: '📊' },
   { name: 'venues', label: 'Venue', icon: '🏟️' },
   { name: 'products', label: 'Produk', icon: '📦' },
+  { name: 'promos', label: 'Promo', icon: '🎉' },
   { name: 'facilities', label: 'Lapangan', icon: '⚽' },
   { name: 'bookings', label: 'Booking', icon: '📅' },
   { name: 'reports', label: 'Laporan', icon: '📈' },
