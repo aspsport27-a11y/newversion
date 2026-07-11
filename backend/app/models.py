@@ -350,6 +350,9 @@ class User(db.Model):
     last_login = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
+    # POS (migration 002)
+    pin_hash = db.Column(db.String(255))
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id"))
 
     # --- password helpers ---
     def set_password(self, password: str) -> None:

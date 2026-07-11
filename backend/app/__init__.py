@@ -23,17 +23,24 @@ def create_app(config_class: type = Config) -> Flask:
 
     # register model agar dikenali SQLAlchemy/Flask-Migrate
     from . import models  # noqa: F401
+    from .pos import models as pos_models  # noqa: F401
 
     # blueprint
     from .auth.routes import auth_bp
     from .main.routes import main_bp
+    from .pos.routes import pos_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(main_bp, url_prefix="/api")
+    app.register_blueprint(pos_bp, url_prefix="/api/pos")
 
     _register_jwt_handlers(app)
     _register_error_handlers(app)
     _register_cli(app)
+
+    from .pos.cli import register_pos_cli
+
+    register_pos_cli(app)
     return app
 
 
