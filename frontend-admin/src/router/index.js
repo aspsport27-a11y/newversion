@@ -14,6 +14,10 @@ const routes = [
     children: [
       { path: '', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
       { path: 'venues', name: 'venues', component: () => import('../views/VenuesView.vue') },
+      { path: 'products', name: 'products', component: () => import('../views/ProductsView.vue') },
+      { path: 'facilities', name: 'facilities', component: () => import('../views/FacilitiesView.vue') },
+      { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue') },
+      { path: 'setup', name: 'setup', component: () => import('../views/SetupView.vue') },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/' },

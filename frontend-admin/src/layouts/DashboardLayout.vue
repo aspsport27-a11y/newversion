@@ -23,6 +23,10 @@ async function doLogout() {
 const nav = [
   { name: 'dashboard', label: 'Dashboard', icon: '📊' },
   { name: 'venues', label: 'Venue', icon: '🏟️' },
+  { name: 'products', label: 'Produk', icon: '📦' },
+  { name: 'facilities', label: 'Lapangan', icon: '⚽' },
+  { name: 'reports', label: 'Laporan', icon: '📈' },
+  { name: 'setup', label: 'Setup Kasir', icon: '⚙️' },
 ]
 </script>
 

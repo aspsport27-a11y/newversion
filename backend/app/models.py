@@ -372,6 +372,7 @@ class User(db.Model):
             "role": self.role,
             "active": self.active,
             "employee_id": self.employee_id,
+            "venue_id": self.venue_id,
             "last_login": self.last_login.isoformat() if self.last_login else None,
         }
 
