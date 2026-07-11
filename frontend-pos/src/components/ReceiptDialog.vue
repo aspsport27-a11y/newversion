@@ -16,7 +16,7 @@ function print() {
       <!-- struk -->
       <div id="receipt" class="p-5 text-sm">
         <div class="text-center mb-2">
-          <p class="font-bold">ASP SPORTS</p>
+          <img src="/asp-logo.png" alt="ASP Sports" class="h-8 mx-auto mb-1" />
           <p class="text-xs">{{ terminal?.name }}</p>
         </div>
         <div class="border-t border-dashed border-slate-300 my-2"></div>

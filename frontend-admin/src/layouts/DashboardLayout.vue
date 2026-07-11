@@ -39,9 +39,8 @@ const nav = [
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
       ]"
     >
-      <div class="h-16 flex items-center gap-2 px-6 border-b border-white/10">
-        <span class="text-2xl">🏟️</span>
-        <span class="font-bold">ASP Sport</span>
+      <div class="h-16 flex items-center px-6 border-b border-white/10">
+        <img src="/asp-logo.png" alt="ASP Sports" class="h-7" style="filter: brightness(0) invert(1)" />
       </div>
       <nav class="p-4 space-y-1">
         <RouterLink

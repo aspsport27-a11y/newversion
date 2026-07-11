@@ -47,9 +47,8 @@ async function submit() {
   <div class="min-h-full flex items-center justify-center p-4 bg-gradient-to-br from-brand-700 to-brand-900">
     <div class="w-full max-w-sm bg-white rounded-2xl shadow-xl p-6">
       <div class="text-center mb-5">
-        <div class="text-3xl mb-1">🏟️</div>
-        <h1 class="text-xl font-bold text-slate-800">ASP Sport POS</h1>
-        <p class="text-xs text-slate-400">Login Kasir</p>
+        <img src="/asp-logo.png" alt="ASP Sports" class="h-12 mx-auto mb-2" />
+        <p class="text-xs text-slate-400">Point of Sale — Login Kasir</p>
       </div>
 
       <div class="space-y-3">

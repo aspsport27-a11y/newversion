@@ -85,9 +85,9 @@ function logout() {
   <div class="min-h-full flex flex-col">
     <!-- Header -->
     <header class="h-14 bg-brand-900 text-white flex items-center justify-between px-4 shrink-0">
-      <div class="flex items-center gap-2">
-        <span class="text-xl">🏟️</span>
-        <div class="leading-tight">
+      <div class="flex items-center gap-3">
+        <img src="/asp-logo.png" alt="ASP Sports" class="h-5" style="filter: brightness(0) invert(1)" />
+        <div class="leading-tight border-l border-white/20 pl-3">
           <p class="text-sm font-semibold">{{ pos.terminal?.name || 'POS' }}</p>
           <p class="text-[11px] text-brand-100">{{ pos.cashier?.username }} · {{ pos.terminal?.code }}</p>
         </div>

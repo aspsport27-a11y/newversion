@@ -30,11 +30,8 @@ async function submit() {
   <div class="min-h-full flex items-center justify-center px-4 py-12 bg-gradient-to-br from-brand-700 to-brand-900">
     <div class="w-full max-w-md">
       <div class="text-center mb-8">
-        <div class="mx-auto h-16 w-16 rounded-2xl bg-white/10 flex items-center justify-center text-3xl mb-4">
-          🏟️
-        </div>
-        <h1 class="text-2xl font-bold text-white">ASP Sport System</h1>
-        <p class="text-brand-100 text-sm mt-1">Venue Management System</p>
+        <img src="/asp-logo.png" alt="ASP Sports" class="h-16 mx-auto mb-3" style="filter: brightness(0) invert(1)" />
+        <p class="text-brand-100 text-sm">Venue Management System</p>
       </div>
 
       <div class="bg-white rounded-2xl shadow-xl p-8">
