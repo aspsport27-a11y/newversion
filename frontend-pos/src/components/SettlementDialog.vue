@@ -32,6 +32,19 @@ async function onPay(payload) {
     err.value = e?.response?.data?.message || 'Gagal memproses pelunasan.'
   }
 }
+
+const msg = ref('')
+async function cancel(o) {
+  if (!window.confirm(`Batalkan booking a/n ${o.customer_name || 'tanpa nama'}?\nDP yang sudah dibayar HANGUS (tidak dikembalikan) dan slot dilepas.`)) return
+  err.value = ''
+  try {
+    await pos.cancelOrder(o.id)
+    msg.value = `Booking ${o.order_number} dibatalkan.`
+    await load()
+  } catch (e) {
+    err.value = e?.response?.data?.message || 'Gagal membatalkan.'
+  }
+}
 </script>
 
 <template>
@@ -48,8 +61,7 @@ async function onPay(payload) {
       </p>
 
       <div v-else class="space-y-2">
-        <button v-for="o in orders" :key="o.id" @click="selected = o"
-          class="w-full text-left border rounded-xl p-3 hover:border-brand-400 transition">
+        <div v-for="o in orders" :key="o.id" class="border rounded-xl p-3">
           <div class="flex justify-between items-start">
             <div>
               <p class="font-medium text-slate-800">{{ o.customer_name || 'Tanpa nama' }}</p>
@@ -63,9 +75,14 @@ async function onPay(payload) {
               <p class="font-bold text-amber-600">{{ rupiah(o.amount_due) }}</p>
             </div>
           </div>
-        </button>
+          <div class="flex gap-2 mt-2">
+            <button @click="selected = o" class="flex-1 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium">Bayar Pelunasan</button>
+            <button @click="cancel(o)" class="py-2 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium">Batalkan</button>
+          </div>
+        </div>
       </div>
 
+      <p v-if="msg" class="text-sm text-emerald-600 bg-emerald-50 rounded-lg px-3 py-2 mt-3">{{ msg }}</p>
       <p v-if="err" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mt-3">{{ err }}</p>
     </div>
 

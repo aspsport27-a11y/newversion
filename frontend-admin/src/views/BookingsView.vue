@@ -58,6 +58,17 @@ async function openDetail(b) {
     detail.value = data.order
   } finally { detailLoading.value = false }
 }
+async function cancelBooking() {
+  if (!detail.value?.id) return
+  if (!window.confirm('Batalkan booking ini (no-show)?\nDP yang sudah dibayar HANGUS (tidak dikembalikan) dan slot dilepas.')) return
+  try {
+    await client.post(`/admin/orders/${detail.value.id}/cancel`)
+    detail.value = null
+    await run()
+  } catch (e) {
+    alert(e?.response?.data?.message || 'Gagal membatalkan.')
+  }
+}
 onMounted(async () => { await loadVenues(); await run() })
 </script>
 
@@ -150,6 +161,11 @@ onMounted(async () => { await loadVenues(); await run() })
             </span>
             <span class="font-medium">{{ rupiah(p.amount) }}</span>
           </div>
+
+          <button v-if="detail.status === 'open' || detail.status === 'partial'" @click="cancelBooking"
+            class="mt-5 w-full py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium">
+            Batalkan Booking (No-show) — DP hangus
+          </button>
         </template>
       </div>
     </div>

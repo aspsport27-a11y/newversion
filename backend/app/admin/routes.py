@@ -429,6 +429,23 @@ def order_detail(order_id):
     return jsonify(order=order.to_dict()), 200
 
 
+@admin_bp.post("/orders/<int:order_id>/cancel")
+@jwt_required()
+@MANAGE
+def order_cancel_admin(order_id):
+    """Batalkan booking (no-show): void + lepas slot, DP hangus."""
+    from ..pos.services import PosError, cancel_order
+
+    order = db.session.get(Order, order_id)
+    if not order:
+        return _err("Order tidak ditemukan", "not_found", 404)
+    try:
+        cancel_order(order)
+    except PosError as e:
+        return _err(e.message, e.code, e.status)
+    return jsonify(order=order.to_dict()), 200
+
+
 @admin_bp.get("/reports/outstanding")
 @jwt_required()
 @VIEW

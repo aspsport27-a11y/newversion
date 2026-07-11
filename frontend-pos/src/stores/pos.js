@@ -145,6 +145,10 @@ export const usePosStore = defineStore('pos', {
       })
       return data // { order, payment }
     },
+    async cancelOrder(orderId) {
+      const { data } = await client.post(`/orders/${orderId}/cancel`)
+      return data
+    },
     logout() {
       this.$reset()
       localStorage.removeItem('pos_token')

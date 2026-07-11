@@ -277,6 +277,25 @@ def _apply_payment(order: Order, payment: Payment, shift: Shift, cashier_id: int
         order.status = "partial"
 
 
+def cancel_order(order: Order) -> Order:
+    """Batalkan booking (no-show): order → void, slot dilepas, DP hangus (tak di-refund)."""
+    if order.status not in ("open", "partial"):
+        raise PosError(
+            "Hanya order belum lunas yang bisa dibatalkan", "cannot_cancel", 409
+        )
+    order.status = "void"
+    order.updated_at = datetime.utcnow()
+    # lepas slot lapangan yang terkait item order ini
+    item_ids = [i.id for i in order.items]
+    if item_ids:
+        FacilityBooking.query.filter(
+            FacilityBooking.order_item_id.in_(item_ids),
+            FacilityBooking.status == "booked",
+        ).update({FacilityBooking.status: "cancelled"}, synchronize_session=False)
+    db.session.commit()
+    return order
+
+
 def _deduct_stock(order: Order, cashier_id: int) -> None:
     """Kurangi stok produk (sekali, saat order lunas penuh)."""
     for item in order.items:

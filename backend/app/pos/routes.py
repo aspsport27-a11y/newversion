@@ -16,6 +16,7 @@ from .models import Facility, FacilityBooking, PosTerminal, Product, Shift
 from .services import (
     PosError,
     add_cash_movement,
+    cancel_order,
     close_shift,
     create_order,
     open_shift,
@@ -269,3 +270,18 @@ def order_pay(order_id):
     data = request.get_json(silent=True) or {}
     payment = pay_order(order, shift, int(get_jwt_identity()), data)
     return jsonify(order=order.to_dict(), payment=payment.to_dict()), 200
+
+
+@pos_bp.post("/orders/<int:order_id>/cancel")
+@jwt_required()
+def order_cancel(order_id):
+    from .models import Order
+
+    terminal = _current_terminal()
+    order = db.session.get(Order, order_id)
+    if order is None:
+        raise PosError("Order tidak ditemukan", "not_found", 404)
+    if order.venue_id != terminal.venue_id:
+        raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
+    cancel_order(order)
+    return jsonify(order=order.to_dict()), 200
