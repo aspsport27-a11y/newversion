@@ -1,0 +1,27 @@
+# ===== Secrets — JANGAN pernah di-commit =====
+.env
+*.env
+!*.env.example
+*.pem
+*.key
+id_ed25519*
+aspsport
+aspsport.pub
+*_admin.txt
+
+# ===== Python =====
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# ===== Node / Frontend =====
+node_modules/
+dist/
+*.log
+
+# ===== Editor / OS =====
+.vscode/
+.idea/
+.DS_Store
