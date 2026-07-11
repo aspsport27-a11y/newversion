@@ -5,7 +5,7 @@ from flask import Flask
 from ..extensions import db
 from ..models import User, Venue
 from ..security import hash_password
-from .models import PosTerminal, Product, ProductCategory
+from .models import Facility, PosTerminal, Product, ProductCategory
 
 
 def _venue_by_code(code):
@@ -90,3 +90,25 @@ def register_pos_cli(app: Flask) -> None:
         db.session.add(p)
         db.session.commit()
         click.echo(f"✅ Produk '{name}' (sku={sku}) venue {venue.code}, harga {price}, stok {stock}")
+
+    @app.cli.command("pos-facility")
+    @click.option("--name", required=True)
+    @click.option("--venue-code", required=True)
+    @click.option("--type", "ftype", default=None)
+    @click.option("--rate", required=True, type=float, help="Tarif per jam")
+    @click.option("--open", "open_t", default="08:00")
+    @click.option("--close", "close_t", default="23:00")
+    def create_facility(name, venue_code, ftype, rate, open_t, close_t):
+        """Buat lapangan yang bisa dibooking."""
+        from datetime import datetime as _dt
+
+        venue = _venue_by_code(venue_code)
+        f = Facility(
+            venue_id=venue.id, name=name, type=ftype, hourly_rate=rate,
+            open_time=_dt.strptime(open_t, "%H:%M").time(),
+            close_time=_dt.strptime(close_t, "%H:%M").time(),
+            is_active=True,
+        )
+        db.session.add(f)
+        db.session.commit()
+        click.echo(f"✅ Lapangan '{name}' venue {venue.code}, tarif {rate}/jam, {open_t}-{close_t} (id={f.id})")

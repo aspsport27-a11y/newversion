@@ -8,6 +8,8 @@ from ..extensions import db
 from ..models import Venue
 from .models import (
     CashMovement,
+    Facility,
+    FacilityBooking,
     Order,
     OrderItem,
     Payment,
@@ -15,6 +17,30 @@ from .models import (
     Shift,
     StockMovement,
 )
+
+
+def _parse_time(s):
+    return datetime.strptime(s, "%H:%M").time()
+
+
+def _hours_between(start, end) -> float:
+    s = start.hour * 60 + start.minute
+    e = end.hour * 60 + end.minute
+    return (e - s) / 60.0
+
+
+def is_slot_available(facility_id, booking_date, start, end, exclude_id=None) -> bool:
+    """True jika slot [start,end) di tanggal itu belum dibooking (tanpa overlap)."""
+    q = FacilityBooking.query.filter(
+        FacilityBooking.facility_id == facility_id,
+        FacilityBooking.booking_date == booking_date,
+        FacilityBooking.status == "booked",
+        FacilityBooking.start_time < end,
+        FacilityBooking.end_time > start,
+    )
+    if exclude_id:
+        q = q.filter(FacilityBooking.id != exclude_id)
+    return not db.session.query(q.exists()).scalar()
 
 VALID_ITEM_TYPES = {"product", "ticket", "rental", "booking"}
 VALID_METHODS = {"cash", "qris"}
@@ -71,15 +97,16 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
     )
 
     subtotal = Decimal("0")
+    booking_specs = []  # (order_item, facility_id, date, start, end)
     for row in items_in:
         item_type = row.get("item_type", "product")
         if item_type not in VALID_ITEM_TYPES:
             raise PosError(f"item_type tidak valid: {item_type}", "bad_item_type")
-        qty = _D(row.get("quantity", 1))
-        if qty <= 0:
-            raise PosError("Quantity harus > 0", "bad_quantity")
 
         if item_type == "product":
+            qty = _D(row.get("quantity", 1))
+            if qty <= 0:
+                raise PosError("Quantity harus > 0", "bad_quantity")
             product = db.session.get(Product, row.get("product_id"))
             if product is None or not product.is_active:
                 raise PosError("Produk tidak ditemukan/nonaktif", "product_not_found", 404)
@@ -90,27 +117,57 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
                     f"Stok '{product.name}' kurang (sisa {product.stock_qty})",
                     "insufficient_stock",
                 )
-            name = product.name
-            unit_price = _D(product.price)
-            product_id = product.id
-        else:
-            # ticket/rental/booking: nama & harga dari input (booking dari M2)
-            name = row.get("name") or item_type
-            unit_price = _D(row.get("unit_price"))
-            product_id = row.get("product_id")
-
-        line_total = (unit_price * qty).quantize(Decimal("0.01"))
-        subtotal += line_total
-        order.items.append(
-            OrderItem(
-                item_type=item_type,
-                product_id=product_id,
-                name_snapshot=name[:120],
-                unit_price=unit_price,
-                quantity=qty,
-                line_total=line_total,
+            oi = OrderItem(
+                item_type="product", product_id=product.id, name_snapshot=product.name[:120],
+                unit_price=_D(product.price), quantity=qty,
+                line_total=(_D(product.price) * qty).quantize(Decimal("0.01")),
             )
-        )
+
+        elif item_type == "booking":
+            facility = db.session.get(Facility, row.get("facility_id"))
+            if facility is None or not facility.is_active or facility.venue_id != shift.venue_id:
+                raise PosError("Lapangan tidak ditemukan/nonaktif", "facility_not_found", 404)
+            try:
+                bdate = date.fromisoformat(row["booking_date"])
+                start = _parse_time(row["start_time"])
+                end = _parse_time(row["end_time"])
+            except (KeyError, ValueError, TypeError):
+                raise PosError("Tanggal/jam booking tidak valid", "bad_booking_time")
+            hours = _hours_between(start, end)
+            if hours <= 0:
+                raise PosError("Jam selesai harus setelah jam mulai", "bad_booking_range")
+            if not is_slot_available(facility.id, bdate, start, end):
+                raise PosError(
+                    f"Jadwal {facility.name} {row['start_time']}-{row['end_time']} sudah dibooking",
+                    "slot_taken", 409,
+                )
+            for _, fid2, d2, s2, e2 in booking_specs:  # bentrok dalam 1 keranjang
+                if fid2 == facility.id and d2 == bdate and s2 < end and e2 > start:
+                    raise PosError("Slot bentrok dengan item lain di keranjang", "slot_taken", 409)
+            qty = _D(hours)
+            unit_price = _D(facility.hourly_rate)
+            name = f"{facility.name} {bdate:%d/%m} {row['start_time']}-{row['end_time']}"
+            oi = OrderItem(
+                item_type="booking", product_id=None, name_snapshot=name[:120],
+                unit_price=unit_price, quantity=qty,
+                line_total=(unit_price * qty).quantize(Decimal("0.01")),
+            )
+            booking_specs.append((oi, facility.id, bdate, start, end))
+
+        else:  # ticket | rental: nama & harga dari input
+            qty = _D(row.get("quantity", 1))
+            if qty <= 0:
+                raise PosError("Quantity harus > 0", "bad_quantity")
+            unit_price = _D(row.get("unit_price"))
+            oi = OrderItem(
+                item_type=item_type, product_id=row.get("product_id"),
+                name_snapshot=(row.get("name") or item_type)[:120],
+                unit_price=unit_price, quantity=qty,
+                line_total=(unit_price * qty).quantize(Decimal("0.01")),
+            )
+
+        subtotal += oi.line_total
+        order.items.append(oi)
 
     discount = _D(data.get("discount_amount"))
     if discount < 0 or discount > subtotal:
@@ -120,6 +177,16 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
     order.total_amount = subtotal - discount
 
     db.session.add(order)
+    db.session.flush()
+
+    # buat facility_bookings setelah order_item punya id (reservasi slot)
+    for oi, fid, bdate, start, end in booking_specs:
+        db.session.add(
+            FacilityBooking(
+                facility_id=fid, venue_id=order.venue_id, order_item_id=oi.id,
+                booking_date=bdate, start_time=start, end_time=end, status="booked",
+            )
+        )
     db.session.flush()
     return order
 

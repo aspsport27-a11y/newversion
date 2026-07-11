@@ -5,6 +5,7 @@ import { usePosStore } from '../stores/pos'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
+import BookingDialog from '../components/BookingDialog.vue'
 
 const pos = usePosStore()
 const router = useRouter()
@@ -15,6 +16,7 @@ const openingBusy = ref(false)
 const showPayment = ref(false)
 const showReceipt = ref(false)
 const showClose = ref(false)
+const showBooking = ref(false)
 const lastResult = ref(null)
 const toast = ref('')
 
@@ -118,9 +120,13 @@ function logout() {
     <div v-else class="flex-1 flex flex-col lg:flex-row min-h-0">
       <!-- Produk -->
       <div class="flex-1 overflow-auto p-3">
-        <div v-if="pos.products.length === 0" class="text-center text-slate-400 mt-10">
-          Belum ada produk untuk venue ini.
-        </div>
+        <button @click="showBooking = true"
+          class="w-full mb-3 py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
+          🏟️ Booking Lapangan
+        </button>
+        <p v-if="pos.products.length === 0" class="text-center text-slate-400 mt-6 text-sm">
+          Belum ada produk. Gunakan tombol booking di atas.
+        </p>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           <button
             v-for="p in pos.products"
@@ -145,16 +151,22 @@ function logout() {
 
         <div class="flex-1 overflow-auto p-3 space-y-2">
           <p v-if="!pos.cart.length" class="text-center text-slate-400 text-sm mt-6">Keranjang kosong</p>
-          <div v-for="it in pos.cart" :key="it.product_id" class="flex items-center gap-2">
+          <div v-for="it in pos.cart" :key="it.uid" class="flex items-center gap-2">
             <div class="flex-1 min-w-0">
-              <p class="text-sm text-slate-700 truncate">{{ it.name }}</p>
-              <p class="text-xs text-slate-400">{{ rupiah(it.unit_price) }}</p>
+              <p class="text-sm text-slate-700 truncate">
+                <span v-if="it.item_type === 'booking'" class="text-brand-600">🏟️ </span>{{ it.name }}
+              </p>
+              <p class="text-xs text-slate-400">
+                <template v-if="it.item_type === 'booking'">{{ it.quantity }} jam × {{ rupiah(it.unit_price) }}</template>
+                <template v-else>{{ rupiah(it.unit_price) }}</template>
+              </p>
             </div>
-            <div class="flex items-center gap-1.5">
+            <div v-if="it.item_type === 'product'" class="flex items-center gap-1.5">
               <button @click="pos.decQty(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-600 font-bold">−</button>
               <span class="w-6 text-center text-sm">{{ it.quantity }}</span>
               <button @click="pos.incQty(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-600 font-bold">+</button>
             </div>
+            <button v-else @click="pos.removeItem(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-400 shrink-0">✕</button>
             <span class="w-16 text-right text-sm font-medium">{{ rupiah(it.unit_price * it.quantity) }}</span>
           </div>
         </div>
@@ -182,6 +194,7 @@ function logout() {
     <ReceiptDialog v-if="showReceipt && lastResult" :order="lastResult.order" :payment="lastResult.payment"
       :terminal="pos.terminal" @close="showReceipt = false" />
     <CloseShiftDialog v-if="showClose" :shift="pos.openShift" @close="showClose = false" @submit="onCloseShift" />
+    <BookingDialog v-if="showBooking" @close="showBooking = false" @added="flash('Booking ditambahkan ke keranjang')" />
 
     <!-- Toast -->
     <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">

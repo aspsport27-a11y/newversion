@@ -80,6 +80,18 @@ class Facility(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime)
 
+    def to_dict(self):
+        hm = lambda t: t.strftime("%H:%M") if t else None
+        return {
+            "id": self.id,
+            "name": self.name,
+            "type": self.type,
+            "hourly_rate": float(self.hourly_rate or 0),
+            "open_time": hm(self.open_time),
+            "close_time": hm(self.close_time),
+            "slot_minutes": self.slot_minutes,
+        }
+
 
 class Shift(db.Model):
     __tablename__ = "shifts"
@@ -251,7 +263,18 @@ class FacilityBooking(db.Model):
     start_time = db.Column(db.Time, nullable=False)
     end_time = db.Column(db.Time, nullable=False)
     status = db.Column(db.String(10), nullable=False, default="booked")
-    created_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        hm = lambda t: t.strftime("%H:%M") if t else None
+        return {
+            "id": self.id,
+            "facility_id": self.facility_id,
+            "booking_date": self.booking_date.isoformat() if self.booking_date else None,
+            "start_time": hm(self.start_time),
+            "end_time": hm(self.end_time),
+            "status": self.status,
+        }
 
 
 class StockMovement(db.Model):

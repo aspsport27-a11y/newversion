@@ -12,7 +12,7 @@ from flask_jwt_extended import (
 from ..extensions import db
 from ..models import User
 from ..security import verify_password
-from .models import PosTerminal, Product, Shift
+from .models import Facility, FacilityBooking, PosTerminal, Product, Shift
 from .services import (
     PosError,
     add_cash_movement,
@@ -120,6 +120,40 @@ def pos_products():
         .all()
     )
     return jsonify(count=len(products), products=[p.to_dict() for p in products]), 200
+
+
+# ------------------------------------------------------------------
+# Lapangan (facilities) & jadwal — M2
+# ------------------------------------------------------------------
+@pos_bp.get("/facilities")
+@jwt_required()
+def pos_facilities():
+    terminal = _current_terminal()
+    facilities = (
+        Facility.query.filter_by(venue_id=terminal.venue_id, is_active=True)
+        .order_by(Facility.name)
+        .all()
+    )
+    return jsonify(count=len(facilities), facilities=[f.to_dict() for f in facilities]), 200
+
+
+@pos_bp.get("/facilities/<int:facility_id>/bookings")
+@jwt_required()
+def pos_facility_bookings(facility_id):
+    """Booking pada 1 lapangan di tanggal tertentu (untuk cek ketersediaan)."""
+    terminal = _current_terminal()
+    facility = db.session.get(Facility, facility_id)
+    if facility is None or facility.venue_id != terminal.venue_id:
+        raise PosError("Lapangan tidak ditemukan", "not_found", 404)
+    day = request.args.get("date")
+    q = FacilityBooking.query.filter_by(facility_id=facility_id, status="booked")
+    if day:
+        q = q.filter_by(booking_date=day)
+    bookings = q.order_by(FacilityBooking.start_time).all()
+    return jsonify(
+        facility=facility.to_dict(),
+        bookings=[b.to_dict() for b in bookings],
+    ), 200
 
 
 # ------------------------------------------------------------------

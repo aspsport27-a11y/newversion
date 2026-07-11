@@ -8,7 +8,8 @@ export const usePosStore = defineStore('pos', {
     terminal: JSON.parse(localStorage.getItem('pos_terminal') || 'null'),
     openShift: null,
     products: [],
-    cart: [], // {product_id, name, unit_price, quantity, item_type}
+    facilities: [],
+    cart: [], // {uid, item_type, name, unit_price, quantity, ...}
     discount: 0,
   }),
   getters: {
@@ -42,6 +43,17 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.get('/products')
       this.products = data.products
     },
+    async fetchFacilities() {
+      const { data } = await client.get('/facilities')
+      this.facilities = data.facilities
+      return data.facilities
+    },
+    async fetchFacilityBookings(facilityId, date) {
+      const { data } = await client.get(`/facilities/${facilityId}/bookings`, {
+        params: { date },
+      })
+      return data.bookings
+    },
     async doOpenShift(openingCash) {
       const { data } = await client.post('/shifts/open', { opening_cash: openingCash })
       this.openShift = data.shift
@@ -57,18 +69,26 @@ export const usePosStore = defineStore('pos', {
     },
     // --- keranjang ---
     addProduct(p) {
-      const found = this.cart.find((i) => i.product_id === p.id)
+      const found = this.cart.find((i) => i.item_type === 'product' && i.product_id === p.id)
       if (found) found.quantity += 1
       else
         this.cart.push({
+          uid: 'p' + p.id,
+          item_type: 'product',
           product_id: p.id,
           name: p.name,
           unit_price: p.price,
           quantity: 1,
-          item_type: 'product',
           stock_qty: p.stock_qty,
           track_stock: p.track_stock,
         })
+    },
+    addBooking(b) {
+      // b: {facility_id, name, unit_price(rate), quantity(hours), booking_date, start_time, end_time}
+      const uid = `b${b.facility_id}-${b.booking_date}-${b.start_time}`
+      if (this.cart.some((i) => i.uid === uid)) return false
+      this.cart.push({ uid, item_type: 'booking', product_id: null, ...b })
+      return true
     },
     incQty(item) {
       item.quantity += 1
@@ -88,11 +108,17 @@ export const usePosStore = defineStore('pos', {
       const payload = {
         discount_amount: Number(this.discount) || 0,
         customer_name: extra.customer_name || null,
-        items: this.cart.map((i) => ({
-          item_type: 'product',
-          product_id: i.product_id,
-          quantity: i.quantity,
-        })),
+        items: this.cart.map((i) =>
+          i.item_type === 'booking'
+            ? {
+                item_type: 'booking',
+                facility_id: i.facility_id,
+                booking_date: i.booking_date,
+                start_time: i.start_time,
+                end_time: i.end_time,
+              }
+            : { item_type: 'product', product_id: i.product_id, quantity: i.quantity },
+        ),
       }
       const { data: created } = await client.post('/orders', payload)
       const { data: paid } = await client.post(`/orders/${created.order.id}/pay`, {
