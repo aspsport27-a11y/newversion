@@ -86,6 +86,7 @@ class Employee(db.Model):
     hire_date = db.Column(db.Date)
     birth_date = db.Column(db.Date)
     kasbon_installment = db.Column(db.Numeric(15, 2))  # cicilan kasbon/bulan
+    allowance = db.Column(db.Numeric(15, 2))  # tunjangan tetap/bulan
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -97,6 +98,7 @@ class Employee(db.Model):
             "position": self.position,
             "venue_id": self.venue_id,
             "salary": float(self.salary) if self.salary is not None else None,
+            "allowance": float(self.allowance) if self.allowance is not None else None,
             "kasbon_installment": float(self.kasbon_installment) if self.kasbon_installment is not None else None,
             "bank_account": self.bank_account,
             "bank_name": self.bank_name,

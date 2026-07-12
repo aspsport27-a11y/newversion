@@ -24,6 +24,7 @@ def create_app(config_class: type = Config) -> Flask:
     # register model agar dikenali SQLAlchemy/Flask-Migrate
     from . import models  # noqa: F401
     from .ops import models as ops_models  # noqa: F401
+    from .payroll import models as payroll_models  # noqa: F401
     from .pos import models as pos_models  # noqa: F401
     from .proc import models as proc_models  # noqa: F401
 
@@ -32,6 +33,7 @@ def create_app(config_class: type = Config) -> Flask:
     from .auth.routes import auth_bp
     from .main.routes import main_bp
     from .ops.routes import ops_bp
+    from .payroll.routes import payroll_bp
     from .pos.routes import pos_bp
     from .proc.routes import proc_bp
 
@@ -41,6 +43,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(admin_bp, url_prefix="/api/admin")
     app.register_blueprint(ops_bp, url_prefix="/api/ops")
     app.register_blueprint(proc_bp, url_prefix="/api/procurement")
+    app.register_blueprint(payroll_bp, url_prefix="/api/payroll")
 
     _register_jwt_handlers(app)
     _register_error_handlers(app)

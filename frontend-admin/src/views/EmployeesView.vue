@@ -50,7 +50,7 @@ watch(venueId, load)
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', position: 'Kasir', venue_id: venueId.value || venues.value[0]?.id, salary: null, bank_name: '', bank_account: '', phone: '', email: '', identity_number: '', hire_date: '', status: 'active' }
+  form.value = { name: '', position: 'Kasir', venue_id: venueId.value || venues.value[0]?.id, salary: null, allowance: null, bank_name: '', bank_account: '', phone: '', email: '', identity_number: '', hire_date: '', status: 'active' }
   error.value = ''; showForm.value = true
 }
 function openEdit(e) {
@@ -185,6 +185,8 @@ async function createAccount() {
             </select></div>
           <div><label class="block text-xs text-slate-500 mb-1">Gaji pokok</label>
             <input v-model.number="form.salary" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <div><label class="block text-xs text-slate-500 mb-1">Tunjangan tetap</label>
+            <input v-model.number="form.allowance" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
           <div><label class="block text-xs text-slate-500 mb-1">Bank</label>
             <input v-model="form.bank_name" placeholder="BRI/BCA…" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
           <div><label class="block text-xs text-slate-500 mb-1">No. Rekening</label>
