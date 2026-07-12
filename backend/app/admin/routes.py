@@ -5,11 +5,11 @@ Akses: admin & head_office (kelola); reports juga manager_unit.
 from datetime import date, datetime
 
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import User, Venue
+from ..models import Employee, EmployeeDebt, User, Venue
 from ..security import (
     ROLE_ADMIN,
     ROLE_HEAD_OFFICE,
@@ -34,6 +34,22 @@ admin_bp = Blueprint("admin", __name__)
 
 MANAGE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
 VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+# HR: manager unit juga boleh kelola karyawan (venue-nya sendiri)
+MANAGE_HR = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+
+POSITIONS = ["Manager", "Kasir", "Staff Lapangan", "Lifeguard", "Cleaning", "Admin"]
+
+
+def _current_user():
+    return db.session.get(User, int(get_jwt_identity()))
+
+
+def _forced_venue():
+    """Manager unit dibatasi ke venue-nya; admin/head_office bebas (None)."""
+    u = _current_user()
+    if u and u.role == ROLE_MANAGER:
+        return u.venue_id
+    return None
 
 
 def _err(msg, code="bad_request", status=400):
@@ -221,6 +237,212 @@ def products_update(pid):
     p.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(product=p.to_dict()), 200
+
+
+# ==================================================================
+# EMPLOYEES (karyawan) + kasbon
+# ==================================================================
+def _emp_debt_balance(emp_id):
+    adv = (
+        db.session.query(func.coalesce(func.sum(EmployeeDebt.amount), 0))
+        .filter_by(employee_id=emp_id, type="advance").scalar() or 0
+    )
+    rep = (
+        db.session.query(func.coalesce(func.sum(EmployeeDebt.amount), 0))
+        .filter_by(employee_id=emp_id, type="repayment").scalar() or 0
+    )
+    return round(float(adv) - float(rep), 2)
+
+
+def _gen_employee_code():
+    n = (db.session.query(func.count(Employee.id)).scalar() or 0) + 1
+    code = f"EMP-{n:04d}"
+    while Employee.query.filter_by(employee_id=code).first():
+        n += 1
+        code = f"EMP-{n:04d}"
+    return code
+
+
+def _emp_account(emp_id):
+    return User.query.filter_by(employee_id=emp_id).first()
+
+
+@admin_bp.get("/employees")
+@jwt_required()
+@VIEW
+def employees_list():
+    q = Employee.query
+    forced = _forced_venue()
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
+    if vid:
+        q = q.filter_by(venue_id=vid)
+    rows = []
+    for e in q.order_by(Employee.name).all():
+        d = e.to_dict()
+        d["debt_balance"] = _emp_debt_balance(e.id)
+        acc = _emp_account(e.id)
+        d["has_account"] = acc is not None
+        d["username"] = acc.username if acc else None
+        rows.append(d)
+    return jsonify(count=len(rows), employees=rows, positions=POSITIONS), 200
+
+
+@admin_bp.post("/employees")
+@jwt_required()
+@MANAGE_HR
+def employees_create():
+    d = request.get_json(silent=True) or {}
+    if not d.get("name"):
+        return _err("Nama wajib diisi")
+    forced = _forced_venue()
+    venue_id = forced if forced is not None else d.get("venue_id")
+    if not venue_id:
+        return _err("venue wajib dipilih")
+    e = Employee(
+        employee_id=d.get("employee_id") or _gen_employee_code(),
+        name=d["name"], position=d.get("position"), venue_id=venue_id,
+        salary=_promo(d.get("salary")), bank_account=d.get("bank_account"),
+        bank_name=d.get("bank_name"), phone=d.get("phone"), email=d.get("email"),
+        identity_number=d.get("identity_number"), status=d.get("status", "active"),
+        hire_date=_pdate(d.get("hire_date")), birth_date=_pdate(d.get("birth_date")),
+    )
+    db.session.add(e)
+    db.session.commit()
+    return jsonify(employee=e.to_dict()), 201
+
+
+@admin_bp.put("/employees/<int:eid>")
+@jwt_required()
+@MANAGE_HR
+def employees_update(eid):
+    e = db.session.get(Employee, eid)
+    if not e:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and e.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    d = request.get_json(silent=True) or {}
+    for f in ("name", "position", "bank_account", "bank_name", "phone", "email", "identity_number", "status"):
+        if f in d:
+            setattr(e, f, d[f])
+    if "salary" in d:
+        e.salary = _promo(d["salary"])
+    if "hire_date" in d:
+        e.hire_date = _pdate(d["hire_date"])
+    if "birth_date" in d:
+        e.birth_date = _pdate(d["birth_date"])
+    if forced is None and "venue_id" in d:
+        e.venue_id = d["venue_id"]
+    e.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(employee=e.to_dict()), 200
+
+
+@admin_bp.delete("/employees/<int:eid>")
+@jwt_required()
+@MANAGE_HR
+def employees_delete(eid):
+    e = db.session.get(Employee, eid)
+    if not e:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and e.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    if _emp_account(e.id):
+        return _err("Karyawan punya akun login — putuskan akun dulu.", "has_account", 409)
+    db.session.delete(e)
+    db.session.commit()
+    return jsonify(message="Karyawan dihapus"), 200
+
+
+@admin_bp.get("/employees/<int:eid>")
+@jwt_required()
+@VIEW
+def employee_detail(eid):
+    e = db.session.get(Employee, eid)
+    if not e:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and e.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    debts = (
+        EmployeeDebt.query.filter_by(employee_id=eid)
+        .order_by(EmployeeDebt.created_at.desc()).all()
+    )
+    acc = _emp_account(eid)
+    d = e.to_dict()
+    d["debt_balance"] = _emp_debt_balance(eid)
+    d["debts"] = [x.to_dict() for x in debts]
+    d["account"] = {"username": acc.username, "role": acc.role} if acc else None
+    return jsonify(employee=d), 200
+
+
+@admin_bp.post("/employees/<int:eid>/debt")
+@jwt_required()
+@MANAGE_HR
+def employee_debt_add(eid):
+    e = db.session.get(Employee, eid)
+    if not e:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and e.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    d = request.get_json(silent=True) or {}
+    if d.get("type") not in ("advance", "repayment"):
+        return _err("type harus advance|repayment")
+    amt = _D(d.get("amount"))
+    if amt <= 0:
+        return _err("Jumlah harus > 0")
+    db.session.add(EmployeeDebt(
+        employee_id=eid, type=d["type"], amount=amt, note=d.get("note"),
+        created_by=_current_user().id,
+    ))
+    db.session.commit()
+    return jsonify(debt_balance=_emp_debt_balance(eid)), 201
+
+
+@admin_bp.post("/employees/<int:eid>/account")
+@jwt_required()
+@MANAGE_HR
+def employee_account_create(eid):
+    """Buatkan akun login untuk karyawan (kasir=PIN, manager/admin=password)."""
+    e = db.session.get(Employee, eid)
+    if not e:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and e.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    if _emp_account(eid):
+        return _err("Karyawan sudah punya akun", "duplicate", 409)
+    d = request.get_json(silent=True) or {}
+    username = (d.get("username") or "").strip()
+    role = d.get("role", "staff")
+    if not username:
+        return _err("username wajib diisi")
+    if role not in ("staff", "manager_unit", "head_office", "admin"):
+        return _err("role tidak valid")
+    if User.query.filter_by(username=username).first():
+        return _err("Username sudah dipakai", "duplicate", 409)
+    email = e.email or f"{username}@aspsports.id"
+    if User.query.filter_by(email=email).first():
+        email = f"{username}.{eid}@aspsports.id"
+    u = User(username=username, email=email, role=role, active=True,
+             venue_id=e.venue_id, employee_id=e.id)
+    pin, pw = d.get("pin"), d.get("password")
+    if role == "staff":
+        if not pin or len(str(pin)) < 4:
+            return _err("PIN minimal 4 digit untuk kasir")
+        u.pin_hash = hash_password(str(pin))
+        u.set_password(str(pin))
+    else:
+        if not pw or len(str(pw)) < 8:
+            return _err("Password minimal 8 karakter")
+        u.set_password(str(pw))
+        if pin:
+            u.pin_hash = hash_password(str(pin))
+    db.session.add(u)
+    db.session.commit()
+    return jsonify(account={"username": u.username, "role": u.role}), 201
 
 
 # ==================================================================

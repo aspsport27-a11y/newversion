@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { RouterView, RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
@@ -20,16 +20,19 @@ async function doLogout() {
   router.push({ name: 'login' })
 }
 
-const nav = [
-  { name: 'dashboard', label: 'Dashboard', icon: '📊' },
-  { name: 'venues', label: 'Venue', icon: '🏟️' },
-  { name: 'products', label: 'Produk', icon: '📦' },
-  { name: 'promos', label: 'Promo', icon: '🎉' },
-  { name: 'facilities', label: 'Lapangan', icon: '⚽' },
-  { name: 'bookings', label: 'Booking', icon: '📅' },
-  { name: 'reports', label: 'Laporan', icon: '📈' },
-  { name: 'setup', label: 'Setup Kasir', icon: '⚙️' },
+const ADMINS = ['admin', 'head_office']
+const allNav = [
+  { name: 'dashboard', label: 'Dashboard', icon: '📊', roles: ['admin', 'head_office', 'manager_unit'] },
+  { name: 'venues', label: 'Venue', icon: '🏟️', roles: ADMINS },
+  { name: 'employees', label: 'Karyawan', icon: '👥', roles: ['admin', 'head_office', 'manager_unit'] },
+  { name: 'products', label: 'Produk', icon: '📦', roles: ADMINS },
+  { name: 'promos', label: 'Promo', icon: '🎉', roles: ADMINS },
+  { name: 'facilities', label: 'Lapangan', icon: '⚽', roles: ADMINS },
+  { name: 'bookings', label: 'Booking', icon: '📅', roles: ADMINS },
+  { name: 'reports', label: 'Laporan', icon: '📈', roles: ADMINS },
+  { name: 'setup', label: 'Setup Kasir', icon: '⚙️', roles: ADMINS },
 ]
+const nav = computed(() => allNav.filter((n) => n.roles.includes(auth.user?.role)))
 </script>
 
 <template>

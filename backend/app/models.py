@@ -85,8 +85,51 @@ class Employee(db.Model):
     status = db.Column(db.String(20), default="active")
     hire_date = db.Column(db.Date)
     birth_date = db.Column(db.Date)
-    created_at = db.Column(db.DateTime)
-    updated_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "employee_id": self.employee_id,
+            "name": self.name,
+            "position": self.position,
+            "venue_id": self.venue_id,
+            "salary": float(self.salary) if self.salary is not None else None,
+            "bank_account": self.bank_account,
+            "bank_name": self.bank_name,
+            "phone": self.phone,
+            "email": self.email,
+            "identity_number": self.identity_number,
+            "status": self.status,
+            "hire_date": self.hire_date.isoformat() if self.hire_date else None,
+            "birth_date": self.birth_date.isoformat() if self.birth_date else None,
+        }
+
+
+class EmployeeDebt(db.Model):
+    """Kasbon/piutang karyawan. advance = kasbon keluar, repayment = potong/bayar."""
+
+    __tablename__ = "employee_debts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(
+        db.Integer, db.ForeignKey("employees.id", ondelete="CASCADE"), nullable=False
+    )
+    type = db.Column(db.String(10), nullable=False)  # advance | repayment
+    amount = db.Column(db.Numeric(15, 2), nullable=False)
+    note = db.Column(db.String(200))
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "type": self.type,
+            "amount": float(self.amount),
+            "note": self.note,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
 
 class Payroll(db.Model):
