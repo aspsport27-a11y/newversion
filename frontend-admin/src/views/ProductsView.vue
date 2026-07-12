@@ -39,13 +39,13 @@ watch(venueId, loadProducts)
 
 function openCreate() {
   editing.value = null
-  form.value = { sku: '', name: '', price: 0, unit: 'pcs', stock_qty: 0, track_stock: true, category: '' }
+  form.value = { sku: '', name: '', price: 0, unit: 'pcs', stock_qty: 0, min_stock: 0, track_stock: true, category: '' }
   error.value = ''
   showForm.value = true
 }
 function openEdit(p) {
   editing.value = p
-  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, track_stock: p.track_stock, is_active: p.is_active }
+  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock: p.min_stock, track_stock: p.track_stock, is_active: p.is_active }
   error.value = ''
   showForm.value = true
 }
@@ -147,6 +147,10 @@ async function save() {
               <label class="block text-xs text-slate-500 mb-1">Stok</label>
               <input v-model.number="form.stock_qty" type="number" placeholder="Stok" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
             </div>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Min. stok (alert reorder)</label>
+            <input v-model.number="form.min_stock" type="number" placeholder="0 = tak ada alert" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           </div>
           <p class="text-xs text-slate-400">Promo diatur di menu <span class="font-medium text-slate-500">Promo</span>.</p>
           <label class="flex items-center gap-2 text-sm text-slate-600">

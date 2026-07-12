@@ -205,6 +205,7 @@ def products_create():
         price=_D(d.get("price")), promo_price=_promo(d.get("promo_price")),
         unit=d.get("unit", "pcs"),
         track_stock=bool(d.get("track_stock", True)), stock_qty=int(d.get("stock_qty", 0) or 0),
+        min_stock=int(d.get("min_stock", 0) or 0),
         is_active=bool(d.get("is_active", True)),
     )
     db.session.add(p)
@@ -232,6 +233,8 @@ def products_update(pid):
         p.track_stock = bool(d["track_stock"])
     if "stock_qty" in d:
         p.stock_qty = int(d["stock_qty"] or 0)
+    if "min_stock" in d:
+        p.min_stock = int(d["min_stock"] or 0)
     if "is_active" in d:
         p.is_active = bool(d["is_active"])
     p.updated_at = datetime.utcnow()

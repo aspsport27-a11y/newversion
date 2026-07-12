@@ -273,7 +273,22 @@ class Supplier(db.Model):
     payment_terms = db.Column(db.String(100))
     bank_account = db.Column(db.String(50))
     active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "supplier_code": self.supplier_code,
+            "name": self.name,
+            "contact_person": self.contact_person,
+            "phone": self.phone,
+            "email": self.email,
+            "address": self.address,
+            "city": self.city,
+            "payment_terms": self.payment_terms,
+            "bank_account": self.bank_account,
+            "active": self.active,
+        }
 
 
 class ProcurementRequest(db.Model):

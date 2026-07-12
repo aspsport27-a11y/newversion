@@ -1,0 +1,373 @@
+"""Procurement — supplier, purchase order (approve unit → terima/stok masuk →
+bayar HO), lampiran, reorder alert. Prefix: /api/procurement"""
+import os
+import uuid
+from datetime import datetime
+
+from flask import Blueprint, current_app, jsonify, request, send_file
+from flask_jwt_extended import get_jwt_identity, jwt_required
+from sqlalchemy import func
+from werkzeug.utils import secure_filename
+
+from ..extensions import db
+from ..models import Supplier, User, Venue
+from ..pos.models import Product, StockMovement
+from ..security import ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, roles_required
+from .models import PoAttachment, PurchaseOrder, PurchaseOrderItem
+
+proc_bp = Blueprint("proc", __name__)
+
+VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+CREATE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)  # unit boleh
+MANAGE_SUP = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+PAY = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)  # bayar = HO/admin
+
+ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
+
+
+def _err(msg, code="bad_request", status=400):
+    return jsonify(error=code, message=msg), status
+
+
+def _user():
+    return db.session.get(User, int(get_jwt_identity()))
+
+
+def _forced_venue():
+    u = _user()
+    return u.venue_id if u and u.role == ROLE_MANAGER else None
+
+
+def _D(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _check_venue(po):
+    """Manager hanya boleh venue-nya."""
+    forced = _forced_venue()
+    if forced is not None and po.venue_id != forced:
+        return _err("Bukan PO venue Anda", "forbidden", 403)
+    return None
+
+
+# ------------------------------------------------------------------
+# Suppliers
+# ------------------------------------------------------------------
+@proc_bp.get("/suppliers")
+@jwt_required()
+@VIEW
+def suppliers_list():
+    sups = Supplier.query.order_by(Supplier.name).all()
+    return jsonify(suppliers=[s.to_dict() for s in sups]), 200
+
+
+def _gen_supplier_code():
+    n = (db.session.query(func.count(Supplier.id)).scalar() or 0) + 1
+    code = f"SUP-{n:03d}"
+    while Supplier.query.filter_by(supplier_code=code).first():
+        n += 1
+        code = f"SUP-{n:03d}"
+    return code
+
+
+@proc_bp.post("/suppliers")
+@jwt_required()
+@MANAGE_SUP
+def suppliers_create():
+    d = request.get_json(silent=True) or {}
+    if not d.get("name"):
+        return _err("Nama supplier wajib")
+    s = Supplier(
+        supplier_code=d.get("supplier_code") or _gen_supplier_code(), name=d["name"],
+        contact_person=d.get("contact_person"), phone=d.get("phone"), email=d.get("email"),
+        address=d.get("address"), city=d.get("city"), payment_terms=d.get("payment_terms"),
+        bank_account=d.get("bank_account"), active=bool(d.get("active", True)),
+    )
+    db.session.add(s)
+    db.session.commit()
+    return jsonify(supplier=s.to_dict()), 201
+
+
+@proc_bp.put("/suppliers/<int:sid>")
+@jwt_required()
+@MANAGE_SUP
+def suppliers_update(sid):
+    s = db.session.get(Supplier, sid)
+    if not s:
+        return _err("Supplier tidak ditemukan", "not_found", 404)
+    d = request.get_json(silent=True) or {}
+    for f in ("name", "contact_person", "phone", "email", "address", "city", "payment_terms", "bank_account"):
+        if f in d:
+            setattr(s, f, d[f])
+    if "active" in d:
+        s.active = bool(d["active"])
+    db.session.commit()
+    return jsonify(supplier=s.to_dict()), 200
+
+
+@proc_bp.delete("/suppliers/<int:sid>")
+@jwt_required()
+@MANAGE_SUP
+def suppliers_delete(sid):
+    s = db.session.get(Supplier, sid)
+    if not s:
+        return _err("Supplier tidak ditemukan", "not_found", 404)
+    if PurchaseOrder.query.filter_by(supplier_id=sid).first():
+        return _err("Supplier dipakai di PO — nonaktifkan saja.", "in_use", 409)
+    db.session.delete(s)
+    db.session.commit()
+    return jsonify(message="Supplier dihapus"), 200
+
+
+# ------------------------------------------------------------------
+# Reorder alert (stok menipis)
+# ------------------------------------------------------------------
+@proc_bp.get("/reorder")
+@jwt_required()
+@VIEW
+def reorder_list():
+    forced = _forced_venue()
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
+    q = Product.query.filter(
+        Product.is_active.is_(True), Product.track_stock.is_(True),
+        Product.min_stock > 0, Product.stock_qty <= Product.min_stock,
+    )
+    if vid:
+        q = q.filter(Product.venue_id == vid)
+    prods = q.order_by(Product.stock_qty).all()
+    return jsonify(count=len(prods), products=[p.to_dict() for p in prods]), 200
+
+
+# ------------------------------------------------------------------
+# Purchase Orders
+# ------------------------------------------------------------------
+def _sup_map():
+    return {s.id: s.name for s in Supplier.query.all()}
+
+
+def _gen_po_code(venue):
+    prefix = f"PO-{venue.code}-"
+    n = db.session.query(func.count(PurchaseOrder.id)).filter(PurchaseOrder.code.like(prefix + "%")).scalar() or 0
+    return f"{prefix}{n + 1:04d}"
+
+
+@proc_bp.get("/pos")
+@jwt_required()
+@VIEW
+def pos_list():
+    q = PurchaseOrder.query
+    forced = _forced_venue()
+    if forced is not None:
+        q = q.filter_by(venue_id=forced)
+    elif request.args.get("venue_id", type=int):
+        q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
+    if request.args.get("status"):
+        q = q.filter_by(status=request.args.get("status"))
+    pos = q.order_by(PurchaseOrder.created_at.desc()).all()
+    sm = _sup_map()
+    return jsonify(count=len(pos), pos=[p.to_dict(sm.get(p.supplier_id)) for p in pos]), 200
+
+
+@proc_bp.get("/pos/<int:pid>")
+@jwt_required()
+@VIEW
+def po_detail(pid):
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    err = _check_venue(po)
+    if err:
+        return err
+    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
+
+
+@proc_bp.post("/pos")
+@jwt_required()
+@CREATE
+def po_create():
+    d = request.get_json(silent=True) or {}
+    forced = _forced_venue()
+    vid = forced if forced is not None else d.get("venue_id")
+    if not vid:
+        return _err("venue wajib")
+    venue = db.session.get(Venue, vid)
+    if not venue:
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    items = d.get("items") or []
+    if not items:
+        return _err("Minimal 1 item")
+    po = PurchaseOrder(
+        code=_gen_po_code(venue), venue_id=vid, supplier_id=d.get("supplier_id"),
+        created_by=_user().id, notes=d.get("notes"), status="submitted",
+    )
+    total = 0.0
+    for it in items:
+        qty = int(it.get("quantity") or 0)
+        price = _D(it.get("unit_price"))
+        if qty <= 0 or price < 0:
+            return _err("Item tidak valid (qty > 0)")
+        line = qty * price
+        total += line
+        name = it.get("item_name")
+        pid = it.get("product_id")
+        if pid:  # ambil nama produk kalau item stok
+            prod = db.session.get(Product, pid)
+            if prod:
+                name = prod.name
+        if not name:
+            return _err("Nama item wajib")
+        po.items.append(PurchaseOrderItem(
+            product_id=pid or None, item_name=name[:120], quantity=qty,
+            unit=it.get("unit"), unit_price=price, total_price=line, note=it.get("note"),
+        ))
+    po.total_amount = total
+    db.session.add(po)
+    db.session.commit()
+    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 201
+
+
+@proc_bp.post("/pos/<int:pid>/approve")
+@jwt_required()
+@CREATE
+def po_approve(pid):
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    err = _check_venue(po)
+    if err:
+        return err
+    if po.status != "submitted":
+        return _err(f"Status '{po.status}' tak bisa disetujui", "bad_status", 409)
+    po.status = "approved"
+    po.approved_by = _user().id
+    po.approved_at = datetime.utcnow()
+    po.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
+
+
+@proc_bp.post("/pos/<int:pid>/reject")
+@jwt_required()
+@CREATE
+def po_reject(pid):
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    err = _check_venue(po)
+    if err:
+        return err
+    if po.status != "submitted":
+        return _err(f"Status '{po.status}' tak bisa ditolak", "bad_status", 409)
+    po.status = "rejected"
+    po.rejection_reason = (request.get_json(silent=True) or {}).get("reason")
+    po.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
+
+
+@proc_bp.post("/pos/<int:pid>/receive")
+@jwt_required()
+@CREATE
+def po_receive(pid):
+    """Barang diterima → stok produk masuk (untuk item yang punya product_id)."""
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    err = _check_venue(po)
+    if err:
+        return err
+    if po.status != "approved":
+        return _err("Hanya PO disetujui yang bisa diterima", "bad_status", 409)
+    uid = _user().id
+    for item in po.items:
+        if item.product_id:
+            product = db.session.get(Product, item.product_id)
+            if product and product.track_stock:
+                product.stock_qty = (product.stock_qty or 0) + item.quantity
+                db.session.add(StockMovement(
+                    product_id=product.id, venue_id=po.venue_id, type="purchase",
+                    quantity=item.quantity, balance_after=product.stock_qty,
+                    reference=po.code, created_by=uid,
+                ))
+    po.status = "received"
+    po.received_by = uid
+    po.received_at = datetime.utcnow()
+    po.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
+
+
+@proc_bp.post("/pos/<int:pid>/pay")
+@jwt_required()
+@PAY
+def po_pay(pid):
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    if po.status != "received":
+        return _err("Hanya PO diterima yang bisa dibayar", "bad_status", 409)
+    po.status = "paid"
+    po.paid_by = _user().id
+    po.paid_at = datetime.utcnow()
+    po.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
+
+
+# ------------------------------------------------------------------
+# Lampiran (nota/invoice)
+# ------------------------------------------------------------------
+def _upload_dir():
+    d = os.path.join(current_app.config["UPLOAD_FOLDER"], "po")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+@proc_bp.post("/pos/<int:pid>/attachment")
+@jwt_required()
+@CREATE
+def po_attachment_upload(pid):
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    err = _check_venue(po)
+    if err:
+        return err
+    if "file" not in request.files:
+        return _err("File tidak ada")
+    f = request.files["file"]
+    if not f.filename:
+        return _err("Nama file kosong")
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ALLOWED_EXT:
+        return _err(f"Tipe tidak didukung ({', '.join(sorted(ALLOWED_EXT))})")
+    stored = f"{uuid.uuid4().hex}.{ext}"
+    path = os.path.join(_upload_dir(), stored)
+    f.save(path)
+    att = PoAttachment(
+        po_id=pid, filename=secure_filename(f.filename), stored_name=stored,
+        content_type=f.content_type, size_bytes=os.path.getsize(path),
+    )
+    db.session.add(att)
+    db.session.commit()
+    return jsonify(attachment=att.to_dict()), 201
+
+
+@proc_bp.get("/attachments/<int:aid>")
+@jwt_required()
+@VIEW
+def po_attachment_get(aid):
+    att = db.session.get(PoAttachment, aid)
+    if not att:
+        return _err("Lampiran tidak ditemukan", "not_found", 404)
+    po = db.session.get(PurchaseOrder, att.po_id)
+    err = _check_venue(po) if po else None
+    if err:
+        return err
+    path = os.path.join(_upload_dir(), att.stored_name)
+    if not os.path.exists(path):
+        return _err("File hilang di server", "not_found", 404)
+    return send_file(path, download_name=att.filename, mimetype=att.content_type)

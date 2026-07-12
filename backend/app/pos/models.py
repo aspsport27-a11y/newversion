@@ -47,6 +47,7 @@ class Product(db.Model):
     unit = db.Column(db.String(20), default="pcs")
     track_stock = db.Column(db.Boolean, default=True)
     stock_qty = db.Column(db.Integer, default=0)
+    min_stock = db.Column(db.Integer, default=0)  # ambang reorder
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
@@ -61,6 +62,7 @@ class Product(db.Model):
             "unit": self.unit,
             "track_stock": self.track_stock,
             "stock_qty": self.stock_qty,
+            "min_stock": self.min_stock or 0,
             "is_active": self.is_active,
         }
 
