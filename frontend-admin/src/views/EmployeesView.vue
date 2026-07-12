@@ -92,6 +92,13 @@ async function addDebt() {
     await reloadDetail(); await load()
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
+async function saveInstallment() {
+  busy.value = true
+  try {
+    await client.put(`/admin/employees/${detail.value.id}`, { kasbon_installment: detail.value.kasbon_installment || null })
+    await load(); flash('Cicilan kasbon disimpan')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+}
 async function createAccount() {
   busy.value = true
   try {
@@ -212,6 +219,12 @@ async function createAccount() {
           <div class="flex justify-between items-center mb-2">
             <span class="text-sm font-medium text-slate-700">Kasbon / Piutang</span>
             <span class="font-bold" :class="detail.debt_balance > 0 ? 'text-amber-600' : 'text-emerald-600'">{{ rupiah(detail.debt_balance) }}</span>
+          </div>
+          <div class="flex items-center gap-2 mb-2 text-sm">
+            <span class="text-slate-500 whitespace-nowrap">Cicilan/bulan:</span>
+            <input v-model.number="detail.kasbon_installment" type="number" placeholder="0" class="w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm text-right outline-none" />
+            <button @click="saveInstallment" :disabled="busy" class="text-brand-600 text-xs hover:underline">Simpan</button>
+            <span v-if="detail.kasbon_installment > 0 && detail.debt_balance > 0" class="text-xs text-slate-400 ml-auto">≈ {{ Math.ceil(detail.debt_balance / detail.kasbon_installment) }} bln lunas</span>
           </div>
           <div class="flex gap-2">
             <select v-model="debtForm.type" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none">

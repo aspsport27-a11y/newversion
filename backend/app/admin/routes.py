@@ -301,7 +301,8 @@ def employees_create():
     e = Employee(
         employee_id=d.get("employee_id") or _gen_employee_code(),
         name=d["name"], position=d.get("position"), venue_id=venue_id,
-        salary=_promo(d.get("salary")), bank_account=d.get("bank_account"),
+        salary=_promo(d.get("salary")), kasbon_installment=_promo(d.get("kasbon_installment")),
+        bank_account=d.get("bank_account"),
         bank_name=d.get("bank_name"), phone=d.get("phone"), email=d.get("email"),
         identity_number=d.get("identity_number"), status=d.get("status", "active"),
         hire_date=_pdate(d.get("hire_date")), birth_date=_pdate(d.get("birth_date")),
@@ -327,6 +328,8 @@ def employees_update(eid):
             setattr(e, f, d[f])
     if "salary" in d:
         e.salary = _promo(d["salary"])
+    if "kasbon_installment" in d:
+        e.kasbon_installment = _promo(d["kasbon_installment"])
     if "hire_date" in d:
         e.hire_date = _pdate(d["hire_date"])
     if "birth_date" in d:
