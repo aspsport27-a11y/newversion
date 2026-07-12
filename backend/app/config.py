@@ -31,3 +31,7 @@ class Config:
     CORS_ORIGINS = os.environ.get(
         "CORS_ORIGINS", "https://portal.aspsports.id"
     ).split(",")
+
+    # --- Upload lampiran (bukti operasional) ---
+    UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", "/opt/aspsport-uploads")
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB per upload
