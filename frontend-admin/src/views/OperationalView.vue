@@ -24,7 +24,7 @@ const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], appr
 const accounts = ref([])
 const sourceAccount = ref('')
 async function loadBase() {
-  const [v, c] = await Promise.all([client.get('/admin/venues'), client.get('/ops/categories')])
+  const [v, c] = await Promise.all([client.get('/venues'), client.get('/ops/categories')])
   venues.value = v.data.venues
   // admin_unit hanya boleh ajukan utk venue di areanya
   if (isAdminUnit.value) {
@@ -125,7 +125,39 @@ async function saveBudget() {
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { savingBudget.value = false }
 }
 
-function reloadTab() { tab.value === 'requests' ? loadRequests() : loadBudget() }
+// --- Kelola Kategori Beban (admin/HO) ---
+const catsAll = ref([])
+const newCatName = ref('')
+const savingCat = ref(false)
+async function loadCats() {
+  const { data } = await client.get('/ops/categories', { params: { all: 1 } })
+  catsAll.value = data.categories
+}
+async function addCat() {
+  if (!newCatName.value.trim()) return
+  savingCat.value = true
+  try {
+    await client.post('/ops/categories', { name: newCatName.value.trim() })
+    newCatName.value = ''
+    await loadCats(); await loadBase(); flash('Kategori ditambah')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { savingCat.value = false }
+}
+async function renameCat(c) {
+  const nm = prompt('Nama kategori:', c.name)
+  if (!nm || nm.trim() === c.name) return
+  try { await client.put(`/ops/categories/${c.id}`, { name: nm.trim() }); await loadCats(); await loadBase(); flash('Disimpan') }
+  catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
+}
+async function toggleCat(c) {
+  try { await client.put(`/ops/categories/${c.id}`, { is_active: !c.is_active }); await loadCats(); await loadBase() }
+  catch (e) { alert('Gagal.') }
+}
+
+function reloadTab() {
+  if (tab.value === 'requests') loadRequests()
+  else if (tab.value === 'budget') loadBudget()
+  else if (tab.value === 'categories') loadCats()
+}
 onMounted(async () => { await loadBase(); await loadRequests() })
 watch([venueId, period], reloadTab)
 watch(tab, reloadTab)
@@ -151,6 +183,36 @@ watch(statusFilter, loadRequests)
     <div class="flex gap-1 mb-4 border-b">
       <button @click="tab = 'requests'" :class="tab === 'requests' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Pengajuan</button>
       <button @click="tab = 'budget'" :class="tab === 'budget' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Budget</button>
+      <button v-if="isApprover" @click="tab = 'categories'" :class="tab === 'categories' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Kategori</button>
+    </div>
+
+    <!-- Tab Kategori Beban -->
+    <div v-if="tab === 'categories'">
+      <p class="text-slate-500 text-sm mb-3">Kategori rincian yang muncul saat mengajukan dana. Nonaktifkan untuk menyembunyikan dari form (tidak menghapus riwayat).</p>
+      <div class="bg-white rounded-xl shadow-sm border p-4 mb-4 flex gap-2 max-w-lg">
+        <input v-model="newCatName" placeholder="Nama kategori baru (mis. Ops Kebersihan)" @keyup.enter="addCat" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        <button @click="addCat" :disabled="savingCat" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">+ Tambah</button>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden max-w-lg">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+            <th class="px-4 py-2 font-medium">Kategori</th><th class="px-4 py-2 font-medium text-center">Status</th><th class="px-4 py-2"></th>
+          </tr></thead>
+          <tbody>
+            <tr v-if="!catsAll.length"><td colspan="3" class="px-4 py-6 text-center text-slate-400">Belum ada kategori.</td></tr>
+            <tr v-for="c in catsAll" :key="c.id" class="border-t">
+              <td class="px-4 py-2 text-slate-700" :class="{ 'text-slate-400 line-through': !c.is_active }">{{ c.name }}</td>
+              <td class="px-4 py-2 text-center">
+                <span class="text-xs px-2 py-0.5 rounded-full" :class="c.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ c.is_active ? 'Aktif' : 'Nonaktif' }}</span>
+              </td>
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                <button @click="renameCat(c)" class="text-brand-600 text-xs hover:underline mr-3">Ubah</button>
+                <button @click="toggleCat(c)" class="text-xs hover:underline" :class="c.is_active ? 'text-red-500' : 'text-emerald-600'">{{ c.is_active ? 'Nonaktifkan' : 'Aktifkan' }}</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- ============ PENGAJUAN ============ -->

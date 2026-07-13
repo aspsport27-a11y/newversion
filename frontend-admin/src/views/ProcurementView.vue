@@ -23,7 +23,7 @@ function supName(id) { const s = suppliers.value.find((x) => x.id === id); retur
 const accounts = ref([])
 const sourceAccount = ref('')
 async function loadBase() {
-  const [v, s] = await Promise.all([client.get('/admin/venues'), client.get('/procurement/suppliers')])
+  const [v, s] = await Promise.all([client.get('/venues'), client.get('/procurement/suppliers')])
   venues.value = v.data.venues
   // admin_unit hanya venue di areanya
   if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)

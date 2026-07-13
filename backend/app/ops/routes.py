@@ -83,7 +83,10 @@ def _D(v):
 @jwt_required()
 @VIEW
 def categories_list():
-    cats = ExpenseCategory.query.filter_by(is_active=True).order_by(ExpenseCategory.sort_order).all()
+    q = ExpenseCategory.query
+    if not request.args.get("all"):
+        q = q.filter_by(is_active=True)
+    cats = q.order_by(ExpenseCategory.sort_order, ExpenseCategory.name).all()
     return jsonify(categories=[c.to_dict() for c in cats]), 200
 
 
@@ -92,14 +95,37 @@ def categories_list():
 @APPROVE
 def categories_create():
     d = request.get_json(silent=True) or {}
-    if not d.get("name"):
+    name = (d.get("name") or "").strip()
+    if not name:
         return _err("Nama kategori wajib")
-    if ExpenseCategory.query.filter_by(name=d["name"]).first():
+    if ExpenseCategory.query.filter_by(name=name).first():
         return _err("Kategori sudah ada", "duplicate", 409)
-    c = ExpenseCategory(name=d["name"], sort_order=int(d.get("sort_order", 99)))
+    c = ExpenseCategory(name=name, sort_order=int(d.get("sort_order", 99)))
     db.session.add(c)
     db.session.commit()
     return jsonify(category=c.to_dict()), 201
+
+
+@ops_bp.put("/categories/<int:cid>")
+@jwt_required()
+@APPROVE
+def categories_update(cid):
+    c = db.session.get(ExpenseCategory, cid)
+    if not c:
+        return _err("Kategori tidak ditemukan", "not_found", 404)
+    d = request.get_json(silent=True) or {}
+    if "name" in d and d["name"].strip():
+        nm = d["name"].strip()
+        dup = ExpenseCategory.query.filter(ExpenseCategory.name == nm, ExpenseCategory.id != cid).first()
+        if dup:
+            return _err("Kategori sudah ada", "duplicate", 409)
+        c.name = nm
+    if "is_active" in d:
+        c.is_active = bool(d["is_active"])
+    if "sort_order" in d:
+        c.sort_order = int(d["sort_order"])
+    db.session.commit()
+    return jsonify(category=c.to_dict()), 200
 
 
 # ------------------------------------------------------------------
