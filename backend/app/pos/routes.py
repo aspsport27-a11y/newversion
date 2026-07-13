@@ -10,9 +10,9 @@ from flask_jwt_extended import (
 )
 
 from ..extensions import db
-from ..models import User, Venue
+from ..models import Employee, User, Venue
 from ..security import verify_password
-from .models import Facility, FacilityBooking, PosTerminal, Product, Shift
+from .models import Attendance, Facility, FacilityBooking, PosTerminal, Product, Shift
 from .services import (
     PosError,
     add_cash_movement,
@@ -92,6 +92,76 @@ def pos_login():
         access_token=token,
         cashier={"id": user.id, "username": user.username, "role": user.role},
         terminal=terminal.to_dict(),
+    ), 200
+
+
+# ------------------------------------------------------------------
+# Absensi — tap PIN di terminal, tanpa login penuh (rekap kehadiran)
+# ------------------------------------------------------------------
+@pos_bp.post("/attendance")
+def pos_attendance():
+    from datetime import timedelta, timezone
+
+    # venue di Kalimantan Selatan → WITA (UTC+8); simpan waktu lokal (naive)
+    now = (datetime.utcnow() + timedelta(hours=8))
+
+    data = request.get_json(silent=True) or {}
+    pin = str(data.get("pin") or "")
+    terminal_code = (data.get("terminal_code") or "").strip()
+    action = (data.get("action") or "in").strip()  # in | out
+    if not pin or not terminal_code:
+        return jsonify(error="bad_request", message="PIN & terminal wajib"), 400
+    if action not in ("in", "out"):
+        return jsonify(error="bad_request", message="action harus in/out"), 400
+
+    terminal = PosTerminal.query.filter_by(code=terminal_code, is_active=True).first()
+    if terminal is None:
+        return jsonify(error="terminal_not_found", message="Terminal tidak ditemukan"), 404
+
+    # cocokkan PIN ke staff di venue terminal (atau tanpa venue)
+    candidates = User.query.filter(
+        User.pin_hash.isnot(None), User.active.is_(True),
+        (User.venue_id == terminal.venue_id) | (User.venue_id.is_(None)),
+    ).all()
+    matched = [u for u in candidates if verify_password(pin, u.pin_hash)]
+    if not matched:
+        return jsonify(error="unauthorized", message="PIN tidak dikenal"), 401
+    if len(matched) > 1:
+        return jsonify(error="ambiguous", message="PIN dipakai >1 orang — hubungi admin"), 409
+    user = matched[0]
+
+    name = user.username
+    if user.employee_id:
+        emp = db.session.get(Employee, user.employee_id)
+        if emp:
+            name = emp.name
+
+    today = now.date()
+    row = Attendance.query.filter_by(user_id=user.id, date=today).first()
+    if row is None:
+        row = Attendance(
+            user_id=user.id, employee_id=user.employee_id,
+            venue_id=terminal.venue_id, terminal_id=terminal.id, date=today,
+        )
+        db.session.add(row)
+
+    if action == "in":
+        if row.check_in:
+            return jsonify(error="already", message=f"{name} sudah absen masuk hari ini "
+                           f"({row.check_in.strftime('%H:%M')})"), 409
+        row.check_in = now
+    else:
+        if row.check_out:
+            return jsonify(error="already", message=f"{name} sudah absen pulang hari ini "
+                           f"({row.check_out.strftime('%H:%M')})"), 409
+        row.check_out = now
+    db.session.commit()
+
+    label = "Masuk" if action == "in" else "Pulang"
+    return jsonify(
+        ok=True, name=name, action=action,
+        time=now.strftime("%H:%M"),
+        message=f"Absen {label} — {name} ({now.strftime('%H:%M')})",
     ), 200
 
 

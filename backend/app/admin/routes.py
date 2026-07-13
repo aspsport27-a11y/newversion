@@ -19,6 +19,7 @@ from ..security import (
     roles_required,
 )
 from ..pos.models import (
+    Attendance,
     Facility,
     FacilityBooking,
     Order,
@@ -886,6 +887,51 @@ def cashiers_delete(uid):
     db.session.delete(u)
     db.session.commit()
     return jsonify(message="Kasir dihapus"), 200
+
+
+# ==================================================================
+# ABSENSI (rekap kehadiran) — dari absen PIN di terminal POS
+# ==================================================================
+@admin_bp.get("/attendance")
+@jwt_required()
+@VIEW
+def attendance_list():
+    from datetime import timedelta
+
+    today = (datetime.utcnow() + timedelta(hours=8)).date()  # WITA
+    d_from = request.args.get("from") or today.isoformat()
+    d_to = request.args.get("to") or today.isoformat()
+    vid = request.args.get("venue_id", type=int)
+
+    # scope: manager→venue-nya; admin_unit→area-nya; lainnya ikut ?venue_id
+    u = _current_user()
+    if u and u.role == ROLE_MANAGER:
+        vid = u.venue_id
+    scope_vids = None
+    if u and u.role == "admin_unit":
+        scope_vids = [v.id for v in Venue.query.filter_by(area_id=u.area_id).all()] if u.area_id else []
+
+    q = Attendance.query.filter(Attendance.date.between(d_from, d_to))
+    if vid:
+        q = q.filter(Attendance.venue_id == vid)
+    elif scope_vids is not None:
+        q = q.filter(Attendance.venue_id.in_(scope_vids)) if scope_vids else q.filter(db.false())
+    rows = q.order_by(Attendance.date.desc(), Attendance.check_in).all()
+
+    # resolusi nama: employee.name kalau ada, else username
+    emp_ids = {r.employee_id for r in rows if r.employee_id}
+    uids = {r.user_id for r in rows if r.user_id}
+    emps = {e.id: e.name for e in Employee.query.filter(Employee.id.in_(emp_ids)).all()} if emp_ids else {}
+    users = {x.id: x.username for x in User.query.filter(User.id.in_(uids)).all()} if uids else {}
+    vmap = {v.id: v.code for v in Venue.query.all()}
+
+    out = []
+    for r in rows:
+        nm = emps.get(r.employee_id) or users.get(r.user_id) or "—"
+        d = r.to_dict(name=nm)
+        d["venue_code"] = vmap.get(r.venue_id)
+        out.append(d)
+    return jsonify(range={"from": d_from, "to": d_to}, count=len(out), attendance=out), 200
 
 
 # ==================================================================

@@ -340,3 +340,34 @@ class StockMovement(db.Model):
     reference = db.Column(db.String(50))
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class Attendance(db.Model):
+    """Kehadiran staff — absen masuk/pulang via terminal POS (rekap saja).
+    1 baris per user per hari (UNIQUE user_id+date)."""
+    __tablename__ = "attendance"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id", ondelete="SET NULL"))
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"))
+    terminal_id = db.Column(db.Integer, db.ForeignKey("pos_terminals.id", ondelete="SET NULL"))
+    date = db.Column(db.Date, nullable=False, default=datetime.utcnow)
+    check_in = db.Column(db.DateTime)
+    check_out = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "date"),)
+
+    def to_dict(self, name=None):
+        hm = lambda t: t.strftime("%H:%M") if t else None
+        dur = None
+        if self.check_in and self.check_out:
+            dur = round((self.check_out - self.check_in).total_seconds() / 3600, 2)
+        return {
+            "id": self.id, "user_id": self.user_id, "employee_id": self.employee_id,
+            "venue_id": self.venue_id, "name": name,
+            "date": self.date.isoformat() if self.date else None,
+            "check_in": hm(self.check_in), "check_out": hm(self.check_out),
+            "work_hours": dur,
+        }
