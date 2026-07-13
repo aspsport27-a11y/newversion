@@ -32,6 +32,7 @@ def create_app(config_class: type = Config) -> Flask:
     # blueprint
     from .admin.routes import admin_bp
     from .auth.routes import auth_bp
+    from .financial.routes import financial_bp
     from .main.routes import main_bp
     from .ops.routes import ops_bp
     from .payroll.routes import payroll_bp
@@ -47,6 +48,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(proc_bp, url_prefix="/api/procurement")
     app.register_blueprint(payroll_bp, url_prefix="/api/payroll")
     app.register_blueprint(treasury_bp, url_prefix="/api/treasury")
+    app.register_blueprint(financial_bp, url_prefix="/api/financial")
 
     _register_jwt_handlers(app)
     _register_error_handlers(app)

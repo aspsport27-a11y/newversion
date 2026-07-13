@@ -34,6 +34,7 @@ const allNav = [
   { name: 'facilities', label: 'Lapangan', icon: '⚽', roles: ADMINS },
   { name: 'bookings', label: 'Booking', icon: '📅', roles: ADMINS },
   { name: 'reports', label: 'Laporan', icon: '📈', roles: ADMINS },
+  { name: 'financial', label: 'Laporan Keuangan', icon: '💹', roles: ['admin', 'head_office', 'manager_unit'] },
   { name: 'setup', label: 'Setup Kasir', icon: '⚙️', roles: ADMINS },
 ]
 const nav = computed(() => allNav.filter((n) => n.roles.includes(auth.user?.role)))
