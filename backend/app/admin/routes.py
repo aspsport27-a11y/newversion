@@ -806,6 +806,88 @@ def cashiers_set_pin(uid):
     return jsonify(message="PIN diperbarui"), 200
 
 
+@admin_bp.put("/terminals/<int:tid>")
+@jwt_required()
+@MANAGE
+def terminals_update(tid):
+    t = db.session.get(PosTerminal, tid)
+    if not t:
+        return _err("Terminal tidak ditemukan", "not_found", 404)
+    d = request.get_json(silent=True) or {}
+    if "code" in d and d["code"] and d["code"] != t.code:
+        if PosTerminal.query.filter_by(code=d["code"]).first():
+            return _err("Kode terminal sudah dipakai", "duplicate", 409)
+        t.code = d["code"]
+    if "name" in d and d["name"]:
+        t.name = d["name"]
+    if "venue_id" in d and d["venue_id"]:
+        t.venue_id = d["venue_id"]
+    if "is_active" in d:
+        t.is_active = bool(d["is_active"])
+    db.session.commit()
+    return jsonify(terminal=t.to_dict()), 200
+
+
+@admin_bp.delete("/terminals/<int:tid>")
+@jwt_required()
+@MANAGE
+def terminals_delete(tid):
+    t = db.session.get(PosTerminal, tid)
+    if not t:
+        return _err("Terminal tidak ditemukan", "not_found", 404)
+    n = Shift.query.filter_by(terminal_id=tid).count() + Order.query.filter_by(terminal_id=tid).count()
+    if n:
+        return _err(
+            f"Terminal punya {n} transaksi/shift terkait. Nonaktifkan saja (jangan hapus).",
+            "has_dependencies", 409,
+        )
+    db.session.delete(t)
+    db.session.commit()
+    return jsonify(message="Terminal dihapus"), 200
+
+
+@admin_bp.put("/cashiers/<int:uid>")
+@jwt_required()
+@MANAGE
+def cashiers_update(uid):
+    u = db.session.get(User, uid)
+    if not u or u.role != "staff":
+        return _err("Kasir tidak ditemukan", "not_found", 404)
+    d = request.get_json(silent=True) or {}
+    if "username" in d and d["username"] and d["username"] != u.username:
+        if User.query.filter_by(username=d["username"]).first():
+            return _err("Username sudah dipakai", "duplicate", 409)
+        u.username = d["username"]
+    if "email" in d and d["email"] and d["email"] != u.email:
+        if User.query.filter_by(email=d["email"]).first():
+            return _err("Email sudah dipakai", "duplicate", 409)
+        u.email = d["email"]
+    if "venue_id" in d:
+        u.venue_id = d["venue_id"] or None
+    if "active" in d:
+        u.active = bool(d["active"])
+    db.session.commit()
+    return jsonify(cashier=u.to_dict()), 200
+
+
+@admin_bp.delete("/cashiers/<int:uid>")
+@jwt_required()
+@MANAGE
+def cashiers_delete(uid):
+    u = db.session.get(User, uid)
+    if not u or u.role != "staff":
+        return _err("Kasir tidak ditemukan", "not_found", 404)
+    n = Shift.query.filter_by(cashier_id=uid).count() + Order.query.filter_by(cashier_id=uid).count()
+    if n:
+        return _err(
+            f"Kasir punya {n} transaksi/shift terkait. Nonaktifkan saja (jangan hapus).",
+            "has_dependencies", 409,
+        )
+    db.session.delete(u)
+    db.session.commit()
+    return jsonify(message="Kasir dihapus"), 200
+
+
 # ==================================================================
 # REPORTS
 # ==================================================================

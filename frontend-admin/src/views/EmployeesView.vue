@@ -260,6 +260,7 @@ async function createAccount() {
                 <option value="staff">Kasir (PIN)</option>
                 <option value="manager_unit">Manager</option>
                 <option v-if="!isManager" value="admin_unit">Admin Unit (area)</option>
+                <option v-if="!isManager" value="head_office">Head Office</option>
               </select>
             </div>
             <select v-if="acctForm.role === 'admin_unit'" v-model="acctForm.area_id" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none">

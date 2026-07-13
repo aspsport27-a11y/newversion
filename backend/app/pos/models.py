@@ -17,7 +17,8 @@ class PosTerminal(db.Model):
     created_at = db.Column(db.DateTime)
 
     def to_dict(self):
-        return {"id": self.id, "code": self.code, "name": self.name, "venue_id": self.venue_id}
+        return {"id": self.id, "code": self.code, "name": self.name,
+                "venue_id": self.venue_id, "is_active": self.is_active}
 
 
 class ProductCategory(db.Model):
