@@ -289,6 +289,13 @@ def request_disburse(rid):
         return _err("Pengajuan tidak ditemukan", "not_found", 404)
     if r.status != "approved":
         return _err("Hanya pengajuan disetujui yang bisa dicairkan", "bad_status", 409)
+    src = (request.get_json(silent=True) or {}).get("source_account_id")
+    if src:
+        from ..treasury.service import pay_expense
+        ok, perr = pay_expense(src, float(r.total_amount), "op_request", r.id, f"Pencairan {r.code}", _user().id)
+        if perr:
+            return _err(perr)
+        r.source_account_id = src
     r.status = "disbursed"
     r.disbursed_by = _user().id
     r.disbursed_at = datetime.utcnow()

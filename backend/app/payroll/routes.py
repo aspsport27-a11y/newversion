@@ -221,6 +221,13 @@ def run_pay(rid):
     if err:
         return err
     uid = _user().id
+    src = (request.get_json(silent=True) or {}).get("source_account_id")
+    if src:
+        from ..treasury.service import pay_expense
+        ok, perr = pay_expense(src, float(r.total_net), "payroll", r.id, f"Gaji {r.code}", uid)
+        if perr:
+            return _err(perr)
+        r.source_account_id = src
     for item in r.items:
         if _D(item.kasbon_deduction) > 0 and item.employee_id:
             bal = _kasbon_balance(item.employee_id)

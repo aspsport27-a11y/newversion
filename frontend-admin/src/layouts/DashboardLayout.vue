@@ -28,6 +28,7 @@ const allNav = [
   { name: 'operational', label: 'Operasional', icon: '💰', roles: ['admin', 'head_office', 'manager_unit'] },
   { name: 'procurement', label: 'Procurement', icon: '🛒', roles: ['admin', 'head_office', 'manager_unit'] },
   { name: 'payroll', label: 'Payroll', icon: '🧾', roles: ['admin', 'head_office', 'manager_unit'] },
+  { name: 'treasury', label: 'Kas & Bank', icon: '🏦', roles: ADMINS },
   { name: 'products', label: 'Produk', icon: '📦', roles: ADMINS },
   { name: 'promos', label: 'Promo', icon: '🎉', roles: ADMINS },
   { name: 'facilities', label: 'Lapangan', icon: '⚽', roles: ADMINS },

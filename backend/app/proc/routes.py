@@ -309,6 +309,13 @@ def po_pay(pid):
         return _err("PO tidak ditemukan", "not_found", 404)
     if po.status != "received":
         return _err("Hanya PO diterima yang bisa dibayar", "bad_status", 409)
+    src = (request.get_json(silent=True) or {}).get("source_account_id")
+    if src:
+        from ..treasury.service import pay_expense
+        ok, perr = pay_expense(src, float(po.total_amount), "po", po.id, f"Bayar {po.code}", _user().id)
+        if perr:
+            return _err(perr)
+        po.source_account_id = src
     po.status = "paid"
     po.paid_by = _user().id
     po.paid_at = datetime.utcnow()

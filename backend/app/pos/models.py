@@ -150,6 +150,7 @@ class Shift(db.Model):
     counted_cash = db.Column(db.Numeric(15, 2))
     cash_variance = db.Column(db.Numeric(15, 2))
     deposit_amount = db.Column(db.Numeric(15, 2))
+    deposit_id = db.Column(db.Integer, db.ForeignKey("cash_deposits.id"))  # sudah disetor?
     notes = db.Column(db.Text)
 
     def to_dict(self):

@@ -22,6 +22,7 @@ class PurchaseOrder(db.Model):
     received_at = db.Column(db.DateTime)
     paid_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     paid_at = db.Column(db.DateTime)
+    source_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 

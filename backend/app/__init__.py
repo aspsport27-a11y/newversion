@@ -27,6 +27,7 @@ def create_app(config_class: type = Config) -> Flask:
     from .payroll import models as payroll_models  # noqa: F401
     from .pos import models as pos_models  # noqa: F401
     from .proc import models as proc_models  # noqa: F401
+    from .treasury import models as treasury_models  # noqa: F401
 
     # blueprint
     from .admin.routes import admin_bp
@@ -36,6 +37,7 @@ def create_app(config_class: type = Config) -> Flask:
     from .payroll.routes import payroll_bp
     from .pos.routes import pos_bp
     from .proc.routes import proc_bp
+    from .treasury.routes import treasury_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(main_bp, url_prefix="/api")
@@ -44,6 +46,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(ops_bp, url_prefix="/api/ops")
     app.register_blueprint(proc_bp, url_prefix="/api/procurement")
     app.register_blueprint(payroll_bp, url_prefix="/api/payroll")
+    app.register_blueprint(treasury_bp, url_prefix="/api/treasury")
 
     _register_jwt_handlers(app)
     _register_error_handlers(app)

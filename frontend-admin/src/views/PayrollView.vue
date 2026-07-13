@@ -24,10 +24,19 @@ const MONTHS = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Jul
 const statusMap = { draft: ['Draft', 'bg-slate-100 text-slate-600'], submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], paid: ['Dibayar', 'bg-emerald-100 text-emerald-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'] }
 const editable = computed(() => detail.value && ['draft', 'submitted'].includes(detail.value.status))
 
+const accounts = ref([])
+const sourceAccount = ref('')
 async function loadVenues() {
   const { data } = await client.get('/admin/venues')
   venues.value = data.venues
   if (!isManager.value && venues.value.length && !venueId.value) venueId.value = venues.value[0].id
+  if (isApprover.value) {
+    try {
+      const { data: acc } = await client.get('/treasury/accounts')
+      accounts.value = acc.accounts
+      sourceAccount.value = acc.accounts.find((a) => a.type === 'holding')?.id || acc.accounts[0]?.id || ''
+    } catch (_) { /* treasury belum disetup */ }
+  }
 }
 async function loadRuns() {
   loading.value = true
@@ -168,7 +177,13 @@ function slip(it) {
             <button @click="act('approve')" :disabled="busy" class="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-50">Setujui</button>
             <button @click="doReject" :disabled="busy" class="flex-1 py-2.5 rounded-lg bg-red-600 text-white font-medium disabled:opacity-50">Tolak</button>
           </template>
-          <button v-else-if="detail.status === 'approved' && isApprover" @click="act('pay')" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Bayar (Transfer) — potong kasbon</button>
+          <div v-else-if="detail.status === 'approved' && isApprover" class="w-full">
+            <label class="block text-xs text-slate-500 mb-1">Sumber dana</label>
+            <select v-model="sourceAccount" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-2">
+              <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option>
+            </select>
+            <button @click="act('pay', { source_account_id: sourceAccount })" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Bayar (Transfer) — potong kasbon</button>
+          </div>
           <p v-else class="text-sm text-slate-400 py-2 text-center w-full">Status: {{ statusMap[detail.status]?.[0] }}<span v-if="detail.status === 'submitted'"> — menunggu Head Office</span></p>
         </div>
       </div>

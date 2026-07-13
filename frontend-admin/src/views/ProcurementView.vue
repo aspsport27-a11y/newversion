@@ -19,11 +19,20 @@ function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], received: ['Diterima', 'bg-violet-100 text-violet-700'], paid: ['Lunas', 'bg-emerald-100 text-emerald-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'] }
 function supName(id) { const s = suppliers.value.find((x) => x.id === id); return s ? s.name : '—' }
 
+const accounts = ref([])
+const sourceAccount = ref('')
 async function loadBase() {
   const [v, s] = await Promise.all([client.get('/admin/venues'), client.get('/procurement/suppliers')])
   venues.value = v.data.venues
   suppliers.value = s.data.suppliers
   if (!isManager.value && venues.value.length && !venueId.value) venueId.value = venues.value[0].id
+  if (isApprover.value) {
+    try {
+      const { data } = await client.get('/treasury/accounts')
+      accounts.value = data.accounts
+      sourceAccount.value = data.accounts.find((a) => a.type === 'holding')?.id || data.accounts[0]?.id || ''
+    } catch (_) { /* treasury belum disetup */ }
+  }
 }
 async function loadProducts() {
   const params = {}
@@ -267,7 +276,15 @@ watch(tab, reloadTab)
             <button @click="doReject" :disabled="busy" class="flex-1 py-2.5 rounded-lg bg-red-600 text-white font-medium disabled:opacity-50">Tolak</button>
           </template>
           <button v-else-if="detail.status === 'approved'" @click="act('receive')" :disabled="busy" class="w-full py-2.5 rounded-lg bg-violet-600 text-white font-medium disabled:opacity-50">Barang Diterima (stok masuk)</button>
-          <button v-else-if="detail.status === 'received' && isApprover" @click="act('pay')" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Bayar Supplier</button>
+          <template v-else-if="detail.status === 'received' && isApprover">
+            <div class="w-full">
+              <label class="block text-xs text-slate-500 mb-1">Sumber dana</label>
+              <select v-model="sourceAccount" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-2">
+                <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option>
+              </select>
+              <button @click="act('pay', { source_account_id: sourceAccount })" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Bayar Supplier</button>
+            </div>
+          </template>
           <p v-else class="text-sm text-slate-400 py-2 text-center w-full">Status: {{ statusMap[detail.status]?.[0] }}<span v-if="detail.status === 'received'"> — menunggu pembayaran HO</span></p>
         </div>
       </div>

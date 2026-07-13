@@ -20,11 +20,20 @@ function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function ym() { const [y, m] = period.value.split('-'); return { year: +y, month: +m } }
 const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'], disbursed: ['Dicairkan', 'bg-emerald-100 text-emerald-700'] }
 
+const accounts = ref([])
+const sourceAccount = ref('')
 async function loadBase() {
   const [v, c] = await Promise.all([client.get('/admin/venues'), client.get('/ops/categories')])
   venues.value = v.data.venues
   categories.value = c.data.categories
   if (!isManager.value && venues.value.length && !venueId.value) venueId.value = venues.value[0].id
+  if (isApprover.value) {
+    try {
+      const { data } = await client.get('/treasury/accounts')
+      accounts.value = data.accounts
+      sourceAccount.value = data.accounts.find((a) => a.type === 'holding')?.id || data.accounts[0]?.id || ''
+    } catch (_) { /* treasury belum disetup */ }
+  }
 }
 
 // ---------- Pengajuan ----------
@@ -268,12 +277,20 @@ watch(statusFilter, loadRequests)
         </div>
 
         <!-- Aksi Head Office -->
-        <div v-if="isApprover" class="flex gap-2 pt-2 border-t">
-          <template v-if="detail.status === 'submitted'">
+        <div v-if="isApprover" class="pt-2 border-t space-y-2">
+          <div v-if="detail.status === 'submitted'" class="flex gap-2">
             <button @click="act('approve')" :disabled="busy" class="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-50">Setujui</button>
             <button @click="doReject" :disabled="busy" class="flex-1 py-2.5 rounded-lg bg-red-600 text-white font-medium disabled:opacity-50">Tolak</button>
+          </div>
+          <template v-else-if="detail.status === 'approved'">
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">Sumber dana</label>
+              <select v-model="sourceAccount" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+                <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option>
+              </select>
+            </div>
+            <button @click="act('disburse', { source_account_id: sourceAccount })" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Cairkan Dana</button>
           </template>
-          <button v-else-if="detail.status === 'approved'" @click="act('disburse')" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Cairkan Dana</button>
           <p v-else class="text-sm text-slate-400 py-2">Status: {{ statusMap[detail.status]?.[0] }}</p>
         </div>
       </div>
