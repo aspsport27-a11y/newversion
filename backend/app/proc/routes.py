@@ -12,15 +12,16 @@ from werkzeug.utils import secure_filename
 from ..extensions import db
 from ..models import Supplier, User, Venue
 from ..pos.models import Product, StockMovement
-from ..security import ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, roles_required
+from ..security import ROLE_MANAGER, require_perm
 from .models import PoAttachment, PurchaseOrder, PurchaseOrderItem
 
 proc_bp = Blueprint("proc", __name__)
 
-VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
-CREATE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)  # unit boleh
-MANAGE_SUP = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
-PAY = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)  # bayar = HO/admin
+# RBAC configurable (izin dikelola via /admin/permissions)
+VIEW = require_perm("proc.view")
+CREATE = require_perm("proc.create")  # buat/approve/terima PO (wewenang unit)
+MANAGE_SUP = require_perm("proc.supplier")
+PAY = require_perm("proc.pay")  # bayar = HO/admin
 
 ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
 

@@ -8,14 +8,15 @@ from sqlalchemy import func
 
 from ..extensions import db
 from ..models import Employee, EmployeeDebt, User, Venue
-from ..security import ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, roles_required
+from ..security import ROLE_MANAGER, require_perm
 from .models import PayrollItem, PayrollRun
 
 payroll_bp = Blueprint("payroll", __name__)
 
-VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
-CREATE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)  # unit generate
-APPROVE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)  # HO approve & pay
+# RBAC configurable (izin dikelola via /admin/permissions)
+VIEW = require_perm("payroll.view")
+CREATE = require_perm("payroll.generate")  # unit generate
+APPROVE = require_perm("payroll.approve")  # HO approve & pay
 
 
 def _err(msg, code="bad_request", status=400):

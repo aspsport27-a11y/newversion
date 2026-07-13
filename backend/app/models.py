@@ -463,6 +463,19 @@ class User(db.Model):
         }
 
 
+class RolePermission(db.Model):
+    """RBAC configurable (migration 014). Kehadiran baris = izin diberikan ke role.
+    Role 'admin' = superuser (bypass di kode)."""
+    __tablename__ = "role_permissions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    role = db.Column(db.String(20), nullable=False)
+    permission_code = db.Column(db.String(50), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint("role", "permission_code"),)
+
+
 class AuditLog(db.Model):
     __tablename__ = "audit_logs"
 

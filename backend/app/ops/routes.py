@@ -16,7 +16,7 @@ from ..security import (
     ROLE_ADMIN_UNIT,
     ROLE_HEAD_OFFICE,
     ROLE_MANAGER,
-    roles_required,
+    require_perm,
 )
 from .models import (
     Budget,
@@ -28,10 +28,10 @@ from .models import (
 
 ops_bp = Blueprint("ops", __name__)
 
-# admin_unit (koordinator area) boleh lihat & buat pengajuan utk venue di areanya
-VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
-CREATE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
-APPROVE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)  # Head Office/Admin
+# RBAC configurable (izin dikelola via /admin/permissions)
+VIEW = require_perm("ops.view")
+CREATE = require_perm("ops.create")
+APPROVE = require_perm("ops.approve")
 
 ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
 

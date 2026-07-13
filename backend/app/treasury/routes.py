@@ -9,12 +9,12 @@ from sqlalchemy import func
 from ..extensions import db
 from ..models import User, Venue
 from ..pos.models import Order, Payment, Shift
-from ..security import ROLE_ADMIN, ROLE_HEAD_OFFICE, roles_required
+from ..security import require_perm
 from .models import AccountTransaction, BankAccount, CashDeposit, QrisSettlement
 from .service import account_balance, holding_account, record_tx
 
 treasury_bp = Blueprint("treasury", __name__)
-MANAGE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+MANAGE = require_perm("treasury.manage")  # RBAC configurable
 
 
 def _err(msg, code="bad_request", status=400):

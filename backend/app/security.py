@@ -45,3 +45,28 @@ def roles_required(*roles):
         return decorated
 
     return wrapper
+
+
+def require_perm(*codes):
+    """Batasi akses berdasarkan izin (RBAC configurable). admin = superuser.
+    Lolos bila role punya salah satu izin di `codes`."""
+
+    def wrapper(fn):
+        @wraps(fn)
+        def decorated(*args, **kwargs):
+            verify_jwt_in_request()
+            role = get_jwt().get("role")
+            if role == ROLE_ADMIN:
+                return fn(*args, **kwargs)
+            from .perms import has_perm  # lazy: hindari circular import
+
+            if any(has_perm(role, c) for c in codes):
+                return fn(*args, **kwargs)
+            return (
+                jsonify(error="forbidden", message="Izin tidak mencukupi"),
+                403,
+            )
+
+        return decorated
+
+    return wrapper

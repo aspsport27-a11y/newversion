@@ -21,7 +21,7 @@ from sqlalchemy import func
 
 from ..extensions import db
 from ..models import User, Venue
-from ..security import ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, roles_required
+from ..security import ROLE_MANAGER, require_perm
 from ..pos.models import Order, Payment
 from ..ops.models import ExpenseCategory, OpRequest, OpRequestItem
 from ..proc.models import PurchaseOrder
@@ -32,9 +32,11 @@ from .models import HOLDING_CATEGORIES, HoldingExpense
 
 financial_bp = Blueprint("financial", __name__)
 
-VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
-# Laporan Manajemen & Beban Holding = data owner-sensitif → HANYA admin/head_office
-HO = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+# RBAC configurable (izin dikelola via /admin/permissions)
+VIEW = require_perm("report.business")
+# data owner-sensitif — izin terpisah: lihat laporan vs kelola beban holding
+MANAGE_REPORT = require_perm("report.management")
+MANAGE_HOLDING = require_perm("holding.manage")
 
 
 def _current_user():
@@ -207,7 +209,7 @@ def _gen_holding_code():
 
 @financial_bp.get("/holding-expenses")
 @jwt_required()
-@HO
+@MANAGE_HOLDING
 def holding_expenses_list():
     d_from, d_to = _date_range()
     # default: seluruh tahun berjalan bila tak diberi rentang eksplisit
@@ -228,7 +230,7 @@ def holding_expenses_list():
 
 @financial_bp.post("/holding-expenses")
 @jwt_required()
-@HO
+@MANAGE_HOLDING
 def holding_expenses_create():
     d = request.get_json(silent=True) or {}
     category = (d.get("category") or "").strip()
@@ -280,7 +282,7 @@ def holding_expenses_create():
 
 @financial_bp.delete("/holding-expenses/<int:eid>")
 @jwt_required()
-@HO
+@MANAGE_HOLDING
 def holding_expenses_delete(eid):
     exp = db.session.get(HoldingExpense, eid)
     if not exp:
@@ -301,7 +303,7 @@ def holding_expenses_delete(eid):
 
 @financial_bp.get("/management-report")
 @jwt_required()
-@HO
+@MANAGE_REPORT
 def management_report():
     d_from, d_to = _date_range()
 

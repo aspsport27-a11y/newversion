@@ -15,6 +15,7 @@ from ..security import (
     ROLE_HEAD_OFFICE,
     ROLE_MANAGER,
     hash_password,
+    require_perm,
     roles_required,
 )
 from ..pos.models import (
@@ -32,10 +33,11 @@ from ..pos.models import (
 
 admin_bp = Blueprint("admin", __name__)
 
-MANAGE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
-VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+# RBAC configurable (izin dikelola via /admin/permissions)
+MANAGE = require_perm("master.manage")
+VIEW = require_perm("master.view")
 # HR: manager unit juga boleh kelola karyawan (venue-nya sendiri)
-MANAGE_HR = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+MANAGE_HR = require_perm("hr.manage")
 
 POSITIONS = ["Manager", "Kasir", "Staff Lapangan", "Lifeguard", "Cleaning", "Admin"]
 
@@ -235,6 +237,43 @@ def areas_delete(aid):
     db.session.delete(a)
     db.session.commit()
     return jsonify(message="Area dihapus"), 200
+
+
+# ==================================================================
+# RBAC — matriks izin per role (configurable). Kelola: HANYA admin (hard),
+# supaya tak bisa mengunci diri sendiri lewat toggle.
+# ==================================================================
+ADMIN_ONLY = roles_required(ROLE_ADMIN)
+
+
+@admin_bp.get("/permissions")
+@jwt_required()
+@ADMIN_ONLY
+def permissions_get():
+    from ..perms import EDITABLE_ROLES, PERMISSIONS, grants_matrix
+    return jsonify(
+        permissions=[{"code": c, "label": l, "category": cat} for c, l, cat in PERMISSIONS],
+        roles=[{"code": r, "label": l} for r, l in EDITABLE_ROLES],
+        grants=grants_matrix(),
+    ), 200
+
+
+@admin_bp.post("/permissions")
+@jwt_required()
+@ADMIN_ONLY
+def permissions_set():
+    from ..perms import EDITABLE_ROLES, PERMISSION_CODES, set_grant
+    d = request.get_json(silent=True) or {}
+    role = d.get("role")
+    code = d.get("code")
+    granted = bool(d.get("granted"))
+    editable = {r for r, _ in EDITABLE_ROLES}
+    if role not in editable:
+        return _err("Role tidak bisa diubah")
+    if code not in PERMISSION_CODES:
+        return _err("Kode izin tidak dikenal")
+    set_grant(role, code, granted)
+    return jsonify(ok=True, role=role, code=code, granted=granted), 200
 
 
 # ==================================================================

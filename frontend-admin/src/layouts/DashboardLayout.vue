@@ -38,6 +38,7 @@ const allNav = [
   { name: 'financial', label: 'Laporan Bisnis', icon: '💹', roles: ['admin', 'head_office', 'manager_unit'] },
   { name: 'management-report', label: 'Laporan Manajemen', icon: '🔐', roles: ['admin', 'head_office'] },
   { name: 'setup', label: 'Setup Kasir', icon: '⚙️', roles: ADMINS },
+  { name: 'permissions', label: 'Hak Akses', icon: '🔑', roles: ['admin'] },
 ]
 const nav = computed(() => allNav.filter((n) => n.roles.includes(auth.user?.role)))
 </script>

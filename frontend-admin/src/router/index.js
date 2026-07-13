@@ -27,6 +27,7 @@ const routes = [
       { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue') },
       { path: 'financial', name: 'financial', component: () => import('../views/FinancialView.vue') },
       { path: 'management-report', name: 'management-report', component: () => import('../views/ManagementReportView.vue') },
+      { path: 'permissions', name: 'permissions', component: () => import('../views/PermissionsView.vue') },
       { path: 'setup', name: 'setup', component: () => import('../views/SetupView.vue') },
     ],
   },
