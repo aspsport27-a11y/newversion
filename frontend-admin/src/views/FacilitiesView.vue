@@ -32,7 +32,7 @@ watch(venueId, loadFacilities)
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', type: '', hourly_rate: 0, open_time: '08:00', close_time: '23:00' }
+  form.value = { name: '', type: '', hourly_rate: 0, open_time: '08:00', close_time: '23:00', is_active: true }
   error.value = ''; showForm.value = true
 }
 function openEdit(f) {
@@ -117,7 +117,7 @@ async function save() {
             <div><label class="text-xs text-slate-500">Buka</label><input v-model="form.open_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
             <div><label class="text-xs text-slate-500">Tutup</label><input v-model="form.close_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
           </div>
-          <label v-if="editing" class="flex items-center gap-2 text-sm text-slate-600">
+          <label class="flex items-center gap-2 text-sm text-slate-600">
             <input v-model="form.is_active" type="checkbox" /> Aktif
           </label>
           <p v-if="error" class="text-sm text-red-600">{{ error }}</p>

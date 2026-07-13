@@ -122,12 +122,14 @@ class Facility(db.Model):
         hm = lambda t: t.strftime("%H:%M") if t else None
         return {
             "id": self.id,
+            "venue_id": self.venue_id,
             "name": self.name,
             "type": self.type,
             "hourly_rate": float(self.hourly_rate or 0),
             "open_time": hm(self.open_time),
             "close_time": hm(self.close_time),
             "slot_minutes": self.slot_minutes,
+            "is_active": self.is_active,
         }
 
 
