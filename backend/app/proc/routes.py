@@ -12,7 +12,7 @@ from werkzeug.utils import secure_filename
 from ..extensions import db
 from ..models import Supplier, User, Venue
 from ..pos.models import Product, StockMovement
-from ..security import ROLE_MANAGER, require_perm
+from ..security import ROLE_ADMIN_UNIT, ROLE_MANAGER, require_perm
 from .models import PoAttachment, PurchaseOrder, PurchaseOrderItem
 
 proc_bp = Blueprint("proc", __name__)
@@ -46,11 +46,23 @@ def _D(v):
         return 0.0
 
 
+def _scope_vids(u):
+    """Venue yang boleh diakses. None = semua (admin/HO).
+    manager→[venue-nya]; admin_unit→semua venue di areanya."""
+    if not u:
+        return []
+    if u.role == ROLE_MANAGER:
+        return [u.venue_id] if u.venue_id else []
+    if u.role == ROLE_ADMIN_UNIT:
+        return [v.id for v in Venue.query.filter_by(area_id=u.area_id).all()] if u.area_id else []
+    return None
+
+
 def _check_venue(po):
-    """Manager hanya boleh venue-nya."""
-    forced = _forced_venue()
-    if forced is not None and po.venue_id != forced:
-        return _err("Bukan PO venue Anda", "forbidden", 403)
+    """Manager/admin_unit hanya boleh dalam cakupannya."""
+    vids = _scope_vids(_user())
+    if vids is not None and po.venue_id not in vids:
+        return _err("PO di luar cakupan Anda", "forbidden", 403)
     return None
 
 
@@ -160,9 +172,9 @@ def _gen_po_code(venue):
 @VIEW
 def pos_list():
     q = PurchaseOrder.query
-    forced = _forced_venue()
-    if forced is not None:
-        q = q.filter_by(venue_id=forced)
+    vids = _scope_vids(_user())
+    if vids is not None:
+        q = q.filter(PurchaseOrder.venue_id.in_(vids)) if vids else q.filter(db.false())
     elif request.args.get("venue_id", type=int):
         q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
     if request.args.get("status"):
@@ -194,6 +206,10 @@ def po_create():
     vid = forced if forced is not None else d.get("venue_id")
     if not vid:
         return _err("venue wajib")
+    vid = int(vid)
+    vids = _scope_vids(_user())
+    if vids is not None and vid not in vids:
+        return _err("Venue di luar cakupan area Anda", "forbidden", 403)
     venue = db.session.get(Venue, vid)
     if not venue:
         return _err("Venue tidak ditemukan", "not_found", 404)

@@ -43,6 +43,13 @@ router.beforeEach((to) => {
   const token = localStorage.getItem('access_token')
   if (to.meta.requiresAuth && !token) return { name: 'login' }
   if (to.meta.guestOnly && token) return { name: 'dashboard' }
+  // admin_unit tidak punya menu Dashboard → arahkan ke Operasional
+  if (to.name === 'dashboard') {
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || 'null')
+      if (u?.role === 'admin_unit') return { name: 'operational' }
+    } catch { /* ignore */ }
+  }
   return true
 })
 

@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
+const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 const isApprover = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
 
 const tab = ref('po')
@@ -24,6 +25,8 @@ const sourceAccount = ref('')
 async function loadBase() {
   const [v, s] = await Promise.all([client.get('/admin/venues'), client.get('/procurement/suppliers')])
   venues.value = v.data.venues
+  // admin_unit hanya venue di areanya
+  if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   suppliers.value = s.data.suppliers
   if (!isManager.value && venues.value.length && !venueId.value) venueId.value = venues.value[0].id
   if (isApprover.value) {
