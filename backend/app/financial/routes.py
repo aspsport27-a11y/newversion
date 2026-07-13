@@ -27,11 +27,14 @@ from ..ops.models import ExpenseCategory, OpRequest, OpRequestItem
 from ..proc.models import PurchaseOrder
 from ..payroll.models import PayrollRun
 from ..treasury.models import BankAccount
-from ..treasury.service import account_balance
+from ..treasury.service import account_balance, holding_account, record_tx
+from .models import HOLDING_CATEGORIES, HoldingExpense
 
 financial_bp = Blueprint("financial", __name__)
 
 VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+# Laporan Manajemen & Beban Holding = data owner-sensitif → HANYA admin/head_office
+HO = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
 
 
 def _current_user():
@@ -184,3 +187,227 @@ def report():
         },
         cash={"total": round(cash_total, 2), "accounts": accounts},
     ), 200
+
+
+# =====================================================================
+# BEBAN HOLDING / OWNER (sensitif — HANYA admin/head_office)
+# =====================================================================
+
+def _gen_holding_code():
+    today = date.today()
+    prefix = f"HLD-{today:%Y%m}-"
+    last = (
+        HoldingExpense.query.filter(HoldingExpense.code.like(prefix + "%"))
+        .order_by(HoldingExpense.code.desc())
+        .first()
+    )
+    seq = int(last.code.rsplit("-", 1)[1]) + 1 if last else 1
+    return f"{prefix}{seq:03d}"
+
+
+@financial_bp.get("/holding-expenses")
+@jwt_required()
+@HO
+def holding_expenses_list():
+    d_from, d_to = _date_range()
+    # default: seluruh tahun berjalan bila tak diberi rentang eksplisit
+    if not request.args.get("from"):
+        d_from = f"{date.today().year}-01-01"
+    q = HoldingExpense.query.filter(
+        HoldingExpense.expense_date.between(d_from, d_to)
+    ).order_by(HoldingExpense.expense_date.desc(), HoldingExpense.id.desc())
+    rows = [e.to_dict() for e in q.all()]
+    total = round(sum(r["amount"] for r in rows), 2)
+    return jsonify(
+        range={"from": d_from, "to": d_to},
+        categories=HOLDING_CATEGORIES,
+        total=total,
+        expenses=rows,
+    ), 200
+
+
+@financial_bp.post("/holding-expenses")
+@jwt_required()
+@HO
+def holding_expenses_create():
+    d = request.get_json(silent=True) or {}
+    category = (d.get("category") or "").strip()
+    amount = d.get("amount")
+    if category not in HOLDING_CATEGORIES:
+        return jsonify(error="bad_request", message="Kategori tidak valid"), 400
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        amount = 0
+    if amount <= 0:
+        return jsonify(error="bad_request", message="Nominal harus lebih dari 0"), 400
+
+    # sumber dana: rekening holding (default) atau yang dipilih
+    src_id = d.get("source_account_id")
+    if src_id:
+        acc = db.session.get(BankAccount, int(src_id))
+    else:
+        acc = holding_account()
+    if not acc:
+        return jsonify(error="bad_request", message="Rekening holding belum ada"), 400
+
+    exp_date = d.get("expense_date")
+    exp = HoldingExpense(
+        code=_gen_holding_code(),
+        category=category,
+        description=(d.get("description") or "").strip() or None,
+        amount=amount,
+        source_account_id=acc.id,
+        created_by=_current_user().id,
+    )
+    if exp_date:
+        try:
+            exp.expense_date = date.fromisoformat(exp_date)
+        except ValueError:
+            pass
+    db.session.add(exp)
+    db.session.flush()  # dapat id utk ref
+    # uang keluar dari rekening holding → tampil di buku besar treasury
+    record_tx(
+        acc.id, "out", amount, "holding_expense",
+        ref_type="holding_expense", ref_id=exp.id,
+        note=f"{category}: {exp.description or ''}".strip(": ").strip(),
+        user_id=exp.created_by, tx_date=exp.expense_date,
+    )
+    db.session.commit()
+    return jsonify(expense=exp.to_dict()), 201
+
+
+@financial_bp.delete("/holding-expenses/<int:eid>")
+@jwt_required()
+@HO
+def holding_expenses_delete(eid):
+    exp = db.session.get(HoldingExpense, eid)
+    if not exp:
+        return jsonify(error="not_found", message="Data tidak ditemukan"), 404
+    # hapus juga mutasi treasury terkait (balik saldo holding)
+    from ..treasury.models import AccountTransaction
+    AccountTransaction.query.filter_by(
+        ref_type="holding_expense", ref_id=exp.id
+    ).delete()
+    db.session.delete(exp)
+    db.session.commit()
+    return jsonify(ok=True), 200
+
+
+# =====================================================================
+# LAPORAN MANAJEMEN (HO only) — konsolidasi semua venue + beban holding/owner
+# =====================================================================
+
+@financial_bp.get("/management-report")
+@jwt_required()
+@HO
+def management_report():
+    d_from, d_to = _date_range()
+
+    # --- Pendapatan per venue (basis kas) ---
+    rev_rows = dict(
+        db.session.query(
+            Order.venue_id, func.coalesce(func.sum(Payment.amount), 0)
+        )
+        .join(Order, Payment.order_id == Order.id)
+        .filter(Payment.status == "paid")
+        .filter(func.date(Payment.paid_at).between(d_from, d_to))
+        .group_by(Order.venue_id)
+        .all()
+    )
+
+    # --- Beban per venue: operasional (disbursed) ---
+    op_rows = dict(
+        db.session.query(
+            OpRequest.venue_id, func.coalesce(func.sum(OpRequest.total_amount), 0)
+        )
+        .filter(OpRequest.status == "disbursed")
+        .filter(func.date(OpRequest.disbursed_at).between(d_from, d_to))
+        .group_by(OpRequest.venue_id)
+        .all()
+    )
+    # --- procurement (paid) ---
+    po_rows = dict(
+        db.session.query(
+            PurchaseOrder.venue_id,
+            func.coalesce(func.sum(PurchaseOrder.total_amount), 0),
+        )
+        .filter(PurchaseOrder.status == "paid")
+        .filter(func.date(PurchaseOrder.paid_at).between(d_from, d_to))
+        .group_by(PurchaseOrder.venue_id)
+        .all()
+    )
+    # --- payroll (paid) ---
+    pr_rows = dict(
+        db.session.query(
+            PayrollRun.venue_id, func.coalesce(func.sum(PayrollRun.total_net), 0)
+        )
+        .filter(PayrollRun.status == "paid")
+        .filter(func.date(PayrollRun.paid_at).between(d_from, d_to))
+        .group_by(PayrollRun.venue_id)
+        .all()
+    )
+
+    venue_ids = set(rev_rows) | set(op_rows) | set(po_rows) | set(pr_rows)
+    vnames = {
+        v.id: {"code": v.code, "name": v.name}
+        for v in Venue.query.filter(Venue.id.in_(venue_ids)).all()
+    } if venue_ids else {}
+
+    by_venue = []
+    biz_revenue = biz_expense = 0.0
+    for vid in venue_ids:
+        rev = _f(rev_rows.get(vid))
+        exp = _f(op_rows.get(vid)) + _f(po_rows.get(vid)) + _f(pr_rows.get(vid))
+        biz_revenue += rev
+        biz_expense += exp
+        info = vnames.get(vid, {})
+        by_venue.append({
+            "venue_id": vid,
+            "venue_code": info.get("code"),
+            "venue_name": info.get("name"),
+            "revenue": round(rev, 2),
+            "expense": round(exp, 2),
+            "net": round(rev - exp, 2),
+        })
+    by_venue.sort(key=lambda r: r["net"], reverse=True)
+    business_net = round(biz_revenue - biz_expense, 2)
+
+    # --- Beban holding/owner (prive, fee direktur, bonus) ---
+    hexp = HoldingExpense.query.filter(
+        HoldingExpense.expense_date.between(d_from, d_to)
+    ).all()
+    holding_by_cat = {}
+    for e in hexp:
+        holding_by_cat[e.category] = holding_by_cat.get(e.category, 0) + _f(e.amount)
+    holding_total = round(sum(holding_by_cat.values()), 2)
+    holding_by_category = sorted(
+        [{"category": k, "amount": round(v, 2)} for k, v in holding_by_cat.items()],
+        key=lambda r: r["amount"], reverse=True,
+    )
+
+    net_true = round(business_net - holding_total, 2)
+
+    # --- Saldo kas seluruh rekening (venue + holding) ---
+    accounts, cash_total = [], 0.0
+    for acc in BankAccount.query.filter_by(is_active=True).order_by(
+        BankAccount.type.desc(), BankAccount.name
+    ).all():
+        bal = account_balance(acc.id)
+        cash_total += bal
+        accounts.append(acc.to_dict(balance=bal))
+
+    return jsonify(
+        range={"from": d_from, "to": d_to},
+        business={
+            "revenue": round(biz_revenue, 2),
+            "expense": round(biz_expense, 2),
+            "net": business_net,
+            "by_venue": by_venue,
+        },
+        holding={"total": holding_total, "by_category": holding_by_category},
+        net_profit=net_true,
+        cash={"total": round(cash_total, 2), "accounts": accounts},
+    ), 200
+

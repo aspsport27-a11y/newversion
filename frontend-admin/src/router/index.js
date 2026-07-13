@@ -25,6 +25,7 @@ const routes = [
       { path: 'bookings', name: 'bookings', component: () => import('../views/BookingsView.vue') },
       { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue') },
       { path: 'financial', name: 'financial', component: () => import('../views/FinancialView.vue') },
+      { path: 'management-report', name: 'management-report', component: () => import('../views/ManagementReportView.vue') },
       { path: 'setup', name: 'setup', component: () => import('../views/SetupView.vue') },
     ],
   },

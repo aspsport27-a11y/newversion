@@ -23,6 +23,7 @@ def create_app(config_class: type = Config) -> Flask:
 
     # register model agar dikenali SQLAlchemy/Flask-Migrate
     from . import models  # noqa: F401
+    from .financial import models as financial_models  # noqa: F401
     from .ops import models as ops_models  # noqa: F401
     from .payroll import models as payroll_models  # noqa: F401
     from .pos import models as pos_models  # noqa: F401

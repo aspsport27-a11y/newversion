@@ -60,8 +60,8 @@ onMounted(async () => { await loadVenues(); await run() })
 
 <template>
   <div>
-    <h1 class="text-2xl font-bold text-slate-800 mb-1">Laporan Keuangan</h1>
-    <p class="text-slate-500 mb-5">Laba-rugi, arus kas, dan saldo kas — basis kas (uang benar-benar diterima / dibayar).</p>
+    <h1 class="text-2xl font-bold text-slate-800 mb-1">Laporan Bisnis</h1>
+    <p class="text-slate-500 mb-5">Laba-rugi &amp; arus kas operasional per venue — basis kas. Tidak termasuk beban holding/owner.</p>
 
     <!-- Filter -->
     <div class="bg-white rounded-xl shadow-sm border p-4 mb-5 flex flex-wrap items-end gap-3">
