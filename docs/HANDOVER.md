@@ -99,7 +99,7 @@ Menu admin otomatis tersaring per role.
 | Procurement (PO, supplier, terima→stok, reorder) | ✅ | `app/proc` | Procurement |
 | Payroll (generate, potong kasbon, slip) | ✅ | `app/payroll` | Payroll |
 | Kas & Bank / Treasury (rekening, setoran, QRIS recon, sumber dana) | ✅ | `app/treasury` | Kas & Bank |
-| **Financial Report** | ⏳ **BELUM** (modul terakhir) | — | — |
+| Financial Report (laba-rugi, arus kas, saldo kas per venue) | ✅ | `app/financial` | Laporan Keuangan |
 
 ### Alur kunci
 - **POS bayar:** cash (lunas otomatis, potong stok) / QRIS (pending — nunggu BRIAPI).
@@ -108,6 +108,7 @@ Menu admin otomatis tersaring per role.
 - **Procurement:** Unit buat PO → unit approve → terima (stok masuk) → HO bayar (sumber dana).
 - **Payroll:** Manager generate (auto: pokok+tunjangan−kasbon−potongan) → HO approve → bayar (potong kasbon dieksekusi).
 - **Kas & Bank:** QRIS→rek venue (HO recon), cash→setor holding, pengeluaran default holding, sapu venue→holding.
+- **Financial Report:** agregasi basis kas — pendapatan (payments diterima) − beban (operasional cair + PO dibayar + payroll dibayar) = laba/rugi; + snapshot saldo kas. `GET /api/financial/report?from=&to=&venue_id=`. Manager dibatasi venue-nya.
 
 ---
 
@@ -132,9 +133,9 @@ Menu admin otomatis tersaring per role.
 
 ## 8. Sisa pekerjaan / backlog
 
-1. **Financial Report** (modul terakhir) — laba-rugi & arus kas per venue, gabung semua modul.
-2. **BRIAPI QRIS** (hutang teknis, `docs/TECH_DEBT.md`) — QRIS auto-konfirmasi (MPM Dinamis +
-   Notifikasi/webhook). Sekarang QRIS di POS = pending. Operasional pakai cash dulu.
+1. ~~**Financial Report**~~ — ✅ SELESAI (`app/financial`, commit 9836a56).
+2. **BRIAPI QRIS** (hutang teknis, `docs/TECH_DEBT.md`) — **kini prioritas utama tersisa**. QRIS
+   auto-konfirmasi (MPM Dinamis + Notifikasi/webhook). Sekarang QRIS di POS = pending. Operasional pakai cash dulu.
 3. **Nonaktifkan venue tak terpakai** — user minta, belum dieksekusi (V002-006, V008-012 kosong).
 4. **Bersihkan tabel usang** (lihat §6).
 5. **Data asli** — ganti data demo dengan data operasional nyata (produk, karyawan, rekening, saldo awal).
