@@ -9,7 +9,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Employee, EmployeeDebt, User, Venue
+from ..models import Area, Employee, EmployeeDebt, User, Venue
 from ..security import (
     ROLE_ADMIN,
     ROLE_HEAD_OFFICE,
@@ -133,6 +133,8 @@ def venues_update(vid):
         v.capacity = _cap(d["capacity"])
     if "active" in d:
         v.active = bool(d["active"])
+    if "area_id" in d:
+        v.area_id = d["area_id"] or None
     v.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(venue=v.to_dict()), 200
@@ -161,6 +163,78 @@ def venues_delete(vid):
     db.session.delete(v)
     db.session.commit()
     return jsonify(message="Venue dihapus"), 200
+
+
+# ==================================================================
+# AREA (kumpulan venue) — utk scope role admin_unit. Kelola: admin/HO.
+# ==================================================================
+@admin_bp.get("/areas")
+@jwt_required()
+@VIEW
+def areas_list():
+    areas = Area.query.order_by(Area.code).all()
+    counts = dict(
+        db.session.query(Venue.area_id, func.count(Venue.id))
+        .filter(Venue.area_id.isnot(None)).group_by(Venue.area_id).all()
+    )
+    return jsonify(areas=[a.to_dict(venue_count=counts.get(a.id, 0)) for a in areas]), 200
+
+
+@admin_bp.post("/areas")
+@jwt_required()
+@MANAGE
+def areas_create():
+    d = request.get_json(silent=True) or {}
+    code = (d.get("code") or "").strip().upper()
+    name = (d.get("name") or "").strip()
+    if not code or not name:
+        return _err("Kode & nama area wajib")
+    if Area.query.filter_by(code=code).first():
+        return _err("Kode area sudah dipakai", "duplicate", 409)
+    a = Area(code=code, name=name, is_active=d.get("is_active", True))
+    db.session.add(a)
+    db.session.commit()
+    return jsonify(area=a.to_dict(venue_count=0)), 201
+
+
+@admin_bp.put("/areas/<int:aid>")
+@jwt_required()
+@MANAGE
+def areas_update(aid):
+    a = db.session.get(Area, aid)
+    if not a:
+        return _err("Area tidak ditemukan", "not_found", 404)
+    d = request.get_json(silent=True) or {}
+    if "code" in d and d["code"]:
+        code = d["code"].strip().upper()
+        if code != a.code and Area.query.filter_by(code=code).first():
+            return _err("Kode area sudah dipakai", "duplicate", 409)
+        a.code = code
+    if "name" in d and d["name"]:
+        a.name = d["name"].strip()
+    if "is_active" in d:
+        a.is_active = bool(d["is_active"])
+    db.session.commit()
+    return jsonify(area=a.to_dict()), 200
+
+
+@admin_bp.delete("/areas/<int:aid>")
+@jwt_required()
+@MANAGE
+def areas_delete(aid):
+    a = db.session.get(Area, aid)
+    if not a:
+        return _err("Area tidak ditemukan", "not_found", 404)
+    nv = Venue.query.filter_by(area_id=aid).count()
+    nu = User.query.filter_by(area_id=aid).count()
+    if nv or nu:
+        return _err(
+            f"Area masih dipakai: {nv} venue, {nu} user. Lepaskan dulu.",
+            "has_dependencies", 409,
+        )
+    db.session.delete(a)
+    db.session.commit()
+    return jsonify(message="Area dihapus"), 200
 
 
 # ==================================================================
@@ -427,15 +501,21 @@ def employee_account_create(eid):
     role = d.get("role", "staff")
     if not username:
         return _err("username wajib diisi")
-    if role not in ("staff", "manager_unit", "head_office", "admin"):
+    if role not in ("staff", "manager_unit", "admin_unit", "head_office", "admin"):
         return _err("role tidak valid")
+    # admin_unit = scope area → wajib pilih area
+    area_id = None
+    if role == "admin_unit":
+        area_id = d.get("area_id")
+        if not area_id or not db.session.get(Area, int(area_id)):
+            return _err("Admin Unit wajib dipilihkan area yang valid")
     if User.query.filter_by(username=username).first():
         return _err("Username sudah dipakai", "duplicate", 409)
     email = e.email or f"{username}@aspsports.id"
     if User.query.filter_by(email=email).first():
         email = f"{username}.{eid}@aspsports.id"
     u = User(username=username, email=email, role=role, active=True,
-             venue_id=e.venue_id, employee_id=e.id)
+             venue_id=e.venue_id, area_id=area_id, employee_id=e.id)
     pin, pw = d.get("pin"), d.get("password")
     if role == "staff":
         if not pin or len(str(pin)) < 4:

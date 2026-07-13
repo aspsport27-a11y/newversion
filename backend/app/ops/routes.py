@@ -10,8 +10,14 @@ from sqlalchemy import func
 from werkzeug.utils import secure_filename
 
 from ..extensions import db
-from ..models import User, Venue
-from ..security import ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, roles_required
+from ..models import Area, User, Venue
+from ..security import (
+    ROLE_ADMIN,
+    ROLE_ADMIN_UNIT,
+    ROLE_HEAD_OFFICE,
+    ROLE_MANAGER,
+    roles_required,
+)
 from .models import (
     Budget,
     ExpenseCategory,
@@ -22,8 +28,9 @@ from .models import (
 
 ops_bp = Blueprint("ops", __name__)
 
-VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
-CREATE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+# admin_unit (koordinator area) boleh lihat & buat pengajuan utk venue di areanya
+VIEW = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
+CREATE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
 APPROVE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)  # Head Office/Admin
 
 ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
@@ -40,6 +47,22 @@ def _user():
 def _forced_venue():
     u = _user()
     return u.venue_id if u and u.role == ROLE_MANAGER else None
+
+
+def _scope_vids(u):
+    """Venue yang boleh diakses user. None = semua (admin/HO).
+    - manager_unit → [venue-nya]
+    - admin_unit   → semua venue di areanya
+    """
+    if not u:
+        return []
+    if u.role == ROLE_MANAGER:
+        return [u.venue_id] if u.venue_id else []
+    if u.role == ROLE_ADMIN_UNIT:
+        if not u.area_id:
+            return []
+        return [v.id for v in Venue.query.filter_by(area_id=u.area_id).all()]
+    return None  # admin / head_office → semua
 
 
 def _cat_map():
@@ -174,9 +197,10 @@ def _gen_code(venue, year, month):
 @VIEW
 def requests_list():
     q = OpRequest.query
-    forced = _forced_venue()
-    if forced is not None:
-        q = q.filter_by(venue_id=forced)
+    vids = _scope_vids(_user())
+    if vids is not None:
+        # manager/admin_unit dibatasi ke cakupannya (list kosong bila belum di-set)
+        q = q.filter(OpRequest.venue_id.in_(vids)) if vids else q.filter(db.false())
     elif request.args.get("venue_id", type=int):
         q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
     if request.args.get("status"):
@@ -193,9 +217,9 @@ def request_detail(rid):
     r = db.session.get(OpRequest, rid)
     if not r:
         return _err("Pengajuan tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and r.venue_id != forced:
-        return _err("Bukan pengajuan venue Anda", "forbidden", 403)
+    vids = _scope_vids(_user())
+    if vids is not None and r.venue_id not in vids:
+        return _err("Bukan pengajuan dalam cakupan Anda", "forbidden", 403)
     d = r.to_dict(_cat_map())
     # konteks budget per kategori
     plafon = {b.category_id: float(b.amount) for b in Budget.query.filter_by(venue_id=r.venue_id, year=r.period_year, month=r.period_month).all()}
@@ -216,6 +240,11 @@ def request_create():
     vid = forced if forced is not None else d.get("venue_id")
     if not vid:
         return _err("venue wajib")
+    vid = int(vid)
+    # admin_unit hanya boleh ajukan utk venue di areanya
+    vids = _scope_vids(_user())
+    if vids is not None and vid not in vids:
+        return _err("Venue di luar cakupan area Anda", "forbidden", 403)
     venue = db.session.get(Venue, vid)
     if not venue:
         return _err("Venue tidak ditemukan", "not_found", 404)

@@ -9,8 +9,9 @@ from flask_jwt_extended import get_jwt, verify_jwt_in_request
 ROLE_ADMIN = "admin"
 ROLE_HEAD_OFFICE = "head_office"
 ROLE_MANAGER = "manager_unit"
+ROLE_ADMIN_UNIT = "admin_unit"  # koordinator area, junior — hanya entry pengajuan dana
 ROLE_STAFF = "staff"
-VALID_ROLES = {ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_STAFF}
+VALID_ROLES = {ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT, ROLE_STAFF}
 
 
 def hash_password(password: str) -> str:

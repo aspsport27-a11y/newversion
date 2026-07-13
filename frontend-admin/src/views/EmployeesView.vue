@@ -7,6 +7,7 @@ const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 
 const venues = ref([])
+const areas = ref([])
 const venueId = ref('')
 const employees = ref([])
 const positions = ref([])
@@ -23,7 +24,7 @@ const saving = ref(false)
 // detail (kasbon + akun)
 const detail = ref(null)
 const debtForm = ref({ type: 'advance', amount: null, note: '' })
-const acctForm = ref({ username: '', role: 'staff', pin: '', password: '' })
+const acctForm = ref({ username: '', role: 'staff', pin: '', password: '', area_id: '' })
 const busy = ref(false)
 
 function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
@@ -34,6 +35,9 @@ async function loadVenues() {
   const { data } = await client.get('/admin/venues')
   venues.value = data.venues
   if (!isManager.value && venues.value.length && !venueId.value) venueId.value = venues.value[0].id
+  if (!isManager.value) {
+    try { areas.value = (await client.get('/admin/areas')).data.areas } catch { /* ignore */ }
+  }
 }
 async function load() {
   loading.value = true
@@ -78,7 +82,7 @@ async function openDetail(e) {
   const { data } = await client.get(`/admin/employees/${e.id}`)
   detail.value = data.employee
   debtForm.value = { type: 'advance', amount: null, note: '' }
-  acctForm.value = { username: (e.name || '').toLowerCase().replace(/\s+/g, ''), role: 'staff', pin: '', password: '' }
+  acctForm.value = { username: (e.name || '').toLowerCase().replace(/\s+/g, ''), role: 'staff', pin: '', password: '', area_id: '' }
 }
 async function reloadDetail() {
   const { data } = await client.get(`/admin/employees/${detail.value.id}`)
@@ -255,8 +259,13 @@ async function createAccount() {
               <select v-model="acctForm.role" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none">
                 <option value="staff">Kasir (PIN)</option>
                 <option value="manager_unit">Manager</option>
+                <option v-if="!isManager" value="admin_unit">Admin Unit (area)</option>
               </select>
             </div>
+            <select v-if="acctForm.role === 'admin_unit'" v-model="acctForm.area_id" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none">
+              <option value="">— pilih area —</option>
+              <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.code }} — {{ a.name }} ({{ a.venue_count }} venue)</option>
+            </select>
             <input v-if="acctForm.role === 'staff'" v-model="acctForm.pin" placeholder="PIN (min 4 digit)" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
             <input v-else v-model="acctForm.password" type="text" placeholder="Password (min 8 karakter)" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
             <button @click="createAccount" :disabled="busy" class="w-full py-2 rounded-lg bg-brand-600 text-white text-sm font-medium disabled:opacity-50">Buatkan Akun</button>

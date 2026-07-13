@@ -29,6 +29,7 @@ class Venue(db.Model):
     capacity = db.Column(db.Integer)
     facilities = db.Column(db.Text)
     active = db.Column(db.Boolean, default=True)
+    area_id = db.Column(db.Integer, db.ForeignKey("areas.id", ondelete="SET NULL"))
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
 
@@ -46,6 +47,23 @@ class Venue(db.Model):
             "email": self.email,
             "capacity": self.capacity,
             "active": self.active,
+            "area_id": self.area_id,
+        }
+
+
+class Area(db.Model):
+    __tablename__ = "areas"
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(10), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self, venue_count=None):
+        return {
+            "id": self.id, "code": self.code, "name": self.name,
+            "is_active": self.is_active, "venue_count": venue_count,
         }
 
 
@@ -418,6 +436,8 @@ class User(db.Model):
     # POS (migration 002)
     pin_hash = db.Column(db.String(255))
     venue_id = db.Column(db.Integer, db.ForeignKey("venues.id"))
+    # Area scope (migration 013) — dipakai role admin_unit
+    area_id = db.Column(db.Integer, db.ForeignKey("areas.id"))
 
     # --- password helpers ---
     def set_password(self, password: str) -> None:
@@ -438,6 +458,7 @@ class User(db.Model):
             "active": self.active,
             "employee_id": self.employee_id,
             "venue_id": self.venue_id,
+            "area_id": self.area_id,
             "last_login": self.last_login.isoformat() if self.last_login else None,
         }
 

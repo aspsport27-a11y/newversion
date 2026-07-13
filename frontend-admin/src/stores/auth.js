@@ -13,6 +13,7 @@ export const useAuthStore = defineStore('auth', {
         admin: 'Administrator',
         head_office: 'Head Office',
         manager_unit: 'Manager Unit',
+        admin_unit: 'Admin Unit (Area)',
         staff: 'Staff / Kasir',
       }
       return s.user ? map[s.user.role] || s.user.role : ''
