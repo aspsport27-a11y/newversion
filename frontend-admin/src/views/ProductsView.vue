@@ -5,7 +5,9 @@ import client from '../api/client'
 const venues = ref([])
 const venueId = ref(null)
 const products = ref([])
+const suppliers = ref([])
 const loading = ref(false)
+function supName(id) { const s = suppliers.value.find((x) => x.id === id); return s ? s.name : '—' }
 const showForm = ref(false)
 const editing = ref(null)
 const form = ref({})
@@ -20,6 +22,7 @@ async function loadVenues() {
   const { data } = await client.get('/admin/venues')
   venues.value = data.venues
   if (venues.value.length && !venueId.value) venueId.value = venues.value[0].id
+  try { suppliers.value = (await client.get('/procurement/suppliers')).data.suppliers } catch { /* ignore */ }
 }
 async function loadProducts() {
   if (!venueId.value) return
@@ -39,13 +42,13 @@ watch(venueId, loadProducts)
 
 function openCreate() {
   editing.value = null
-  form.value = { sku: '', name: '', price: 0, unit: 'pcs', stock_qty: 0, min_stock: 0, track_stock: true, category: '' }
+  form.value = { name: '', price: 0, unit: 'pcs', stock_qty: 0, min_stock: 0, track_stock: true, category: '', supplier_id: '' }
   error.value = ''
   showForm.value = true
 }
 function openEdit(p) {
   editing.value = p
-  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock: p.min_stock, track_stock: p.track_stock, is_active: p.is_active }
+  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock: p.min_stock, track_stock: p.track_stock, supplier_id: p.supplier_id || '', is_active: p.is_active }
   error.value = ''
   showForm.value = true
 }
@@ -90,6 +93,7 @@ async function save() {
             <tr>
               <th class="px-4 py-3 font-medium">SKU</th>
               <th class="px-4 py-3 font-medium">Nama</th>
+              <th class="px-4 py-3 font-medium">Supplier</th>
               <th class="px-4 py-3 font-medium text-right">Harga</th>
               <th class="px-4 py-3 font-medium text-right">Stok</th>
               <th class="px-4 py-3 font-medium text-center">Status</th>
@@ -97,11 +101,12 @@ async function save() {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!products.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada produk.</td></tr>
+            <tr v-if="loading"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!products.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada produk.</td></tr>
             <tr v-for="p in products" :key="p.id" class="border-t hover:bg-slate-50">
               <td class="px-4 py-3 font-mono text-slate-500">{{ p.sku }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ p.name }}</td>
+              <td class="px-4 py-3 text-slate-500">{{ supName(p.supplier_id) }}</td>
               <td class="px-4 py-3 text-right">
                 <template v-if="p.promo && p.effective_price < p.price">
                   <span class="text-emerald-600 font-medium">{{ rupiah(p.effective_price) }}</span>
@@ -134,10 +139,17 @@ async function save() {
         </div>
         <div class="space-y-3">
           <template v-if="!editing">
-            <input v-model="form.sku" placeholder="SKU (mis. FB004)" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            <p class="text-xs text-slate-400">SKU dibuat otomatis (mis. {{ venues.find(v=>v.id===venueId)?.code }}-001).</p>
             <input v-model="form.category" placeholder="Kategori (mis. Minuman)" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           </template>
           <input v-model="form.name" placeholder="Nama produk" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Supplier (default utk PO)</label>
+            <select v-model="form.supplier_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+              <option value="">— tanpa supplier —</option>
+              <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+            </select>
+          </div>
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-xs text-slate-500 mb-1">Harga</label>

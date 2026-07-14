@@ -49,6 +49,7 @@ class Product(db.Model):
     track_stock = db.Column(db.Boolean, default=True)
     stock_qty = db.Column(db.Integer, default=0)
     min_stock = db.Column(db.Integer, default=0)  # ambang reorder
+    supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id", ondelete="SET NULL"))
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
@@ -59,11 +60,13 @@ class Product(db.Model):
             "sku": self.sku,
             "name": self.name,
             "category_id": self.category_id,
+            "venue_id": self.venue_id,
             "price": float(self.price or 0),
             "unit": self.unit,
             "track_stock": self.track_stock,
             "stock_qty": self.stock_qty,
             "min_stock": self.min_stock or 0,
+            "supplier_id": self.supplier_id,
             "is_active": self.is_active,
         }
 

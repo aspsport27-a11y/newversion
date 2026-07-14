@@ -67,6 +67,11 @@ async function openCreate() {
   cFiles.value = []; cErr.value = ''; showCreate.value = true
 }
 function addRow() { cForm.value.items.push({ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }) }
+// saat pilih produk → auto isi supplier PO dari supplier default produk
+function onPickProduct(it) {
+  const p = products.value.find((x) => x.id === it.product_id)
+  if (p?.supplier_id) cForm.value.supplier_id = p.supplier_id
+}
 function rmRow(i) { cForm.value.items.splice(i, 1) }
 function onFiles(e) { cFiles.value = Array.from(e.target.files) }
 async function submitCreate() {
@@ -227,7 +232,7 @@ watch(tab, reloadTab)
             <select v-model="it.mode" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm w-28">
               <option value="product">Produk</option><option value="other">Non-stok</option>
             </select>
-            <select v-if="it.mode === 'product'" v-model="it.product_id" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+            <select v-if="it.mode === 'product'" v-model="it.product_id" @change="onPickProduct(it)" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
               <option v-for="p in products" :key="p.id" :value="p.id">{{ p.name }} (stok {{ p.stock_qty }})</option>
             </select>
             <input v-else v-model="it.item_name" placeholder="Nama barang (non-stok)" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />

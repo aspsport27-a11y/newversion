@@ -294,17 +294,31 @@ def products_list():
     return jsonify(count=len(items), products=[product_public(p) for p in items]), 200
 
 
+def _gen_sku(venue):
+    """SKU otomatis: KODEVENUE-NNN, dijamin unik."""
+    base = (venue.code or "PRD").upper().replace(" ", "")
+    n = Product.query.filter_by(venue_id=venue.id).count() + 1
+    while True:
+        sku = f"{base}-{n:03d}"
+        if not Product.query.filter_by(sku=sku).first():
+            return sku
+        n += 1
+
+
 @admin_bp.post("/products")
 @jwt_required()
 @MANAGE
 def products_create():
     d = request.get_json(silent=True) or {}
-    for f in ("sku", "name", "venue_id"):
+    for f in ("name", "venue_id"):
         if not d.get(f):
             return _err(f"{f} wajib diisi")
-    if not _venue_or_404(d["venue_id"]):
+    venue = _venue_or_404(d["venue_id"])
+    if not venue:
         return _err("Venue tidak ditemukan", "not_found", 404)
-    if Product.query.filter_by(sku=d["sku"]).first():
+    # SKU otomatis (kalau tak diberikan / kosong)
+    sku = (d.get("sku") or "").strip() or _gen_sku(venue)
+    if Product.query.filter_by(sku=sku).first():
         return _err("SKU sudah dipakai", "duplicate", 409)
     cat_id = None
     if d.get("category"):
@@ -315,11 +329,12 @@ def products_create():
             db.session.flush()
         cat_id = cat.id
     p = Product(
-        sku=d["sku"], name=d["name"], venue_id=d["venue_id"], category_id=cat_id,
+        sku=sku, name=d["name"], venue_id=d["venue_id"], category_id=cat_id,
         price=_D(d.get("price")), promo_price=_promo(d.get("promo_price")),
         unit=d.get("unit", "pcs"),
         track_stock=bool(d.get("track_stock", True)), stock_qty=int(d.get("stock_qty", 0) or 0),
         min_stock=int(d.get("min_stock", 0) or 0),
+        supplier_id=d.get("supplier_id") or None,
         is_active=bool(d.get("is_active", True)),
     )
     db.session.add(p)
@@ -349,6 +364,8 @@ def products_update(pid):
         p.stock_qty = int(d["stock_qty"] or 0)
     if "min_stock" in d:
         p.min_stock = int(d["min_stock"] or 0)
+    if "supplier_id" in d:
+        p.supplier_id = d["supplier_id"] or None
     if "is_active" in d:
         p.is_active = bool(d["is_active"])
     p.updated_at = datetime.utcnow()
