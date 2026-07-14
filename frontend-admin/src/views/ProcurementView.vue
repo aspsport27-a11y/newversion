@@ -40,7 +40,7 @@ async function loadBase() {
 async function loadProducts() {
   const params = {}
   if (!isManager.value && venueId.value) params.venue_id = venueId.value
-  const { data } = await client.get('/admin/products', { params })
+  const { data } = await client.get('/procurement/products', { params })
   products.value = data.products
 }
 
@@ -61,7 +61,7 @@ const cErr = ref('')
 const saving = ref(false)
 const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0))
 async function openCreate() {
-  await loadProducts()
+  try { await loadProducts() } catch (e) { products.value = [] }  // tetap buka modal walau produk gagal (bisa item non-stok)
   cForm.value = { supplier_id: suppliers.value[0]?.id || '', notes: '', items: [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }] }
   cFiles.value = []; cErr.value = ''; showCreate.value = true
 }

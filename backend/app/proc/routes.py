@@ -167,6 +167,24 @@ def _gen_po_code(venue):
     return f"{prefix}{n + 1:04d}"
 
 
+@proc_bp.get("/products")
+@jwt_required()
+@VIEW
+def products_for_po():
+    """Produk per venue utk form PO — izin proc.view (dipakai manager & admin_unit)."""
+    vid = request.args.get("venue_id", type=int)
+    vids = _scope_vids(_user())
+    q = Product.query.filter_by(is_active=True)
+    if vid:
+        if vids is not None and vid not in vids:
+            return _err("Venue di luar cakupan", "forbidden", 403)
+        q = q.filter_by(venue_id=vid)
+    elif vids is not None:
+        q = q.filter(Product.venue_id.in_(vids)) if vids else q.filter(db.false())
+    prods = q.order_by(Product.name).all()
+    return jsonify(products=[p.to_dict() for p in prods]), 200
+
+
 @proc_bp.get("/pos")
 @jwt_required()
 @VIEW
