@@ -31,7 +31,7 @@ async function loadBase() {
     venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   }
   categories.value = c.data.categories
-  if (!isManager.value && venues.value.length && !venueId.value) venueId.value = venues.value[0].id
+  // default: "Semua venue" (venueId tetap '') agar semua pengajuan tampil
   if (isApprover.value) {
     try {
       const { data } = await client.get('/treasury/accounts')
@@ -62,7 +62,7 @@ const cErr = ref('')
 const saving = ref(false)
 const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.amount) || 0), 0))
 function openCreate() {
-  cForm.value = { description: '', items: [{ category_id: categories.value[0]?.id, amount: null, note: '' }] }
+  cForm.value = { venue_id: venueId.value || venues.value[0]?.id, description: '', items: [{ category_id: categories.value[0]?.id, amount: null, note: '' }] }
   cFiles.value = []; cErr.value = ''; showCreate.value = true
 }
 function addRow() { cForm.value.items.push({ category_id: categories.value[0]?.id, amount: null, note: '' }) }
@@ -72,7 +72,7 @@ async function submitCreate() {
   saving.value = true; cErr.value = ''
   try {
     const payload = { ...ym(), description: cForm.value.description, items: cForm.value.items.filter((i) => i.category_id && i.amount > 0) }
-    if (!isManager.value) payload.venue_id = venueId.value
+    if (!isManager.value) payload.venue_id = cForm.value.venue_id
     const { data } = await client.post('/ops/requests', payload)
     for (const f of cFiles.value) {
       const fd = new FormData(); fd.append('file', f)
@@ -173,6 +173,7 @@ watch(statusFilter, loadRequests)
       </div>
       <div class="flex gap-2 items-center">
         <select v-if="!isManager" v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="">Semua venue</option>
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
         <input v-model="period" type="month" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
@@ -230,15 +231,18 @@ watch(statusFilter, loadRequests)
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-              <th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Periode</th>
+              <th class="px-4 py-3 font-medium">Kode</th>
+              <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
+              <th class="px-4 py-3 font-medium">Periode</th>
               <th class="px-4 py-3 font-medium">Deskripsi</th><th class="px-4 py-3 font-medium text-right">Total</th>
               <th class="px-4 py-3 font-medium text-center">Status</th><th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="loadingReq"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!requests.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan.</td></tr>
+              <tr v-if="loadingReq"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!requests.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan.</td></tr>
               <tr v-for="r in requests" :key="r.id" @click="openDetail(r)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ r.code }}</td>
+                <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===r.venue_id)?.code || '—' }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ r.period_month }}/{{ r.period_year }}</td>
                 <td class="px-4 py-3 text-slate-600 max-w-xs truncate">{{ r.description || '—' }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(r.total_amount) }}</td>
@@ -252,7 +256,8 @@ watch(statusFilter, loadRequests)
     </div>
 
     <!-- ============ BUDGET ============ -->
-    <div v-else>
+    <div v-else-if="tab === 'budget'">
+      <div v-if="!isManager && !venueId" class="bg-amber-50 text-amber-700 text-sm rounded-lg px-4 py-3 mb-3">Pilih satu venue dulu (bukan "Semua venue") untuk mengatur budget.</div>
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <div class="flex justify-between items-center px-4 py-3 border-b">
           <span class="text-sm text-slate-500">Plafon budget per kategori — {{ period }}</span>
@@ -290,7 +295,13 @@ watch(statusFilter, loadRequests)
     <div v-if="showCreate" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
       <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
         <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">Ajukan Dana Operasional</h3><button @click="showCreate = false" class="text-slate-400 text-xl">✕</button></div>
-        <p class="text-xs text-slate-400 mb-3">Periode {{ period }}<span v-if="!isManager"> · venue {{ venues.find(v=>v.id===venueId)?.code }}</span></p>
+        <p class="text-xs text-slate-400 mb-3">Periode {{ period }}</p>
+        <div v-if="!isManager" class="mb-3">
+          <label class="block text-xs text-slate-500 mb-1">Venue</label>
+          <select v-model="cForm.venue_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+            <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+          </select>
+        </div>
         <textarea v-model="cForm.description" placeholder="Deskripsi / keterangan" rows="2" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3"></textarea>
         <p class="text-xs font-medium text-slate-500 mb-1">Rincian</p>
         <div v-for="(it, i) in cForm.items" :key="i" class="flex gap-2 mb-2">
