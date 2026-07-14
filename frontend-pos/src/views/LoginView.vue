@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePosStore } from '../stores/pos'
-import client from '../api/client'
+import AbsenDialog from '../components/AbsenDialog.vue'
 
 const router = useRouter()
 const pos = usePosStore()
@@ -11,27 +11,8 @@ const terminalCode = ref(localStorage.getItem('pos_terminal_code') || '')
 const username = ref('')
 const pin = ref('')
 const error = ref('')
-const okMsg = ref('')
 const loading = ref(false)
-
-async function absen(action) {
-  if (!terminalCode.value || !pin.value) {
-    error.value = 'Isi Terminal & PIN dulu untuk absen.'; okMsg.value = ''
-    return
-  }
-  error.value = ''; okMsg.value = ''; loading.value = true
-  try {
-    const { data } = await client.post('/attendance', {
-      terminal_code: terminalCode.value.trim(), pin: pin.value, action,
-    })
-    okMsg.value = data.message
-    localStorage.setItem('pos_terminal_code', terminalCode.value.trim())
-    pin.value = ''
-  } catch (e) {
-    error.value = e?.response?.data?.message || 'Absen gagal.'
-    pin.value = ''
-  } finally { loading.value = false }
-}
+const showAbsen = ref(false)
 
 onMounted(() => {
   // kalau terminal sudah pernah diset, langsung fokus ke username
@@ -49,7 +30,7 @@ async function submit() {
     error.value = 'Terminal, username, dan PIN wajib diisi.'
     return
   }
-  error.value = ''; okMsg.value = ''
+  error.value = ''
   loading.value = true
   try {
     await pos.login(terminalCode.value.trim(), username.value.trim(), pin.value)
@@ -115,23 +96,17 @@ async function submit() {
         </div>
 
         <p v-if="error" class="text-sm text-center text-red-600 bg-red-50 rounded-lg px-3 py-2">{{ error }}</p>
-        <p v-if="okMsg" class="text-sm text-center text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2 font-medium">{{ okMsg }}</p>
 
-        <!-- Absensi: cukup Terminal + PIN (tanpa username) -->
+        <!-- Absensi: buka dialog (kamera + PIN) -->
         <div class="pt-3 mt-1 border-t border-slate-100">
-          <p class="text-xs text-center text-slate-400 mb-2">Absen — isi Terminal &amp; PIN, lalu:</p>
-          <div class="grid grid-cols-2 gap-2">
-            <button @click="absen('in')" :disabled="loading"
-              class="py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold active:scale-95 disabled:opacity-60">
-              🕐 Absen Masuk
-            </button>
-            <button @click="absen('out')" :disabled="loading"
-              class="py-2.5 rounded-lg bg-slate-600 hover:bg-slate-700 text-white text-sm font-semibold active:scale-95 disabled:opacity-60">
-              🏠 Absen Pulang
-            </button>
-          </div>
+          <button @click="showAbsen = true"
+            class="w-full py-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold active:scale-95">
+            🕐 Absen Masuk / Pulang
+          </button>
         </div>
       </div>
     </div>
+
+    <AbsenDialog v-if="showAbsen" :terminal-code="terminalCode" @close="showAbsen = false" />
   </div>
 </template>

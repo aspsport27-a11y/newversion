@@ -1012,6 +1012,25 @@ def attendance_list():
     return jsonify(range={"from": d_from, "to": d_to}, count=len(out), attendance=out), 200
 
 
+@admin_bp.get("/attendance/<int:aid>/photo/<which>")
+@jwt_required()
+@VIEW
+def attendance_photo(aid, which):
+    import os
+    from flask import current_app, send_file
+
+    a = db.session.get(Attendance, aid)
+    if not a or which not in ("in", "out"):
+        return _err("Tidak ditemukan", "not_found", 404)
+    fn = a.check_in_photo if which == "in" else a.check_out_photo
+    if not fn:
+        return _err("Tidak ada foto", "not_found", 404)
+    path = os.path.join(current_app.config["UPLOAD_FOLDER"], "attendance", fn)
+    if not os.path.exists(path):
+        return _err("File tidak ada", "not_found", 404)
+    return send_file(path, mimetype="image/jpeg")
+
+
 # ==================================================================
 # REPORTS
 # ==================================================================

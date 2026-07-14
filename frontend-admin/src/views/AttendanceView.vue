@@ -29,6 +29,17 @@ async function load() {
     rows.value = data.attendance
   } finally { loading.value = false }
 }
+// lihat foto absen (endpoint butuh auth → ambil blob lalu tampilkan)
+const photoUrl = ref('')
+const photoTitle = ref('')
+async function openPhoto(row, which) {
+  try {
+    const { data } = await client.get(`/admin/attendance/${row.id}/photo/${which}`, { responseType: 'blob' })
+    photoUrl.value = URL.createObjectURL(data)
+    photoTitle.value = `${row.name} — Absen ${which === 'in' ? 'Masuk' : 'Pulang'} ${which === 'in' ? row.check_in : row.check_out}`
+  } catch { alert('Foto tidak tersedia.') }
+}
+function closePhoto() { if (photoUrl.value) URL.revokeObjectURL(photoUrl.value); photoUrl.value = ''; }
 onMounted(async () => { await loadVenues(); await load() })
 </script>
 
@@ -68,16 +79,29 @@ onMounted(async () => { await loadVenues(); await load() })
               <td class="px-4 py-2 text-slate-500">{{ a.date }}</td>
               <td class="px-4 py-2 text-slate-700 font-medium">{{ a.name }}</td>
               <td class="px-4 py-2 text-slate-500">{{ a.venue_code || '—' }}</td>
-              <td class="px-4 py-2 text-center">
+              <td class="px-4 py-2 text-center whitespace-nowrap">
                 <span :class="a.check_in ? 'text-emerald-700' : 'text-slate-300'">{{ a.check_in || '—' }}</span>
+                <button v-if="a.has_in_photo" @click="openPhoto(a, 'in')" title="Lihat foto" class="ml-1">📷</button>
               </td>
-              <td class="px-4 py-2 text-center">
+              <td class="px-4 py-2 text-center whitespace-nowrap">
                 <span :class="a.check_out ? 'text-slate-700' : 'text-amber-500'">{{ a.check_out || 'belum' }}</span>
+                <button v-if="a.has_out_photo" @click="openPhoto(a, 'out')" title="Lihat foto" class="ml-1">📷</button>
               </td>
               <td class="px-4 py-2 text-right text-slate-600">{{ a.work_hours != null ? a.work_hours + ' jam' : '—' }}</td>
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Foto absen -->
+    <div v-if="photoUrl" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" @click.self="closePhoto">
+      <div class="bg-white rounded-2xl p-4 max-w-sm w-full">
+        <div class="flex justify-between items-center mb-2">
+          <p class="text-sm font-medium text-slate-700">{{ photoTitle }}</p>
+          <button @click="closePhoto" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <img :src="photoUrl" alt="Foto absen" class="w-full rounded-lg" />
       </div>
     </div>
   </div>

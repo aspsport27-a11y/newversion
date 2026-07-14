@@ -7,9 +7,11 @@ import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
 import BookingDialog from '../components/BookingDialog.vue'
 import SettlementDialog from '../components/SettlementDialog.vue'
+import AbsenDialog from '../components/AbsenDialog.vue'
 
 const pos = usePosStore()
 const router = useRouter()
+const showAbsen = ref(false)
 
 const loading = ref(true)
 const openingCash = ref('')
@@ -105,11 +107,15 @@ function logout() {
         </div>
       </div>
       <div class="flex items-center gap-2">
+        <button @click="showAbsen = true"
+          class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">🕐 Absen</button>
         <button v-if="pos.openShift" @click="showClose = true"
           class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">Tutup Shift</button>
         <button @click="logout" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">Keluar</button>
       </div>
     </header>
+
+    <AbsenDialog v-if="showAbsen" :terminal-code="pos.terminal?.code || ''" @close="showAbsen = false" />
 
     <div v-if="loading" class="flex-1 grid place-items-center text-slate-400">Memuat…</div>
 

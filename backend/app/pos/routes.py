@@ -98,6 +98,29 @@ def pos_login():
 # ------------------------------------------------------------------
 # Absensi — tap PIN di terminal, tanpa login penuh (rekap kehadiran)
 # ------------------------------------------------------------------
+def _save_absen_photo(data_url, prefix):
+    """Simpan foto base64 (data URL) ke UPLOAD_FOLDER/attendance. Return filename / None."""
+    import base64
+    import os
+    import uuid
+
+    from flask import current_app
+    try:
+        if "," in data_url:
+            data_url = data_url.split(",", 1)[1]
+        raw = base64.b64decode(data_url)
+        if not raw or len(raw) > 2_000_000:  # guard 2MB
+            return None
+        d = os.path.join(current_app.config["UPLOAD_FOLDER"], "attendance")
+        os.makedirs(d, exist_ok=True)
+        fn = f"{prefix}_{uuid.uuid4().hex[:8]}.jpg"
+        with open(os.path.join(d, fn), "wb") as f:
+            f.write(raw)
+        return fn
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @pos_bp.post("/attendance")
 def pos_attendance():
     from datetime import timedelta, timezone
@@ -155,13 +178,26 @@ def pos_attendance():
             return jsonify(error="already", message=f"{name} sudah absen pulang hari ini "
                            f"({row.check_out.strftime('%H:%M')})"), 409
         row.check_out = now
+
+    # foto bukti (opsional — device tanpa kamera tetap tercatat, ditandai tanpa foto)
+    db.session.flush()  # pastikan row.id ada utk nama file
+    photo = data.get("photo")
+    if photo:
+        fn = _save_absen_photo(photo, f"att{row.id}_{action}")
+        if fn:
+            if action == "in":
+                row.check_in_photo = fn
+            else:
+                row.check_out_photo = fn
     db.session.commit()
 
     label = "Masuk" if action == "in" else "Pulang"
+    has_photo = bool(row.check_in_photo if action == "in" else row.check_out_photo)
     return jsonify(
         ok=True, name=name, action=action,
-        time=now.strftime("%H:%M"),
-        message=f"Absen {label} — {name} ({now.strftime('%H:%M')})",
+        time=now.strftime("%H:%M"), photo=has_photo,
+        message=f"Absen {label} — {name} ({now.strftime('%H:%M')})"
+                + ("" if has_photo else " — tanpa foto"),
     ), 200
 
 

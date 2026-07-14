@@ -375,6 +375,8 @@ class Attendance(db.Model):
     date = db.Column(db.Date, nullable=False, default=datetime.utcnow)
     check_in = db.Column(db.DateTime)
     check_out = db.Column(db.DateTime)
+    check_in_photo = db.Column(db.String(255))
+    check_out_photo = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (db.UniqueConstraint("user_id", "date"),)
@@ -390,4 +392,6 @@ class Attendance(db.Model):
             "date": self.date.isoformat() if self.date else None,
             "check_in": hm(self.check_in), "check_out": hm(self.check_out),
             "work_hours": dur,
+            "has_in_photo": bool(self.check_in_photo),
+            "has_out_photo": bool(self.check_out_photo),
         }
