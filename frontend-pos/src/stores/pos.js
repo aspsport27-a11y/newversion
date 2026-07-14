@@ -19,6 +19,8 @@ export const usePosStore = defineStore('pos', {
   getters: {
     isAuthenticated: (s) => !!s.token,
     cartCount: (s) => s.cart.reduce((n, i) => n + i.quantity, 0),
+    tickets: (s) => s.products.filter((p) => p.is_ticket),
+    fnbProducts: (s) => s.products.filter((p) => !p.is_ticket),
     // total per baris, memperhitungkan promo BELI-X-GRATIS-Y
     lineTotal: () => (i) => {
       const promo = i.promo
@@ -103,6 +105,20 @@ export const usePosStore = defineStore('pos', {
           track_stock: p.track_stock,
         })
     },
+    addTicket(p) {
+      const found = this.cart.find((i) => i.item_type === 'ticket' && i.product_id === p.id)
+      if (found) found.quantity += 1
+      else
+        this.cart.push({
+          uid: 't' + p.id,
+          item_type: 'ticket',
+          product_id: p.id,
+          name: p.name,
+          unit_price: p.effective_price ?? p.price, // harga weekday/weekend hari ini
+          quantity: 1,
+          track_stock: false,
+        })
+    },
     addBooking(b) {
       // b: {facility_id, name, unit_price(rate), quantity(hours), booking_date, start_time, end_time}
       const uid = `b${b.facility_id}-${b.booking_date}-${b.start_time}`
@@ -131,17 +147,19 @@ export const usePosStore = defineStore('pos', {
         discount_amount: Number(this.discount) || 0,
         customer_name: this.customerName || null,
         customer_phone: this.customerPhone || null,
-        items: this.cart.map((i) =>
-          i.item_type === 'booking'
-            ? {
-                item_type: 'booking',
-                facility_id: i.facility_id,
-                booking_date: i.booking_date,
-                start_time: i.start_time,
-                end_time: i.end_time,
-              }
-            : { item_type: 'product', product_id: i.product_id, quantity: i.quantity },
-        ),
+        items: this.cart.map((i) => {
+          if (i.item_type === 'booking')
+            return {
+              item_type: 'booking',
+              facility_id: i.facility_id,
+              booking_date: i.booking_date,
+              start_time: i.start_time,
+              end_time: i.end_time,
+            }
+          if (i.item_type === 'ticket')
+            return { item_type: 'ticket', product_id: i.product_id, quantity: i.quantity }
+          return { item_type: 'product', product_id: i.product_id, quantity: i.quantity }
+        }),
       }
       const { data: created } = await client.post('/orders', payload)
       const { data: paid } = await client.post(`/orders/${created.order.id}/pay`, {

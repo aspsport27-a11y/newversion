@@ -195,13 +195,21 @@ def pos_me():
 def pos_products():
     terminal = _current_terminal()
     from .promos import product_public
+    from .services import ticket_unit_price
 
     products = (
         Product.query.filter_by(venue_id=terminal.venue_id, is_active=True)
         .order_by(Product.name)
         .all()
     )
-    return jsonify(count=len(products), products=[product_public(p) for p in products]), 200
+    out = []
+    for p in products:
+        d = product_public(p)
+        if p.is_ticket:
+            # harga tiket berlaku hari ini (weekday/weekend/libur otomatis)
+            d["effective_price"] = ticket_unit_price(p)
+        out.append(d)
+    return jsonify(count=len(out), products=out), 200
 
 
 # ------------------------------------------------------------------

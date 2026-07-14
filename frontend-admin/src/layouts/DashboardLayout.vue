@@ -34,7 +34,7 @@ const allNav = [
   { name: 'treasury', label: 'Kas & Bank', icon: '🏦', roles: ADMINS },
   { name: 'products', label: 'Produk', icon: '📦', roles: ADMINS },
   { name: 'promos', label: 'Promo', icon: '🎉', roles: ADMINS },
-  { name: 'facilities', label: 'Lapangan', icon: '⚽', roles: ADMINS },
+  { name: 'facilities', label: 'Lapangan & Tiket', icon: '⚽', roles: ADMINS },
   { name: 'bookings', label: 'Booking', icon: '📅', roles: ADMINS },
   { name: 'reports', label: 'Laporan', icon: '📈', roles: ADMINS },
   { name: 'financial', label: 'Laporan Bisnis', icon: '💹', roles: ['admin', 'head_office', 'manager_unit'] },

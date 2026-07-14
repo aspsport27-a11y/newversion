@@ -10,6 +10,7 @@ from .models import (
     CashMovement,
     Facility,
     FacilityBooking,
+    Holiday,
     Order,
     OrderItem,
     Payment,
@@ -17,6 +18,21 @@ from .models import (
     Shift,
     StockMovement,
 )
+
+
+def is_weekend(d) -> bool:
+    """True bila tanggal = Sabtu/Minggu ATAU hari libur nasional (tabel holidays)."""
+    if d.weekday() >= 5:  # 5=Sabtu, 6=Minggu
+        return True
+    return db.session.query(Holiday.id).filter_by(date=d).first() is not None
+
+
+def ticket_unit_price(product, on_date=None) -> float:
+    """Harga tiket berlaku: weekend_price bila weekend/libur & terisi, else price (weekday)."""
+    on_date = on_date or date.today()
+    if is_weekend(on_date) and product.weekend_price is not None:
+        return float(product.weekend_price)
+    return float(product.price or 0)
 
 
 def _parse_time(s):
@@ -125,6 +141,21 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
             oi = OrderItem(
                 item_type="product", product_id=product.id, name_snapshot=pname[:120],
                 unit_price=unit, quantity=qty, line_total=line_total,
+            )
+
+        elif item_type == "ticket":
+            qty = _D(row.get("quantity", 1))
+            if qty <= 0:
+                raise PosError("Quantity harus > 0", "bad_quantity")
+            product = db.session.get(Product, row.get("product_id"))
+            if product is None or not product.is_active or not product.is_ticket:
+                raise PosError("Tiket tidak ditemukan/nonaktif", "ticket_not_found", 404)
+            if product.venue_id != shift.venue_id:
+                raise PosError("Tiket bukan milik venue ini", "ticket_wrong_venue")
+            unit = _D(ticket_unit_price(product))  # harga weekday/weekend otomatis
+            oi = OrderItem(
+                item_type="ticket", product_id=product.id, name_snapshot=product.name[:120],
+                unit_price=unit, quantity=qty, line_total=unit * qty,
             )
 
         elif item_type == "booking":

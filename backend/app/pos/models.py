@@ -50,6 +50,8 @@ class Product(db.Model):
     stock_qty = db.Column(db.Integer, default=0)
     min_stock = db.Column(db.Integer, default=0)  # ambang reorder
     supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id", ondelete="SET NULL"))
+    is_ticket = db.Column(db.Boolean, nullable=False, default=False)  # tiket masuk (waterpark)
+    weekend_price = db.Column(db.Numeric(15, 2))  # harga weekend/libur (khusus tiket)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
@@ -67,8 +69,23 @@ class Product(db.Model):
             "stock_qty": self.stock_qty,
             "min_stock": self.min_stock or 0,
             "supplier_id": self.supplier_id,
+            "is_ticket": self.is_ticket,
+            "weekend_price": float(self.weekend_price) if self.weekend_price is not None else None,
             "is_active": self.is_active,
         }
+
+
+class Holiday(db.Model):
+    """Hari libur nasional — tanggal ini dihitung sebagai 'weekend' utk harga tiket."""
+    __tablename__ = "holidays"
+
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, unique=True, nullable=False)
+    name = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {"id": self.id, "date": self.date.isoformat() if self.date else None, "name": self.name}
 
 
 class Promo(db.Model):

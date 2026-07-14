@@ -22,6 +22,7 @@ from ..pos.models import (
     Attendance,
     Facility,
     FacilityBooking,
+    Holiday,
     Order,
     OrderItem,
     Payment,
@@ -278,6 +279,54 @@ def permissions_set():
 
 
 # ==================================================================
+# HARI LIBUR (holidays) — tanggal dihitung 'weekend' utk harga tiket
+# ==================================================================
+@admin_bp.get("/holidays")
+@jwt_required()
+@VIEW
+def holidays_list():
+    year = request.args.get("year", type=int)
+    q = Holiday.query
+    if year:
+        from datetime import date as _d
+        q = q.filter(Holiday.date >= _d(year, 1, 1), Holiday.date <= _d(year, 12, 31))
+    items = q.order_by(Holiday.date).all()
+    return jsonify(holidays=[h.to_dict() for h in items]), 200
+
+
+@admin_bp.post("/holidays")
+@jwt_required()
+@MANAGE
+def holidays_create():
+    d = request.get_json(silent=True) or {}
+    ds = (d.get("date") or "").strip()
+    if not ds:
+        return _err("Tanggal wajib diisi")
+    try:
+        dt = date.fromisoformat(ds)
+    except ValueError:
+        return _err("Format tanggal salah (YYYY-MM-DD)")
+    if Holiday.query.filter_by(date=dt).first():
+        return _err("Tanggal sudah ada", "duplicate", 409)
+    h = Holiday(date=dt, name=(d.get("name") or "").strip() or None)
+    db.session.add(h)
+    db.session.commit()
+    return jsonify(holiday=h.to_dict()), 201
+
+
+@admin_bp.delete("/holidays/<int:hid>")
+@jwt_required()
+@MANAGE
+def holidays_delete(hid):
+    h = db.session.get(Holiday, hid)
+    if not h:
+        return _err("Hari libur tidak ditemukan", "not_found", 404)
+    db.session.delete(h)
+    db.session.commit()
+    return jsonify(message="Dihapus"), 200
+
+
+# ==================================================================
 # PRODUCTS
 # ==================================================================
 @admin_bp.get("/products")
@@ -288,6 +337,12 @@ def products_list():
     vid = request.args.get("venue_id", type=int)
     if vid:
         q = q.filter_by(venue_id=vid)
+    # filter jenis: ?ticket=1 (hanya tiket) / ?ticket=0 (hanya F&B) / tanpa = semua
+    tk = request.args.get("ticket")
+    if tk == "1":
+        q = q.filter(Product.is_ticket.is_(True))
+    elif tk == "0":
+        q = q.filter(Product.is_ticket.is_(False))
     from ..pos.promos import product_public
 
     items = q.order_by(Product.venue_id, Product.name).all()
@@ -335,6 +390,8 @@ def products_create():
         track_stock=bool(d.get("track_stock", True)), stock_qty=int(d.get("stock_qty", 0) or 0),
         min_stock=int(d.get("min_stock", 0) or 0),
         supplier_id=d.get("supplier_id") or None,
+        is_ticket=bool(d.get("is_ticket", False)),
+        weekend_price=_promo(d.get("weekend_price")),
         is_active=bool(d.get("is_active", True)),
     )
     db.session.add(p)
@@ -366,6 +423,10 @@ def products_update(pid):
         p.min_stock = int(d["min_stock"] or 0)
     if "supplier_id" in d:
         p.supplier_id = d["supplier_id"] or None
+    if "is_ticket" in d:
+        p.is_ticket = bool(d["is_ticket"])
+    if "weekend_price" in d:
+        p.weekend_price = _promo(d["weekend_price"])
     if "is_active" in d:
         p.is_active = bool(d["is_active"])
     p.updated_at = datetime.utcnow()

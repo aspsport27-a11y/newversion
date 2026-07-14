@@ -132,7 +132,7 @@ function logout() {
     <div v-else class="flex-1 flex flex-col lg:flex-row min-h-0">
       <!-- Produk -->
       <div class="flex-1 overflow-auto p-3">
-        <!-- Mode booking lapangan (venue punya lapangan) -->
+        <!-- Booking lapangan (venue punya lapangan) -->
         <div v-if="pos.bookingEnabled" class="grid grid-cols-2 gap-2 mb-3">
           <button @click="showBooking = true"
             class="py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
@@ -143,16 +143,26 @@ function logout() {
             💰 Pelunasan
           </button>
         </div>
-        <!-- Mode tiketing (venue tanpa lapangan, mis. waterpark) -->
-        <div v-else class="mb-3 py-2.5 rounded-xl bg-brand-50 text-brand-700 font-medium border border-brand-100 text-center">
-          🎟️ Penjualan Tiket — pilih tiket di bawah
+
+        <!-- Tiket (klik = masuk keranjang, harga hari ini otomatis) -->
+        <div v-if="pos.tickets.length" class="mb-4">
+          <p class="text-xs font-semibold text-slate-400 mb-1.5">🎟️ TIKET MASUK</p>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <button v-for="t in pos.tickets" :key="t.id" @click="pos.addTicket(t)"
+              class="py-3 px-3 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-left active:scale-95 transition">
+              <p class="font-semibold text-sm leading-tight">{{ t.name }}</p>
+              <p class="font-bold mt-0.5">{{ rupiah(t.effective_price ?? t.price) }}</p>
+            </button>
+          </div>
         </div>
+
         <p v-if="pos.products.length === 0" class="text-center text-slate-400 mt-6 text-sm">
-          {{ pos.bookingEnabled ? 'Belum ada produk untuk venue ini.' : 'Belum ada tiket/produk. Tambahkan di admin (menu Produk).' }}
+          Belum ada tiket/produk untuk venue ini. Tambahkan di admin.
         </p>
+        <p v-if="pos.fnbProducts.length" class="text-xs font-semibold text-slate-400 mb-1.5">🍔 F&amp;B</p>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           <button
-            v-for="p in pos.products"
+            v-for="p in pos.fnbProducts"
             :key="p.id"
             @click="pos.addProduct(p)"
             :disabled="p.track_stock && p.stock_qty <= 0"
@@ -182,7 +192,7 @@ function logout() {
           <div v-for="it in pos.cart" :key="it.uid" class="flex items-center gap-2">
             <div class="flex-1 min-w-0">
               <p class="text-sm text-slate-700 truncate">
-                <span v-if="it.item_type === 'booking'" class="text-brand-600">🏟️ </span>{{ it.name }}
+                <span v-if="it.item_type === 'booking'" class="text-brand-600">🏟️ </span><span v-else-if="it.item_type === 'ticket'" class="text-brand-600">🎟️ </span>{{ it.name }}
               </p>
               <p class="text-xs text-slate-400">
                 <template v-if="it.item_type === 'booking'">{{ it.quantity }} jam × {{ rupiah(it.unit_price) }}</template>
@@ -190,7 +200,7 @@ function logout() {
               </p>
               <p v-if="it.promo" class="text-[10px] text-amber-600">🎉 {{ it.promo.label }}</p>
             </div>
-            <div v-if="it.item_type === 'product'" class="flex items-center gap-1.5">
+            <div v-if="it.item_type === 'product' || it.item_type === 'ticket'" class="flex items-center gap-1.5">
               <button @click="pos.decQty(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-600 font-bold">−</button>
               <span class="w-6 text-center text-sm">{{ it.quantity }}</span>
               <button @click="pos.incQty(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-600 font-bold">+</button>

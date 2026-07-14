@@ -28,7 +28,7 @@ async function loadProducts() {
   if (!venueId.value) return
   loading.value = true
   try {
-    const { data } = await client.get('/admin/products', { params: { venue_id: venueId.value } })
+    const { data } = await client.get('/admin/products', { params: { venue_id: venueId.value, ticket: 0 } })
     products.value = data.products
   } finally {
     loading.value = false
@@ -76,7 +76,7 @@ async function save() {
     <div class="flex items-center justify-between flex-wrap gap-3 mb-6">
       <div>
         <h1 class="text-2xl font-bold text-slate-800">Produk</h1>
-        <p class="text-slate-500 mt-1">Kelola produk F&B, tiket, sewa alat per venue.</p>
+        <p class="text-slate-500 mt-1">Kelola produk F&amp;B per venue. (Tiket dikelola di menu Lapangan &amp; Tiket.)</p>
       </div>
       <div class="flex gap-2">
         <select v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
