@@ -9,7 +9,8 @@ const sidebarOpen = ref(false)
 
 onMounted(async () => {
   try {
-    if (!auth.user) await auth.fetchMe()
+    // refresh juga bila permissions belum ada (sesi lama sebelum fitur izin)
+    if (!auth.user || !auth.permissions.length) await auth.fetchMe()
   } catch (_) {
     /* interceptor 401 akan redirect */
   }

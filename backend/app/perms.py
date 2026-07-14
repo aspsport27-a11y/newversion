@@ -69,6 +69,15 @@ def has_perm(role: str, code: str) -> bool:
     )
 
 
+def perms_for_role(role: str) -> list:
+    """Daftar izin (codes) yang dimiliki role — utk dikirim ke frontend. admin=semua."""
+    if role == "admin":
+        return sorted(PERMISSION_CODES)
+    return sorted(
+        rp.permission_code for rp in RolePermission.query.filter_by(role=role).all()
+    )
+
+
 def grants_matrix() -> dict:
     """{role: [codes]} utk semua role editable — dipakai UI."""
     out = {r: [] for r, _ in EDITABLE_ROLES}

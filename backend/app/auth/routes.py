@@ -48,10 +48,12 @@ def login():
     db.session.commit()
 
     access, refresh = _token_for(user)
+    from ..perms import perms_for_role
     return jsonify(
         access_token=access,
         refresh_token=refresh,
         user=user.to_dict(),
+        permissions=perms_for_role(user.role),
     ), 200
 
 
@@ -74,7 +76,8 @@ def me():
     user = db.session.get(User, int(get_jwt_identity()))
     if user is None:
         return jsonify(error="not_found", message="User tidak ditemukan"), 404
-    return jsonify(user=user.to_dict()), 200
+    from ..perms import perms_for_role
+    return jsonify(user=user.to_dict(), permissions=perms_for_role(user.role)), 200
 
 
 @auth_bp.post("/logout")

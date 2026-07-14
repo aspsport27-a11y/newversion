@@ -7,6 +7,7 @@ const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 const isApprover = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
+const canSupplier = computed(() => auth.hasPerm('proc.supplier'))  // kelola supplier
 
 const tab = ref('po')
 const venues = ref([])
@@ -137,7 +138,7 @@ watch(tab, reloadTab)
     <div class="flex gap-1 mb-4 border-b">
       <button @click="tab = 'po'" :class="tab === 'po' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Purchase Order</button>
       <button @click="tab = 'reorder'" :class="tab === 'reorder' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Stok Menipis</button>
-      <button v-if="isApprover" @click="tab = 'supplier'" :class="tab === 'supplier' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Supplier</button>
+      <button @click="tab = 'supplier'" :class="tab === 'supplier' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Supplier</button>
     </div>
 
     <!-- ===== PO ===== -->
@@ -188,7 +189,8 @@ watch(tab, reloadTab)
 
     <!-- ===== Supplier ===== -->
     <div v-else>
-      <div class="flex justify-end mb-3"><button @click="openSupCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Supplier</button></div>
+      <div v-if="canSupplier" class="flex justify-end mb-3"><button @click="openSupCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Supplier</button></div>
+      <p v-else class="text-xs text-slate-400 mb-3">Hanya lihat — tidak punya izin kelola supplier.</p>
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
@@ -201,7 +203,7 @@ watch(tab, reloadTab)
               <td class="px-4 py-3 font-medium text-slate-700">{{ s.name }}</td>
               <td class="px-4 py-3 text-slate-600">{{ s.contact_person || '—' }} {{ s.phone ? '· ' + s.phone : '' }}</td>
               <td class="px-4 py-3 text-slate-500">{{ s.payment_terms || '—' }}</td>
-              <td class="px-4 py-3 text-right whitespace-nowrap"><button @click="openSupEdit(s)" class="text-brand-600 text-sm hover:underline">Edit</button><button @click="removeSup(s)" class="text-red-500 text-sm hover:underline ml-3">Hapus</button></td>
+              <td class="px-4 py-3 text-right whitespace-nowrap"><template v-if="canSupplier"><button @click="openSupEdit(s)" class="text-brand-600 text-sm hover:underline">Edit</button><button @click="removeSup(s)" class="text-red-500 text-sm hover:underline ml-3">Hapus</button></template><span v-else class="text-slate-300 text-xs">—</span></td>
             </tr>
           </tbody>
         </table>
