@@ -17,6 +17,10 @@ const suppliers = ref([])
 const products = ref([])
 const toast = ref('')
 
+const searchPo = ref('')
+const searchReorder = ref('')
+const searchSup = ref('')
+
 function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 
@@ -53,6 +57,28 @@ async function onSupFile(e) {
 }
 const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], received: ['Diterima', 'bg-violet-100 text-violet-700'], paid: ['Lunas', 'bg-emerald-100 text-emerald-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'] }
 function supName(id) { const s = suppliers.value.find((x) => x.id === id); return s ? s.name : '—' }
+
+const filteredPos = computed(() => {
+  const q = searchPo.value.trim().toLowerCase()
+  if (!q) return pos.value
+  return pos.value.filter((p) =>
+    p.code.toLowerCase().includes(q) || (p.supplier_name || '').toLowerCase().includes(q)
+  )
+})
+const filteredReorder = computed(() => {
+  const q = searchReorder.value.trim().toLowerCase()
+  if (!q) return reorder.value
+  return reorder.value.filter((p) => p.name.toLowerCase().includes(q))
+})
+const filteredSuppliers = computed(() => {
+  const q = searchSup.value.trim().toLowerCase()
+  if (!q) return suppliers.value
+  return suppliers.value.filter((s) =>
+    s.name.toLowerCase().includes(q) ||
+    s.supplier_code.toLowerCase().includes(q) ||
+    (s.contact_person || '').toLowerCase().includes(q)
+  )
+})
 
 const accounts = ref([])
 const sourceAccount = ref('')
@@ -203,7 +229,7 @@ async function loadReorder() {
 
 function reloadTab() { tab.value === 'po' ? loadPo() : tab.value === 'reorder' ? loadReorder() : null }
 onMounted(async () => { await loadBase(); await loadPo() })
-watch([venueId], reloadTab)
+watch([venueId], () => { searchPo.value = ''; searchReorder.value = ''; reloadTab() })
 watch(tab, reloadTab)
 </script>
 
@@ -228,7 +254,11 @@ watch(tab, reloadTab)
 
     <!-- ===== PO ===== -->
     <div v-if="tab === 'po'">
-      <div class="flex justify-end mb-3"><button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Buat PO</button></div>
+      <div class="flex justify-between items-center gap-2 mb-3 flex-wrap">
+        <input v-model="searchPo" type="text" placeholder="🔍 Cari kode PO atau supplier…"
+          class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        <button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Buat PO</button>
+      </div>
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -241,7 +271,8 @@ watch(tab, reloadTab)
             <tbody>
               <tr v-if="loadingPo"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
               <tr v-else-if="!pos.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada PO.</td></tr>
-              <tr v-for="p in pos" :key="p.id" @click="openDetail(p)" class="border-t hover:bg-slate-50 cursor-pointer">
+              <tr v-else-if="!filteredPos.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Tidak ada PO yang cocok dengan pencarian.</td></tr>
+              <tr v-for="p in filteredPos" :key="p.id" @click="openDetail(p)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ p.code }}</td>
                 <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===p.venue_id)?.code || '—' }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ p.supplier_name || '—' }}</td>
@@ -260,6 +291,8 @@ watch(tab, reloadTab)
 
     <!-- ===== Reorder ===== -->
     <div v-else-if="tab === 'reorder'">
+      <input v-model="searchReorder" type="text" placeholder="🔍 Cari nama produk…"
+        class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3" />
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
@@ -269,7 +302,8 @@ watch(tab, reloadTab)
           </tr></thead>
           <tbody>
             <tr v-if="!reorder.length"><td colspan="5" class="px-4 py-8 text-center text-emerald-600">Semua stok aman 🎉</td></tr>
-            <tr v-for="p in reorder" :key="p.id" class="border-t">
+            <tr v-else-if="!filteredReorder.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Tidak ada produk yang cocok dengan pencarian.</td></tr>
+            <tr v-for="p in filteredReorder" :key="p.id" class="border-t">
               <td class="px-4 py-3 font-medium text-slate-700">{{ p.name }}</td>
               <td v-if="!isManager" class="px-4 py-3 text-slate-500">{{ venues.find(v=>v.id===p.venue_id)?.code || '—' }}</td>
               <td class="px-4 py-3 text-right text-red-600 font-medium">{{ p.stock_qty }}</td>
@@ -283,13 +317,17 @@ watch(tab, reloadTab)
 
     <!-- ===== Supplier ===== -->
     <div v-else>
-      <div v-if="canSupplier" class="flex justify-end items-center gap-2 mb-3">
-        <button @click="downloadSupplierTemplate" class="text-brand-600 hover:underline text-sm px-2 py-2">📥 Unduh Template CSV</button>
-        <input ref="supFileInput" type="file" accept=".csv" class="hidden" @change="onSupFile" />
-        <button @click="triggerSupImport" :disabled="importingSup" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">{{ importingSup ? 'Mengimpor…' : '📤 Upload CSV' }}</button>
-        <button @click="openSupCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Supplier</button>
+      <div class="flex justify-between items-center gap-2 mb-3 flex-wrap">
+        <input v-model="searchSup" type="text" placeholder="🔍 Cari nama, kode, atau kontak…"
+          class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        <div v-if="canSupplier" class="flex items-center gap-2">
+          <button @click="downloadSupplierTemplate" class="text-brand-600 hover:underline text-sm px-2 py-2">📥 Unduh Template CSV</button>
+          <input ref="supFileInput" type="file" accept=".csv" class="hidden" @change="onSupFile" />
+          <button @click="triggerSupImport" :disabled="importingSup" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">{{ importingSup ? 'Mengimpor…' : '📤 Upload CSV' }}</button>
+          <button @click="openSupCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Supplier</button>
+        </div>
+        <p v-else class="text-xs text-slate-400">Hanya lihat — tidak punya izin kelola supplier.</p>
       </div>
-      <p v-else class="text-xs text-slate-400 mb-3">Hanya lihat — tidak punya izin kelola supplier.</p>
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
@@ -297,7 +335,8 @@ watch(tab, reloadTab)
           </tr></thead>
           <tbody>
             <tr v-if="!suppliers.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Belum ada supplier.</td></tr>
-            <tr v-for="s in suppliers" :key="s.id" class="border-t hover:bg-slate-50">
+            <tr v-else-if="!filteredSuppliers.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Tidak ada supplier yang cocok dengan pencarian.</td></tr>
+            <tr v-for="s in filteredSuppliers" :key="s.id" class="border-t hover:bg-slate-50">
               <td class="px-4 py-3 font-mono text-slate-500">{{ s.supplier_code }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ s.name }}</td>
               <td class="px-4 py-3 text-slate-600">{{ s.contact_person || '—' }} {{ s.phone ? '· ' + s.phone : '' }}</td>
