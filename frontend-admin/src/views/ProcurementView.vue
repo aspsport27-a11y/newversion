@@ -199,7 +199,7 @@ watch(tab, reloadTab)
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-            <th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Nama</th><th class="px-4 py-3 font-medium">Kontak</th><th class="px-4 py-3 font-medium">Termin</th><th class="px-4 py-3"></th>
+            <th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Nama</th><th class="px-4 py-3 font-medium">Kontak</th><th class="px-4 py-3 font-medium">No. Rekening</th><th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
             <tr v-if="!suppliers.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Belum ada supplier.</td></tr>
@@ -207,7 +207,7 @@ watch(tab, reloadTab)
               <td class="px-4 py-3 font-mono text-slate-500">{{ s.supplier_code }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ s.name }}</td>
               <td class="px-4 py-3 text-slate-600">{{ s.contact_person || '—' }} {{ s.phone ? '· ' + s.phone : '' }}</td>
-              <td class="px-4 py-3 text-slate-500">{{ s.payment_terms || '—' }}</td>
+              <td class="px-4 py-3 text-slate-500">{{ s.bank_account || '—' }}</td>
               <td class="px-4 py-3 text-right whitespace-nowrap"><template v-if="canSupplier"><button @click="openSupEdit(s)" class="text-brand-600 text-sm hover:underline">Edit</button><button @click="removeSup(s)" class="text-red-500 text-sm hover:underline ml-3">Hapus</button></template><span v-else class="text-slate-300 text-xs">—</span></td>
             </tr>
           </tbody>
