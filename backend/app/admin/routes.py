@@ -499,6 +499,40 @@ def products_delete(pid):
     return jsonify(message="Produk dihapus"), 200
 
 
+@admin_bp.post("/products/bulk-min-stock")
+@jwt_required()
+@PRODUCT_MANAGE
+def products_bulk_min_stock():
+    """Isi ambang stok minimum (min_stock) sekaligus utk banyak produk —
+    percepat setup awal 'Stok Menipis'. Default hanya isi yang belum diatur
+    (min_stock 0/kosong), supaya nilai yg sudah dikustom user tak tertimpa."""
+    d = request.get_json(silent=True) or {}
+    try:
+        min_stock = int(d.get("min_stock"))
+    except (TypeError, ValueError):
+        return _err("min_stock wajib berupa angka")
+    if min_stock <= 0:
+        return _err("min_stock harus lebih dari 0")
+    overwrite = bool(d.get("overwrite", False))
+    venue_id = d.get("venue_id")
+
+    vids = _scope_vids(_current_user())
+    q = Product.query.filter(Product.is_active.is_(True), Product.track_stock.is_(True))
+    if venue_id:
+        venue_id = int(venue_id)
+        if vids is not None and venue_id not in vids:
+            return _err("Venue di luar cakupan Anda", "forbidden", 403)
+        q = q.filter(Product.venue_id == venue_id)
+    elif vids is not None:
+        q = q.filter(Product.venue_id.in_(vids)) if vids else q.filter(db.false())
+    if not overwrite:
+        q = q.filter(db.or_(Product.min_stock.is_(None), Product.min_stock == 0))
+
+    updated = q.update({Product.min_stock: min_stock}, synchronize_session=False)
+    db.session.commit()
+    return jsonify(updated=updated), 200
+
+
 @admin_bp.post("/products/import")
 @jwt_required()
 @PRODUCT_MANAGE

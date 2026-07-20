@@ -135,6 +135,30 @@ async function act(action, extra = {}) {
 }
 function doReject() { const reason = prompt('Alasan penolakan:'); if (reason !== null) act('reject', { reason }) }
 async function viewAtt(a) { const res = await client.get(`/procurement/attachments/${a.id}`, { responseType: 'blob' }); window.open(URL.createObjectURL(res.data), '_blank') }
+async function removePo(p, ev) {
+  ev.stopPropagation()
+  if (!window.confirm(`Hapus PO ${p.code}?`)) return
+  try { await client.delete(`/procurement/pos/${p.id}`); await loadPo(); flash('PO dihapus') }
+  catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
+}
+const canDeletePo = (p) => ['submitted', 'approved', 'rejected'].includes(p.status)
+
+// -------- Upload Bukti Bayar (attachment tambahan setelah PO dibuat) --------
+const payProofInput = ref(null)
+const uploadingProof = ref(false)
+function triggerPayProof() { payProofInput.value?.click() }
+async function onPayProof(e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file || !detail.value) return
+  uploadingProof.value = true
+  try {
+    const fd = new FormData(); fd.append('file', file)
+    await client.post(`/procurement/pos/${detail.value.id}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    const { data } = await client.get(`/procurement/pos/${detail.value.id}`); detail.value = data.po
+    flash('Bukti diunggah')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal mengunggah.') } finally { uploadingProof.value = false }
+}
 
 // -------- Supplier --------
 const showSup = ref(false)
@@ -205,7 +229,10 @@ watch(tab, reloadTab)
                 <td class="px-4 py-3 text-slate-600">{{ p.supplier_name || '—' }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(p.total_amount) }}</td>
                 <td class="px-4 py-3 text-center"><span :class="statusMap[p.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[p.status]?.[0] }}</span></td>
-                <td class="px-4 py-3 text-right text-brand-600 text-sm">Detail</td>
+                <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
+                  <span class="text-brand-600">Detail</span>
+                  <button v-if="canDeletePo(p)" @click="removePo(p, $event)" class="text-red-500 hover:underline ml-3">Hapus</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -329,7 +356,11 @@ watch(tab, reloadTab)
         </div>
         <div v-if="detail.rejection_reason" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">Ditolak: {{ detail.rejection_reason }}</div>
         <div class="mb-3">
-          <p class="text-xs font-medium text-slate-500 mb-1">Bukti</p>
+          <div class="flex items-center justify-between mb-1">
+            <p class="text-xs font-medium text-slate-500">Bukti / Nota / Bukti Bayar</p>
+            <input ref="payProofInput" type="file" accept="image/*,.pdf" class="hidden" @change="onPayProof" />
+            <button @click="triggerPayProof" :disabled="uploadingProof" class="text-xs text-brand-600 hover:underline disabled:opacity-50">{{ uploadingProof ? 'Mengunggah…' : '+ Upload Bukti' }}</button>
+          </div>
           <div v-if="!detail.attachments.length" class="text-sm text-slate-400">Tidak ada lampiran.</div>
           <div v-else class="flex flex-wrap gap-2"><button v-for="a in detail.attachments" :key="a.id" @click="viewAtt(a)" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded px-2 py-1">📎 {{ a.filename }}</button></div>
         </div>

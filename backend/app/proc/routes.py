@@ -420,6 +420,32 @@ def po_pay(pid):
     return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
 
 
+@proc_bp.delete("/pos/<int:pid>")
+@jwt_required()
+@CREATE
+def po_delete(pid):
+    """Hapus PO — hanya sebelum barang diterima/dibayar (blm ada efek stok/kas).
+    PO yg sudah 'received'/'paid' TIDAK bisa dihapus (akan merusak riwayat stok/kas)."""
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    err = _check_venue(po)
+    if err:
+        return err
+    if po.status not in ("submitted", "approved", "rejected"):
+        return _err(
+            f"PO sudah {po.status} — tidak bisa dihapus (sudah ada efek stok/kas).",
+            "bad_status", 409,
+        )
+    for att in po.attachments:
+        path = os.path.join(_upload_dir(), att.stored_name)
+        if os.path.exists(path):
+            os.remove(path)
+    db.session.delete(po)  # items & attachments (DB rows) ikut terhapus, ondelete=CASCADE
+    db.session.commit()
+    return jsonify(message="PO dihapus"), 200
+
+
 # ------------------------------------------------------------------
 # Lampiran (nota/invoice)
 # ------------------------------------------------------------------

@@ -18,6 +18,26 @@ const form = ref({})
 const error = ref('')
 const saving = ref(false)
 
+// ---- Isi Ambang Stok (min_stock) massal ----
+const showBulkMin = ref(false)
+const bulkForm = ref({ min_stock: 10, allVenues: false, overwrite: false })
+const bulkBusy = ref(false)
+function openBulkMin() { bulkForm.value = { min_stock: 10, allVenues: false, overwrite: false }; showBulkMin.value = true }
+async function applyBulkMin() {
+  if (!bulkForm.value.min_stock || bulkForm.value.min_stock <= 0) { alert('Isi angka lebih dari 0'); return }
+  bulkBusy.value = true
+  try {
+    const { data } = await client.post('/admin/products/bulk-min-stock', {
+      venue_id: bulkForm.value.allVenues ? null : venueId.value,
+      min_stock: bulkForm.value.min_stock,
+      overwrite: bulkForm.value.overwrite,
+    })
+    showBulkMin.value = false
+    await loadProducts()
+    alert(`${data.updated} produk diperbarui.`)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { bulkBusy.value = false }
+}
+
 function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
 }
@@ -131,6 +151,7 @@ async function save() {
         <button @click="downloadProductTemplate" class="text-brand-600 hover:underline text-sm px-2 py-2">📥 Unduh Template CSV</button>
         <input ref="fileInput" type="file" accept=".csv" class="hidden" @change="onFile" />
         <button @click="triggerImport" :disabled="importing" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">{{ importing ? 'Mengimpor…' : '📤 Upload CSV' }}</button>
+        <button @click="openBulkMin" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">⚙️ Isi Ambang Stok</button>
         <button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Produk</button>
       </div>
     </div>
@@ -224,6 +245,33 @@ async function save() {
           <p v-if="error" class="text-sm text-red-600">{{ error }}</p>
           <button @click="save" :disabled="saving" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">
             {{ saving ? 'Menyimpan…' : 'Simpan' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal Isi Ambang Stok Massal -->
+    <div v-if="showBulkMin" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="showBulkMin = false">
+      <div class="bg-white w-full max-w-sm rounded-2xl p-5">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-bold text-slate-800">Isi Ambang Stok Otomatis</h3>
+          <button @click="showBulkMin = false" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <p class="text-xs text-slate-400 mb-3">Supaya produk muncul di "Stok Menipis" (Procurement) sebelum benar-benar habis. Nilai ini jadi ambang minimum — di bawahnya dianggap perlu di-reorder.</p>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Ambang stok minimum</label>
+            <input v-model.number="bulkForm.min_stock" type="number" min="1" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <label class="flex items-center gap-2 text-sm text-slate-600">
+            <input v-model="bulkForm.allVenues" type="checkbox" /> Terapkan ke semua venue (bukan cuma {{ venues.find(v=>v.id===venueId)?.code }})
+          </label>
+          <label class="flex items-center gap-2 text-sm text-slate-600">
+            <input v-model="bulkForm.overwrite" type="checkbox" /> Timpa nilai yang sudah diatur sebelumnya
+          </label>
+          <p class="text-xs text-slate-400">{{ bulkForm.overwrite ? 'Semua produk aktif (lacak stok) akan diubah.' : 'Hanya produk yang ambang stoknya masih 0/belum diatur.' }}</p>
+          <button @click="applyBulkMin" :disabled="bulkBusy" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">
+            {{ bulkBusy ? 'Menerapkan…' : 'Terapkan' }}
           </button>
         </div>
       </div>
