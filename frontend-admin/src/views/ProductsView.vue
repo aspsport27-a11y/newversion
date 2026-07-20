@@ -11,6 +11,16 @@ const venueId = ref(null)
 const products = ref([])
 const suppliers = ref([])
 const loading = ref(false)
+const search = ref('')
+const filteredProducts = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return products.value
+  return products.value.filter((p) =>
+    p.name.toLowerCase().includes(q) ||
+    p.sku.toLowerCase().includes(q) ||
+    supName(p.supplier_id).toLowerCase().includes(q)
+  )
+})
 function supName(id) { const s = suppliers.value.find((x) => x.id === id); return s ? s.name : '—' }
 const showForm = ref(false)
 const editing = ref(null)
@@ -95,7 +105,7 @@ onMounted(async () => {
   await loadVenues()
   await loadProducts()
 })
-watch(venueId, loadProducts)
+watch(venueId, () => { search.value = ''; loadProducts() })
 
 function openCreate() {
   editing.value = null
@@ -156,6 +166,11 @@ async function save() {
       </div>
     </div>
 
+    <div class="mb-3">
+      <input v-model="search" type="text" placeholder="🔍 Cari nama, SKU, atau supplier…"
+        class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+    </div>
+
     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -173,7 +188,8 @@ async function save() {
           <tbody>
             <tr v-if="loading"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
             <tr v-else-if="!products.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada produk.</td></tr>
-            <tr v-for="p in products" :key="p.id" class="border-t hover:bg-slate-50">
+            <tr v-else-if="!filteredProducts.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Tidak ada produk yang cocok dengan pencarian.</td></tr>
+            <tr v-for="p in filteredProducts" :key="p.id" class="border-t hover:bg-slate-50">
               <td class="px-4 py-3 font-mono text-slate-500">{{ p.sku }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ p.name }}</td>
               <td class="px-4 py-3 text-slate-500">{{ supName(p.supplier_id) }}</td>
