@@ -1,6 +1,10 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
+const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 
 const venues = ref([])
 const venueId = ref(null)
@@ -50,8 +54,10 @@ async function onFile(e) {
 }
 
 async function loadVenues() {
-  const { data } = await client.get('/admin/venues')
+  const { data } = await client.get('/venues')
   venues.value = data.venues
+  // admin_unit hanya venue di areanya
+  if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   if (venues.value.length && !venueId.value) venueId.value = venues.value[0].id
   try { suppliers.value = (await client.get('/procurement/suppliers')).data.suppliers } catch { /* ignore */ }
 }

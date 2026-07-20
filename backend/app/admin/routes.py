@@ -12,6 +12,7 @@ from ..extensions import db
 from ..models import Area, Employee, EmployeeDebt, Supplier, User, Venue
 from ..security import (
     ROLE_ADMIN,
+    ROLE_ADMIN_UNIT,
     ROLE_HEAD_OFFICE,
     ROLE_MANAGER,
     hash_password,
@@ -36,7 +37,15 @@ from ..pos.models import (
 admin_bp = Blueprint("admin", __name__)
 
 # RBAC configurable (izin dikelola via /admin/permissions)
-MANAGE = require_perm("master.manage")
+# master.manage dipecah per-resource supaya bisa dikasih granular, mis. admin_unit
+# hanya boleh kelola produk/lapangan/promo tanpa venue/area/setup.
+VENUE_MANAGE = require_perm("venue.manage")
+AREA_MANAGE = require_perm("area.manage")
+PRODUCT_MANAGE = require_perm("product.manage")
+PROMO_MANAGE = require_perm("promo.manage")
+FACILITY_MANAGE = require_perm("facility.manage")
+SETUP_MANAGE = require_perm("setup.manage")
+ORDER_CANCEL = require_perm("order.cancel")
 VIEW = require_perm("master.view")
 # HR: manager unit juga boleh kelola karyawan (venue-nya sendiri)
 MANAGE_HR = require_perm("hr.manage")
@@ -53,6 +62,19 @@ def _forced_venue():
     u = _current_user()
     if u and u.role == ROLE_MANAGER:
         return u.venue_id
+    return None
+
+
+def _scope_vids(u):
+    """Venue yang boleh dikelola user utk master data (produk/lapangan/promo).
+    None = semua (admin/head_office). manager_unit -> [venue-nya].
+    admin_unit -> venue2 di areanya (bisa kosong bila belum di-set area)."""
+    if not u:
+        return []
+    if u.role == ROLE_MANAGER:
+        return [u.venue_id] if u.venue_id else []
+    if u.role == ROLE_ADMIN_UNIT:
+        return [v.id for v in Venue.query.filter_by(area_id=u.area_id).all()] if u.area_id else []
     return None
 
 
@@ -107,7 +129,7 @@ def _cap(v):
 
 @admin_bp.post("/venues")
 @jwt_required()
-@MANAGE
+@VENUE_MANAGE
 def venues_create():
     d = request.get_json(silent=True) or {}
     for f in ("code", "name", "type"):
@@ -127,7 +149,7 @@ def venues_create():
 
 @admin_bp.put("/venues/<int:vid>")
 @jwt_required()
-@MANAGE
+@VENUE_MANAGE
 def venues_update(vid):
     v = db.session.get(Venue, vid)
     if not v:
@@ -153,7 +175,7 @@ def venues_update(vid):
 
 @admin_bp.delete("/venues/<int:vid>")
 @jwt_required()
-@MANAGE
+@VENUE_MANAGE
 def venues_delete(vid):
     v = db.session.get(Venue, vid)
     if not v:
@@ -193,7 +215,7 @@ def areas_list():
 
 @admin_bp.post("/areas")
 @jwt_required()
-@MANAGE
+@AREA_MANAGE
 def areas_create():
     d = request.get_json(silent=True) or {}
     code = (d.get("code") or "").strip().upper()
@@ -210,7 +232,7 @@ def areas_create():
 
 @admin_bp.put("/areas/<int:aid>")
 @jwt_required()
-@MANAGE
+@AREA_MANAGE
 def areas_update(aid):
     a = db.session.get(Area, aid)
     if not a:
@@ -231,7 +253,7 @@ def areas_update(aid):
 
 @admin_bp.delete("/areas/<int:aid>")
 @jwt_required()
-@MANAGE
+@AREA_MANAGE
 def areas_delete(aid):
     a = db.session.get(Area, aid)
     if not a:
@@ -303,7 +325,7 @@ def holidays_list():
 
 @admin_bp.post("/holidays")
 @jwt_required()
-@MANAGE
+@FACILITY_MANAGE
 def holidays_create():
     d = request.get_json(silent=True) or {}
     ds = (d.get("date") or "").strip()
@@ -323,7 +345,7 @@ def holidays_create():
 
 @admin_bp.delete("/holidays/<int:hid>")
 @jwt_required()
-@MANAGE
+@FACILITY_MANAGE
 def holidays_delete(hid):
     h = db.session.get(Holiday, hid)
     if not h:
@@ -369,7 +391,7 @@ def _gen_sku(venue):
 
 @admin_bp.post("/products")
 @jwt_required()
-@MANAGE
+@PRODUCT_MANAGE
 def products_create():
     d = request.get_json(silent=True) or {}
     for f in ("name", "venue_id"):
@@ -378,6 +400,9 @@ def products_create():
     venue = _venue_or_404(d["venue_id"])
     if not venue:
         return _err("Venue tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and venue.id not in vids:
+        return _err("Venue di luar cakupan Anda", "forbidden", 403)
     # SKU otomatis (kalau tak diberikan / kosong)
     sku = (d.get("sku") or "").strip() or _gen_sku(venue)
     if Product.query.filter_by(sku=sku).first():
@@ -408,11 +433,14 @@ def products_create():
 
 @admin_bp.put("/products/<int:pid>")
 @jwt_required()
-@MANAGE
+@PRODUCT_MANAGE
 def products_update(pid):
     p = db.session.get(Product, pid)
     if not p:
         return _err("Produk tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and p.venue_id not in vids:
+        return _err("Bukan produk venue cakupan Anda", "forbidden", 403)
     d = request.get_json(silent=True) or {}
     if "name" in d:
         p.name = d["name"]
@@ -443,7 +471,7 @@ def products_update(pid):
 
 @admin_bp.post("/products/import")
 @jwt_required()
-@MANAGE
+@PRODUCT_MANAGE
 def products_import():
     """Import produk massal dari CSV (percepat entry data awal). Kolom:
     name,price,unit,category,stock_qty,min_stock,track_stock,supplier_code
@@ -457,6 +485,9 @@ def products_import():
     venue = _venue_or_404(vid)
     if not venue:
         return _err("Venue tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and venue.id not in vids:
+        return _err("Venue di luar cakupan Anda", "forbidden", 403)
     f = request.files.get("file")
     if not f:
         return _err("File CSV wajib diunggah")
@@ -835,13 +866,17 @@ def _promo_from_data(promo, d):
 
 @admin_bp.post("/promos")
 @jwt_required()
-@MANAGE
+@PROMO_MANAGE
 def promos_create():
     d = request.get_json(silent=True) or {}
     if not d.get("name") or not d.get("product_id"):
         return _err("name & product_id wajib diisi")
-    if not db.session.get(Product, d["product_id"]):
+    prod = db.session.get(Product, d["product_id"])
+    if not prod:
         return _err("Produk tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and prod.venue_id not in vids:
+        return _err("Produk di luar cakupan Anda", "forbidden", 403)
     t = d.get("type", "price")
     if t not in ("price", "percent", "bogo"):
         return _err("type harus price|percent|bogo")
@@ -860,11 +895,16 @@ def promos_create():
 
 @admin_bp.put("/promos/<int:pid>")
 @jwt_required()
-@MANAGE
+@PROMO_MANAGE
 def promos_update(pid):
     promo = db.session.get(Promo, pid)
     if not promo:
         return _err("Promo tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None:
+        prod = db.session.get(Product, promo.product_id)
+        if not prod or prod.venue_id not in vids:
+            return _err("Bukan promo produk cakupan Anda", "forbidden", 403)
     _promo_from_data(promo, request.get_json(silent=True) or {})
     db.session.commit()
     return jsonify(promo=promo.to_dict()), 200
@@ -872,11 +912,16 @@ def promos_update(pid):
 
 @admin_bp.delete("/promos/<int:pid>")
 @jwt_required()
-@MANAGE
+@PROMO_MANAGE
 def promos_delete(pid):
     promo = db.session.get(Promo, pid)
     if not promo:
         return _err("Promo tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None:
+        prod = db.session.get(Product, promo.product_id)
+        if not prod or prod.venue_id not in vids:
+            return _err("Bukan promo produk cakupan Anda", "forbidden", 403)
     db.session.delete(promo)
     db.session.commit()
     return jsonify(message="Promo dihapus"), 200
@@ -906,7 +951,7 @@ def _parse_time(s, default):
 
 @admin_bp.post("/facilities")
 @jwt_required()
-@MANAGE
+@FACILITY_MANAGE
 def facilities_create():
     d = request.get_json(silent=True) or {}
     for f in ("name", "venue_id"):
@@ -914,6 +959,9 @@ def facilities_create():
             return _err(f"{f} wajib diisi")
     if not _venue_or_404(d["venue_id"]):
         return _err("Venue tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and int(d["venue_id"]) not in vids:
+        return _err("Venue di luar cakupan Anda", "forbidden", 403)
     fac = Facility(
         venue_id=d["venue_id"], name=d["name"], type=d.get("type"),
         hourly_rate=_D(d.get("hourly_rate")),
@@ -928,11 +976,14 @@ def facilities_create():
 
 @admin_bp.put("/facilities/<int:fid>")
 @jwt_required()
-@MANAGE
+@FACILITY_MANAGE
 def facilities_update(fid):
     fac = db.session.get(Facility, fid)
     if not fac:
         return _err("Lapangan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and fac.venue_id not in vids:
+        return _err("Bukan lapangan venue cakupan Anda", "forbidden", 403)
     d = request.get_json(silent=True) or {}
     if "name" in d:
         fac.name = d["name"]
@@ -963,7 +1014,7 @@ def terminals_list():
 
 @admin_bp.post("/terminals")
 @jwt_required()
-@MANAGE
+@SETUP_MANAGE
 def terminals_create():
     d = request.get_json(silent=True) or {}
     for f in ("code", "name", "venue_id"):
@@ -982,7 +1033,7 @@ def terminals_create():
 # ==================================================================
 @admin_bp.get("/cashiers")
 @jwt_required()
-@MANAGE
+@SETUP_MANAGE
 def cashiers_list():
     users = User.query.filter_by(role="staff").order_by(User.username).all()
     return jsonify(cashiers=[u.to_dict() for u in users]), 200
@@ -990,7 +1041,7 @@ def cashiers_list():
 
 @admin_bp.post("/cashiers")
 @jwt_required()
-@MANAGE
+@SETUP_MANAGE
 def cashiers_create():
     d = request.get_json(silent=True) or {}
     for f in ("username", "email", "pin"):
@@ -1013,7 +1064,7 @@ def cashiers_create():
 
 @admin_bp.post("/cashiers/<int:uid>/pin")
 @jwt_required()
-@MANAGE
+@SETUP_MANAGE
 def cashiers_set_pin(uid):
     u = db.session.get(User, uid)
     if not u:
@@ -1028,7 +1079,7 @@ def cashiers_set_pin(uid):
 
 @admin_bp.put("/terminals/<int:tid>")
 @jwt_required()
-@MANAGE
+@SETUP_MANAGE
 def terminals_update(tid):
     t = db.session.get(PosTerminal, tid)
     if not t:
@@ -1050,7 +1101,7 @@ def terminals_update(tid):
 
 @admin_bp.delete("/terminals/<int:tid>")
 @jwt_required()
-@MANAGE
+@SETUP_MANAGE
 def terminals_delete(tid):
     t = db.session.get(PosTerminal, tid)
     if not t:
@@ -1068,7 +1119,7 @@ def terminals_delete(tid):
 
 @admin_bp.put("/cashiers/<int:uid>")
 @jwt_required()
-@MANAGE
+@SETUP_MANAGE
 def cashiers_update(uid):
     u = db.session.get(User, uid)
     if not u or u.role != "staff":
@@ -1092,7 +1143,7 @@ def cashiers_update(uid):
 
 @admin_bp.delete("/cashiers/<int:uid>")
 @jwt_required()
-@MANAGE
+@SETUP_MANAGE
 def cashiers_delete(uid):
     u = db.session.get(User, uid)
     if not u or u.role != "staff":
@@ -1326,7 +1377,7 @@ def order_detail(order_id):
 
 @admin_bp.post("/orders/<int:order_id>/cancel")
 @jwt_required()
-@MANAGE
+@ORDER_CANCEL
 def order_cancel_admin(order_id):
     """Batalkan booking (no-show): void + lepas slot, DP hangus."""
     from ..pos.services import PosError, cancel_order

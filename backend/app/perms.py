@@ -15,7 +15,13 @@ PERMISSIONS = [
     ("holding.manage", "Kelola Beban Holding/Owner", "Laporan"),
     # Master data
     ("master.view", "Lihat data & laporan penjualan", "Master Data"),
-    ("master.manage", "Kelola master (produk, venue, area, lapangan, promo, terminal)", "Master Data"),
+    ("venue.manage", "Kelola Venue", "Master Data"),
+    ("area.manage", "Kelola Area", "Master Data"),
+    ("product.manage", "Kelola Produk", "Master Data"),
+    ("facility.manage", "Kelola Lapangan & Tiket", "Master Data"),
+    ("promo.manage", "Kelola Promo", "Master Data"),
+    ("setup.manage", "Kelola Setup Kasir (terminal & akun kasir)", "Master Data"),
+    ("order.cancel", "Batalkan order/booking", "Master Data"),
     ("hr.manage", "Kelola karyawan & kasbon", "Master Data"),
     # Operasional
     ("ops.view", "Lihat pengajuan dana", "Operasional"),
@@ -52,7 +58,7 @@ DEFAULT_GRANTS = {
         "proc.view", "proc.create", "payroll.view", "payroll.generate",
         "report.business",
     },
-    "admin_unit": {"ops.view", "ops.create"},
+    "admin_unit": {"ops.view", "ops.create", "product.manage", "facility.manage", "promo.manage"},
     "staff": set(),
 }
 

@@ -56,9 +56,9 @@ const navGroups = [
     items: [
       { name: 'venues', label: 'Venue', icon: '🏟️', roles: ADMINS },
       { name: 'areas', label: 'Area', icon: '🗺️', roles: ADMINS },
-      { name: 'products', label: 'Produk', icon: '📦', roles: ADMINS },
-      { name: 'promos', label: 'Promo', icon: '🎉', roles: ADMINS },
-      { name: 'facilities', label: 'Lapangan & Tiket', icon: '⚽', roles: ADMINS },
+      { name: 'products', label: 'Produk', icon: '📦', roles: [...ADMINS, 'admin_unit'] },
+      { name: 'promos', label: 'Promo', icon: '🎉', roles: [...ADMINS, 'admin_unit'] },
+      { name: 'facilities', label: 'Lapangan & Tiket', icon: '⚽', roles: [...ADMINS, 'admin_unit'] },
     ],
   },
   {
