@@ -182,6 +182,7 @@ function toggleGroup(label) {
             {{ (auth.user?.username || '?').charAt(0) }}
           </div>
           <button
+            v-if="auth.user?.role === 'admin'"
             @click="openPwd"
             class="text-sm text-slate-500 hover:text-brand-600 border rounded-lg px-3 py-1.5 transition"
           >
