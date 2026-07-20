@@ -104,6 +104,52 @@ def suppliers_create():
     return jsonify(supplier=s.to_dict()), 201
 
 
+@proc_bp.post("/suppliers/import")
+@jwt_required()
+@MANAGE_SUP
+def suppliers_import():
+    """Import supplier massal dari CSV (percepat entry data awal). Kolom:
+    name,contact_person,phone,email,address,city,payment_terms,bank_account
+    Hanya 'name' wajib; supplier_code dibuat otomatis seperti entry manual."""
+    import csv
+    import io
+
+    f = request.files.get("file")
+    if not f:
+        return _err("File CSV wajib diunggah")
+    try:
+        text = f.stream.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _err("File harus CSV teks (UTF-8)")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        return _err("File CSV kosong atau tanpa header")
+    reader.fieldnames = [(fn or "").strip().lower() for fn in reader.fieldnames]
+
+    created, skipped = 0, []
+    for i, raw in enumerate(reader, start=2):  # baris 1 = header
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items() if k}
+        name = row.get("name")
+        if not name:
+            skipped.append({"row": i, "reason": "kolom 'name' kosong"})
+            continue
+        s = Supplier(
+            supplier_code=_gen_supplier_code(), name=name,
+            contact_person=row.get("contact_person") or None,
+            phone=row.get("phone") or None, email=row.get("email") or None,
+            address=row.get("address") or None, city=row.get("city") or None,
+            payment_terms=row.get("payment_terms") or None,
+            bank_account=row.get("bank_account") or None, active=True,
+        )
+        db.session.add(s)
+        db.session.flush()  # supaya _gen_supplier_code baris berikutnya tak tabrakan
+        created += 1
+
+    db.session.commit()
+    return jsonify(created=created, skipped=skipped), 200
+
+
 @proc_bp.put("/suppliers/<int:sid>")
 @jwt_required()
 @MANAGE_SUP

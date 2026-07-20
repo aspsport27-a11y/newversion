@@ -18,6 +18,37 @@ function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
 }
 
+function downloadProductTemplate() {
+  const sample = suppliers.value[0]?.supplier_code || 'SUP-001'
+  const rows = [
+    ['name', 'price', 'unit', 'category', 'stock_qty', 'min_stock', 'track_stock', 'supplier_code'],
+    ['Air Mineral 600ml', '5000', 'botol', 'Minuman', '50', '10', '1', sample],
+  ]
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = 'template-produk.csv'; a.click()
+  URL.revokeObjectURL(url)
+}
+const fileInput = ref(null)
+const importing = ref(false)
+function triggerImport() { fileInput.value?.click() }
+async function onFile(e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file || !venueId.value) return
+  importing.value = true
+  try {
+    const fd = new FormData(); fd.append('file', file)
+    const { data } = await client.post(`/admin/products/import?venue_id=${venueId.value}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    await loadProducts()
+    let msg = `${data.created} produk berhasil diimpor.`
+    if (data.skipped?.length) msg += `\nDilewati ${data.skipped.length} baris:\n` + data.skipped.map((s) => `- Baris ${s.row}: ${s.reason}`).join('\n')
+    alert(msg)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal mengimpor CSV.') } finally { importing.value = false }
+}
+
 async function loadVenues() {
   const { data } = await client.get('/admin/venues')
   venues.value = data.venues
@@ -78,10 +109,13 @@ async function save() {
         <h1 class="text-2xl font-bold text-slate-800">Produk</h1>
         <p class="text-slate-500 mt-1">Kelola produk F&amp;B per venue. (Tiket dikelola di menu Lapangan &amp; Tiket.)</p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2 items-center">
         <select v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
+        <button @click="downloadProductTemplate" class="text-brand-600 hover:underline text-sm px-2 py-2">📥 Unduh Template CSV</button>
+        <input ref="fileInput" type="file" accept=".csv" class="hidden" @change="onFile" />
+        <button @click="triggerImport" :disabled="importing" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">{{ importing ? 'Mengimpor…' : '📤 Upload CSV' }}</button>
         <button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Produk</button>
       </div>
     </div>

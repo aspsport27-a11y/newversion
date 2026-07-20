@@ -18,6 +18,38 @@ const toast = ref('')
 
 function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+function downloadSupplierTemplate() {
+  downloadCsv('template-supplier.csv', [
+    ['name', 'contact_person', 'phone', 'email', 'address', 'city', 'payment_terms', 'bank_account'],
+    ['CV Contoh Supplier', 'Pak Budi', '081234567890', 'budi@email.com', 'Jl. Contoh No.1', 'Banjarmasin', 'NET 30', 'BCA 1234567890'],
+  ])
+}
+const supFileInput = ref(null)
+const importingSup = ref(false)
+function triggerSupImport() { supFileInput.value?.click() }
+async function onSupFile(e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file) return
+  importingSup.value = true
+  try {
+    const fd = new FormData(); fd.append('file', file)
+    const { data } = await client.post('/procurement/suppliers/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    await loadBase()
+    let msg = `${data.created} supplier berhasil diimpor.`
+    if (data.skipped?.length) msg += `\nDilewati ${data.skipped.length} baris:\n` + data.skipped.map((s) => `- Baris ${s.row}: ${s.reason}`).join('\n')
+    alert(msg)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal mengimpor CSV.') } finally { importingSup.value = false }
+}
 const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], received: ['Diterima', 'bg-violet-100 text-violet-700'], paid: ['Lunas', 'bg-emerald-100 text-emerald-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'] }
 function supName(id) { const s = suppliers.value.find((x) => x.id === id); return s ? s.name : '—' }
 
@@ -194,7 +226,12 @@ watch(tab, reloadTab)
 
     <!-- ===== Supplier ===== -->
     <div v-else>
-      <div v-if="canSupplier" class="flex justify-end mb-3"><button @click="openSupCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Supplier</button></div>
+      <div v-if="canSupplier" class="flex justify-end items-center gap-2 mb-3">
+        <button @click="downloadSupplierTemplate" class="text-brand-600 hover:underline text-sm px-2 py-2">📥 Unduh Template CSV</button>
+        <input ref="supFileInput" type="file" accept=".csv" class="hidden" @change="onSupFile" />
+        <button @click="triggerSupImport" :disabled="importingSup" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">{{ importingSup ? 'Mengimpor…' : '📤 Upload CSV' }}</button>
+        <button @click="openSupCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Supplier</button>
+      </div>
       <p v-else class="text-xs text-slate-400 mb-3">Hanya lihat — tidak punya izin kelola supplier.</p>
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">

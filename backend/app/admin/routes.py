@@ -9,7 +9,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Area, Employee, EmployeeDebt, User, Venue
+from ..models import Area, Employee, EmployeeDebt, Supplier, User, Venue
 from ..security import (
     ROLE_ADMIN,
     ROLE_HEAD_OFFICE,
@@ -63,6 +63,13 @@ def _err(msg, code="bad_request", status=400):
 def _venue_or_404(venue_id):
     v = db.session.get(Venue, venue_id) if venue_id else None
     return v
+
+
+def _int(v, default=0):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
 
 
 def _D(v, default=0):
@@ -432,6 +439,76 @@ def products_update(pid):
     p.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(product=p.to_dict()), 200
+
+
+@admin_bp.post("/products/import")
+@jwt_required()
+@MANAGE
+def products_import():
+    """Import produk massal dari CSV (percepat entry data awal). Kolom:
+    name,price,unit,category,stock_qty,min_stock,track_stock,supplier_code
+    Hanya 'name' wajib; SKU dibuat otomatis per venue seperti entry manual."""
+    import csv
+    import io
+
+    vid = request.args.get("venue_id", type=int)
+    if not vid:
+        return _err("venue_id wajib")
+    venue = _venue_or_404(vid)
+    if not venue:
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    f = request.files.get("file")
+    if not f:
+        return _err("File CSV wajib diunggah")
+    try:
+        text = f.stream.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _err("File harus CSV teks (UTF-8)")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        return _err("File CSV kosong atau tanpa header")
+    reader.fieldnames = [(fn or "").strip().lower() for fn in reader.fieldnames]
+
+    created, skipped = 0, []
+    for i, raw in enumerate(reader, start=2):  # baris 1 = header
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in raw.items() if k}
+        name = row.get("name")
+        if not name:
+            skipped.append({"row": i, "reason": "kolom 'name' kosong"})
+            continue
+
+        cat_id = None
+        if row.get("category"):
+            cat = ProductCategory.query.filter_by(name=row["category"]).first()
+            if not cat:
+                cat = ProductCategory(name=row["category"], kind="other")
+                db.session.add(cat)
+                db.session.flush()
+            cat_id = cat.id
+
+        supplier_id = None
+        if row.get("supplier_code"):
+            sup = Supplier.query.filter_by(supplier_code=row["supplier_code"]).first()
+            supplier_id = sup.id if sup else None
+
+        track_raw = row.get("track_stock", "")
+        track_stock = track_raw.lower() not in ("0", "false", "tidak", "no") if track_raw else True
+
+        p = Product(
+            sku=_gen_sku(venue), name=name, venue_id=vid, category_id=cat_id,
+            price=_D(row.get("price")), unit=row.get("unit") or "pcs",
+            track_stock=track_stock,
+            stock_qty=_int(row.get("stock_qty")),
+            min_stock=_int(row.get("min_stock")),
+            supplier_id=supplier_id, is_active=True,
+        )
+        db.session.add(p)
+        db.session.flush()  # supaya _gen_sku baris berikutnya tak tabrakan
+        created += 1
+
+    db.session.commit()
+    return jsonify(created=created, skipped=skipped), 200
 
 
 # ==================================================================
