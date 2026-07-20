@@ -2,10 +2,32 @@
 import { onMounted, ref, computed } from 'vue'
 import { RouterView, RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import client from '../api/client'
 
 const auth = useAuthStore()
 const router = useRouter()
 const sidebarOpen = ref(false)
+
+// Ganti password akun sendiri (semua role login-portal, termasuk super admin)
+const showPwd = ref(false)
+const pwdForm = ref({ old_password: '', new_password: '', confirm: '' })
+const pwdErr = ref('')
+const pwdBusy = ref(false)
+function openPwd() { pwdForm.value = { old_password: '', new_password: '', confirm: '' }; pwdErr.value = ''; showPwd.value = true }
+async function savePwd() {
+  pwdErr.value = ''
+  if (pwdForm.value.new_password.length < 8) { pwdErr.value = 'Password baru minimal 8 karakter'; return }
+  if (pwdForm.value.new_password !== pwdForm.value.confirm) { pwdErr.value = 'Konfirmasi password tidak cocok'; return }
+  pwdBusy.value = true
+  try {
+    await client.post('/auth/reset-password', {
+      old_password: pwdForm.value.old_password,
+      new_password: pwdForm.value.new_password,
+    })
+    showPwd.value = false
+    alert('Password berhasil diganti.')
+  } catch (e) { pwdErr.value = e?.response?.data?.message || 'Gagal mengganti password.' } finally { pwdBusy.value = false }
+}
 
 onMounted(async () => {
   try {
@@ -160,6 +182,12 @@ function toggleGroup(label) {
             {{ (auth.user?.username || '?').charAt(0) }}
           </div>
           <button
+            @click="openPwd"
+            class="text-sm text-slate-500 hover:text-brand-600 border rounded-lg px-3 py-1.5 transition"
+          >
+            🔒 Ganti Password
+          </button>
+          <button
             @click="doLogout"
             class="text-sm text-slate-500 hover:text-red-600 border rounded-lg px-3 py-1.5 transition"
           >
@@ -171,6 +199,34 @@ function toggleGroup(label) {
       <main class="flex-1 p-4 lg:p-8 overflow-auto">
         <RouterView />
       </main>
+    </div>
+
+    <!-- Ganti Password (akun sendiri) -->
+    <div v-if="showPwd" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click.self="showPwd = false">
+      <div class="bg-white w-full max-w-sm rounded-2xl p-5">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-bold text-slate-800">Ganti Password</h3>
+          <button @click="showPwd = false" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Password lama</label>
+            <input v-model="pwdForm.old_password" type="password" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Password baru (min. 8 karakter)</label>
+            <input v-model="pwdForm.new_password" type="password" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Ulangi password baru</label>
+            <input v-model="pwdForm.confirm" type="password" @keyup.enter="savePwd" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <p v-if="pwdErr" class="text-sm text-red-600">{{ pwdErr }}</p>
+          <button @click="savePwd" :disabled="pwdBusy" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">
+            {{ pwdBusy ? 'Menyimpan…' : 'Simpan Password Baru' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
