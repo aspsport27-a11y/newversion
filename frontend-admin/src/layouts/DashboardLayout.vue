@@ -34,21 +34,27 @@ const navGroups = [
     items: [
       { name: 'venues', label: 'Venue', icon: '🏟️', roles: ADMINS },
       { name: 'areas', label: 'Area', icon: '🗺️', roles: ADMINS },
-      { name: 'employees', label: 'Karyawan', icon: '👥', roles: ['admin', 'head_office', 'manager_unit'] },
       { name: 'products', label: 'Produk', icon: '📦', roles: ADMINS },
       { name: 'promos', label: 'Promo', icon: '🎉', roles: ADMINS },
       { name: 'facilities', label: 'Lapangan & Tiket', icon: '⚽', roles: ADMINS },
     ],
   },
   {
+    label: 'HR',
+    icon: '🧑‍💼',
+    items: [
+      { name: 'employees', label: 'Karyawan', icon: '👥', roles: ['admin', 'head_office', 'manager_unit'] },
+      { name: 'attendance', label: 'Absensi', icon: '🕐', roles: ['admin', 'head_office', 'manager_unit'] },
+      { name: 'payroll', label: 'Payroll', icon: '🧾', roles: ['admin', 'head_office', 'manager_unit'] },
+    ],
+  },
+  {
     label: 'Transaksi',
     icon: '💳',
     items: [
-      { name: 'attendance', label: 'Absensi', icon: '🕐', roles: ['admin', 'head_office', 'manager_unit'] },
       { name: 'bookings', label: 'Booking', icon: '📅', roles: ADMINS },
       { name: 'operational', label: 'Operasional', icon: '💰', roles: ['admin', 'head_office', 'manager_unit', 'admin_unit'] },
       { name: 'procurement', label: 'Procurement', icon: '🛒', roles: ['admin', 'head_office', 'manager_unit', 'admin_unit'] },
-      { name: 'payroll', label: 'Payroll', icon: '🧾', roles: ['admin', 'head_office', 'manager_unit'] },
       { name: 'treasury', label: 'Kas & Bank', icon: '🏦', roles: ADMINS },
     ],
   },
