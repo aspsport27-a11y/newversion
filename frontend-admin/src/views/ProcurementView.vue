@@ -8,6 +8,7 @@ const isManager = computed(() => auth.user?.role === 'manager_unit')
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 const isApprover = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
 const canSupplier = computed(() => auth.hasPerm('proc.supplier'))  // kelola supplier
+const canRevertPo = computed(() => auth.hasPerm('proc.pay'))  // batalkan proses (balikkan stok/kas)
 
 const tab = ref('po')
 const venues = ref([])
@@ -143,6 +144,20 @@ async function removePo(p, ev) {
     if (detail.value?.id === p.id) detail.value = null
     await loadPo(); flash('PO dihapus')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
+}
+async function revertPo() {
+  const warn = detail.value.status === 'paid'
+    ? 'Ini akan membalikkan pembayaran (uang masuk lagi ke Kas & Bank) dan mengurangi stok yang sudah masuk. Lanjutkan?'
+    : detail.value.status === 'received'
+      ? 'Ini akan mengurangi lagi stok yang sudah masuk. Lanjutkan?'
+      : 'Kembalikan status PO ke Menunggu?'
+  if (!window.confirm(warn)) return
+  busy.value = true
+  try {
+    await client.post(`/procurement/pos/${detail.value.id}/revert`)
+    const { data } = await client.get(`/procurement/pos/${detail.value.id}`); detail.value = data.po
+    await loadPo(); flash('Proses PO dibatalkan — kembali ke Menunggu')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan.') } finally { busy.value = false }
 }
 const canDeletePo = (p) => ['submitted', 'approved', 'rejected'].includes(p.status)
 
@@ -341,7 +356,10 @@ watch(tab, reloadTab)
       <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
         <div class="flex justify-between items-start mb-3">
           <div><h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3><p class="text-sm text-slate-500">{{ detail.supplier_name || 'Tanpa supplier' }}</p></div>
-          <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
+          <div class="flex items-center gap-2">
+            <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
+            <button @click="detail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+          </div>
         </div>
         <p v-if="detail.notes" class="text-sm text-slate-600 mb-3">{{ detail.notes }}</p>
         <div class="border rounded-lg overflow-hidden mb-3">
@@ -384,9 +402,11 @@ watch(tab, reloadTab)
           </template>
           <p v-else class="text-sm text-slate-400 py-2 text-center w-full">Status: {{ statusMap[detail.status]?.[0] }}<span v-if="detail.status === 'received'"> — menunggu pembayaran HO</span></p>
         </div>
-        <div class="flex gap-2 pt-2">
-          <button @click="detail = null" class="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium">Batal</button>
-          <button v-if="canDeletePo(detail)" @click="removePo(detail)" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium">Hapus PO</button>
+        <div v-if="detail.status !== 'submitted' && canRevertPo" class="flex gap-2 pt-2">
+          <button @click="revertPo" :disabled="busy" class="flex-1 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium disabled:opacity-50">↩️ Batal Proses (kembali ke Menunggu)</button>
+        </div>
+        <div v-if="canDeletePo(detail)" class="flex gap-2 pt-2">
+          <button @click="removePo(detail)" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium">Hapus PO</button>
         </div>
       </div>
     </div>

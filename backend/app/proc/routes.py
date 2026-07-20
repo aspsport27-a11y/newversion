@@ -420,6 +420,70 @@ def po_pay(pid):
     return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
 
 
+@proc_bp.post("/pos/<int:pid>/revert")
+@jwt_required()
+@PAY
+def po_revert(pid):
+    """Batalkan proses PO — kembalikan status ke 'submitted' (Menunggu).
+    Kalau sudah 'received'/'paid', balikkan efek stok & kas OTOMATIS: stok
+    dikurangi lagi (dicatat sbg penyesuaian, bukan dihapus dr riwayat) & uang
+    yg sudah keluar dicatat balik masuk di Kas & Bank. Ditolak kalau sebagian
+    stok sudah terjual/terpakai (supaya stok tak jadi minus)."""
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    err = _check_venue(po)
+    if err:
+        return err
+    if po.status == "submitted":
+        return _err("PO sudah berstatus Menunggu", "bad_status", 409)
+    uid = _user().id
+
+    if po.status in ("received", "paid"):
+        # cek dulu SEMUA item cukup utk dibalik, baru eksekusi (all-or-nothing)
+        for item in po.items:
+            if item.product_id:
+                product = db.session.get(Product, item.product_id)
+                if product and product.track_stock and (product.stock_qty or 0) < item.quantity:
+                    return _err(
+                        f"Stok '{product.name}' sudah berkurang (tersisa {product.stock_qty}, "
+                        f"PO ini menambah {item.quantity}) — sebagian sudah terjual/terpakai, "
+                        "tidak bisa dibatalkan penuh.",
+                        "stock_conflict", 409,
+                    )
+        for item in po.items:
+            if item.product_id:
+                product = db.session.get(Product, item.product_id)
+                if product and product.track_stock:
+                    product.stock_qty = (product.stock_qty or 0) - item.quantity
+                    db.session.add(StockMovement(
+                        product_id=product.id, venue_id=po.venue_id, type="adjustment",
+                        quantity=-item.quantity, balance_after=product.stock_qty,
+                        reference=po.code, created_by=uid,
+                    ))
+        po.received_by = None
+        po.received_at = None
+
+    if po.status == "paid" and po.source_account_id:
+        from ..treasury.service import record_tx
+        record_tx(
+            po.source_account_id, "in", float(po.total_amount), "po_cancel",
+            ref_type="po", ref_id=po.id, note=f"Pembatalan pembayaran {po.code}",
+            user_id=uid,
+        )
+        po.paid_by = None
+        po.paid_at = None
+        po.source_account_id = None
+
+    po.status = "submitted"
+    po.approved_by = None
+    po.approved_at = None
+    po.rejection_reason = None
+    po.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
+
+
 @proc_bp.delete("/pos/<int:pid>")
 @jwt_required()
 @CREATE
