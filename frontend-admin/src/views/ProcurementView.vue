@@ -136,10 +136,13 @@ async function act(action, extra = {}) {
 function doReject() { const reason = prompt('Alasan penolakan:'); if (reason !== null) act('reject', { reason }) }
 async function viewAtt(a) { const res = await client.get(`/procurement/attachments/${a.id}`, { responseType: 'blob' }); window.open(URL.createObjectURL(res.data), '_blank') }
 async function removePo(p, ev) {
-  ev.stopPropagation()
+  ev?.stopPropagation()
   if (!window.confirm(`Hapus PO ${p.code}?`)) return
-  try { await client.delete(`/procurement/pos/${p.id}`); await loadPo(); flash('PO dihapus') }
-  catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
+  try {
+    await client.delete(`/procurement/pos/${p.id}`)
+    if (detail.value?.id === p.id) detail.value = null
+    await loadPo(); flash('PO dihapus')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
 }
 const canDeletePo = (p) => ['submitted', 'approved', 'rejected'].includes(p.status)
 
@@ -380,6 +383,10 @@ watch(tab, reloadTab)
             </div>
           </template>
           <p v-else class="text-sm text-slate-400 py-2 text-center w-full">Status: {{ statusMap[detail.status]?.[0] }}<span v-if="detail.status === 'received'"> — menunggu pembayaran HO</span></p>
+        </div>
+        <div class="flex gap-2 pt-2">
+          <button @click="detail = null" class="flex-1 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 font-medium">Batal</button>
+          <button v-if="canDeletePo(detail)" @click="removePo(detail)" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium">Hapus PO</button>
         </div>
       </div>
     </div>
