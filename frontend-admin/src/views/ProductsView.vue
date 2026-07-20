@@ -10,6 +10,7 @@ const venues = ref([])
 const venueId = ref(null)
 const products = ref([])
 const suppliers = ref([])
+const categories = ref([])
 const loading = ref(false)
 const search = ref('')
 const filteredProducts = computed(() => {
@@ -18,6 +19,7 @@ const filteredProducts = computed(() => {
   return products.value.filter((p) =>
     p.name.toLowerCase().includes(q) ||
     p.sku.toLowerCase().includes(q) ||
+    (p.category_name || '').toLowerCase().includes(q) ||
     supName(p.supplier_id).toLowerCase().includes(q)
   )
 })
@@ -90,6 +92,7 @@ async function loadVenues() {
   if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   if (venues.value.length && !venueId.value) venueId.value = venues.value[0].id
   try { suppliers.value = (await client.get('/procurement/suppliers')).data.suppliers } catch { /* ignore */ }
+  try { categories.value = (await client.get('/admin/product-categories')).data.categories } catch { /* ignore */ }
 }
 async function loadProducts() {
   if (!venueId.value) return
@@ -115,7 +118,7 @@ function openCreate() {
 }
 function openEdit(p) {
   editing.value = p
-  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock: p.min_stock, track_stock: p.track_stock, supplier_id: p.supplier_id || '', is_active: p.is_active }
+  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock: p.min_stock, track_stock: p.track_stock, supplier_id: p.supplier_id || '', category: p.category_name || '', is_active: p.is_active }
   error.value = ''
   showForm.value = true
 }
@@ -178,6 +181,7 @@ async function save() {
             <tr>
               <th class="px-4 py-3 font-medium">SKU</th>
               <th class="px-4 py-3 font-medium">Nama</th>
+              <th class="px-4 py-3 font-medium">Kategori</th>
               <th class="px-4 py-3 font-medium">Supplier</th>
               <th class="px-4 py-3 font-medium text-right">Harga</th>
               <th class="px-4 py-3 font-medium text-right">Stok</th>
@@ -186,12 +190,13 @@ async function save() {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!products.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada produk.</td></tr>
-            <tr v-else-if="!filteredProducts.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Tidak ada produk yang cocok dengan pencarian.</td></tr>
+            <tr v-if="loading"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!products.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada produk.</td></tr>
+            <tr v-else-if="!filteredProducts.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Tidak ada produk yang cocok dengan pencarian.</td></tr>
             <tr v-for="p in filteredProducts" :key="p.id" class="border-t hover:bg-slate-50">
               <td class="px-4 py-3 font-mono text-slate-500">{{ p.sku }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ p.name }}</td>
+              <td class="px-4 py-3 text-slate-500">{{ p.category_name || '—' }}</td>
               <td class="px-4 py-3 text-slate-500">{{ supName(p.supplier_id) }}</td>
               <td class="px-4 py-3 text-right">
                 <template v-if="p.promo && p.effective_price < p.price">
@@ -225,11 +230,16 @@ async function save() {
           <button @click="showForm = false" class="text-slate-400 text-xl">✕</button>
         </div>
         <div class="space-y-3">
-          <template v-if="!editing">
-            <p class="text-xs text-slate-400">SKU dibuat otomatis (mis. {{ venues.find(v=>v.id===venueId)?.code }}-001).</p>
-            <input v-model="form.category" placeholder="Kategori (mis. Minuman)" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
-          </template>
+          <p v-if="!editing" class="text-xs text-slate-400">SKU dibuat otomatis (mis. {{ venues.find(v=>v.id===venueId)?.code }}-001).</p>
           <input v-model="form.name" placeholder="Nama produk" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Kategori</label>
+            <input v-model="form.category" list="category-options" placeholder="mis. Minuman (pilih atau ketik baru)"
+              class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            <datalist id="category-options">
+              <option v-for="c in categories" :key="c.id" :value="c.name" />
+            </datalist>
+          </div>
           <div>
             <label class="block text-xs text-slate-500 mb-1">Supplier (default utk PO)</label>
             <select v-model="form.supplier_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">

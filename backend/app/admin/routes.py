@@ -359,6 +359,14 @@ def holidays_delete(hid):
 # ==================================================================
 # PRODUCTS
 # ==================================================================
+@admin_bp.get("/product-categories")
+@jwt_required()
+@VIEW
+def product_categories_list():
+    cats = ProductCategory.query.filter_by(is_active=True).order_by(ProductCategory.name).all()
+    return jsonify(categories=[{"id": c.id, "name": c.name} for c in cats]), 200
+
+
 @admin_bp.get("/products")
 @jwt_required()
 @VIEW
@@ -376,7 +384,13 @@ def products_list():
     from ..pos.promos import product_public
 
     items = q.order_by(Product.venue_id, Product.name).all()
-    return jsonify(count=len(items), products=[product_public(p) for p in items]), 200
+    cat_names = {c.id: c.name for c in ProductCategory.query.all()}
+    out = []
+    for p in items:
+        d = product_public(p)
+        d["category_name"] = cat_names.get(p.category_id)
+        out.append(d)
+    return jsonify(count=len(out), products=out), 200
 
 
 def _gen_sku(venue):
@@ -459,6 +473,17 @@ def products_update(pid):
         p.min_stock = int(d["min_stock"] or 0)
     if "supplier_id" in d:
         p.supplier_id = d["supplier_id"] or None
+    if "category" in d:
+        cat_name = (d["category"] or "").strip()
+        if cat_name:
+            cat = ProductCategory.query.filter_by(name=cat_name).first()
+            if not cat:
+                cat = ProductCategory(name=cat_name, kind="other")
+                db.session.add(cat)
+                db.session.flush()
+            p.category_id = cat.id
+        else:
+            p.category_id = None
     if "is_ticket" in d:
         p.is_ticket = bool(d["is_ticket"])
     if "weekend_price" in d:
