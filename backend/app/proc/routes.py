@@ -202,7 +202,12 @@ def reorder_list():
     vid = forced if forced is not None else request.args.get("venue_id", type=int)
     q = Product.query.filter(
         Product.is_active.is_(True), Product.track_stock.is_(True),
-        Product.min_stock > 0, Product.stock_qty <= Product.min_stock,
+        db.or_(
+            # ambang reorder terlampaui (kalau min_stock di-set)
+            db.and_(Product.min_stock > 0, Product.stock_qty <= Product.min_stock),
+            # ATAU stok benar2 kosong, walau min_stock belum di-set
+            Product.stock_qty <= 0,
+        ),
     )
     if vid:
         q = q.filter(Product.venue_id == vid)
