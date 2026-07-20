@@ -110,6 +110,19 @@ async function createAccount() {
     await reloadDetail(); await load(); flash('Akun login dibuat')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
+const resetCred = ref('')
+async function resetAccount() {
+  const isStaff = detail.value?.account?.role === 'staff'
+  if (isStaff ? resetCred.value.length < 4 : resetCred.value.length < 8) {
+    alert(isStaff ? 'PIN minimal 4 digit' : 'Password minimal 8 karakter'); return
+  }
+  busy.value = true
+  try {
+    const body = isStaff ? { pin: resetCred.value } : { password: resetCred.value }
+    const { data } = await client.post(`/admin/employees/${detail.value.id}/account/reset`, body)
+    resetCred.value = ''; flash(data.message || 'Kredensial diperbarui')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+}
 </script>
 
 <template>
@@ -252,7 +265,17 @@ async function createAccount() {
         <!-- Akun login -->
         <div class="bg-slate-50 rounded-lg p-3">
           <p class="text-sm font-medium text-slate-700 mb-2">Akun Login</p>
-          <p v-if="detail.account" class="text-sm text-emerald-700">✓ {{ detail.account.username }} ({{ detail.account.role }})</p>
+          <div v-if="detail.account" class="space-y-2">
+            <p class="text-sm text-emerald-700">✓ {{ detail.account.username }} ({{ detail.account.role }})</p>
+            <div class="flex gap-2">
+              <input v-model="resetCred" :type="detail.account.role === 'staff' ? 'text' : 'text'"
+                :placeholder="detail.account.role === 'staff' ? 'PIN baru (min 4)' : 'Password baru (min 8)'"
+                class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+              <button @click="resetAccount" :disabled="busy" class="rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm px-3 py-1.5 font-medium disabled:opacity-50">
+                {{ detail.account.role === 'staff' ? 'Reset PIN' : 'Ganti Password' }}
+              </button>
+            </div>
+          </div>
           <div v-else class="space-y-2">
             <div class="flex gap-2">
               <input v-model="acctForm.username" placeholder="username" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />

@@ -651,6 +651,38 @@ def employee_account_create(eid):
     return jsonify(account={"username": u.username, "role": u.role}), 201
 
 
+@admin_bp.post("/employees/<int:eid>/account/reset")
+@jwt_required()
+@MANAGE_HR
+def employee_account_reset(eid):
+    """Ganti PIN (akun kasir) / password (akun lain) untuk karyawan yang sudah punya akun."""
+    e = db.session.get(Employee, eid)
+    if not e:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and e.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    u = _emp_account(eid)
+    if not u:
+        return _err("Karyawan belum punya akun", "no_account", 404)
+    d = request.get_json(silent=True) or {}
+    if u.role == "staff":
+        pin = str(d.get("pin") or "")
+        if len(pin) < 4:
+            return _err("PIN minimal 4 digit")
+        u.pin_hash = hash_password(pin)
+        u.set_password(pin)
+        msg = "PIN diperbarui"
+    else:
+        pw = str(d.get("password") or "")
+        if len(pw) < 8:
+            return _err("Password minimal 8 karakter")
+        u.set_password(pw)
+        msg = "Password diperbarui"
+    db.session.commit()
+    return jsonify(message=msg, account={"username": u.username, "role": u.role}), 200
+
+
 # ==================================================================
 # PROMOS
 # ==================================================================
