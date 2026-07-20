@@ -32,6 +32,7 @@ from ..pos.models import (
     ProductCategory,
     Promo,
     Shift,
+    StockMovement,
 )
 
 admin_bp = Blueprint("admin", __name__)
@@ -467,6 +468,35 @@ def products_update(pid):
     p.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(product=p.to_dict()), 200
+
+
+@admin_bp.delete("/products/<int:pid>")
+@jwt_required()
+@PRODUCT_MANAGE
+def products_delete(pid):
+    from ..proc.models import PurchaseOrderItem
+
+    p = db.session.get(Product, pid)
+    if not p:
+        return _err("Produk tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and p.venue_id not in vids:
+        return _err("Bukan produk venue cakupan Anda", "forbidden", 403)
+    deps = {
+        "order": OrderItem.query.filter_by(product_id=pid).count(),
+        "PO": PurchaseOrderItem.query.filter_by(product_id=pid).count(),
+        "riwayat stok": StockMovement.query.filter_by(product_id=pid).count(),
+    }
+    blocking = {k: c for k, c in deps.items() if c > 0}
+    if blocking:
+        detail = ", ".join(f"{k} ({c})" for k, c in blocking.items())
+        return _err(
+            f"Produk punya riwayat terkait: {detail}. Nonaktifkan saja (jangan hapus).",
+            "has_dependencies", 409,
+        )
+    db.session.delete(p)  # promo terkait ikut terhapus (ondelete=CASCADE)
+    db.session.commit()
+    return jsonify(message="Produk dihapus"), 200
 
 
 @admin_bp.post("/products/import")

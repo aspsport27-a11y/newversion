@@ -61,7 +61,7 @@ async function loadBase() {
   // admin_unit hanya venue di areanya
   if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   suppliers.value = s.data.suppliers
-  if (!isManager.value && venues.value.length && !venueId.value) venueId.value = venues.value[0].id
+  // default: "Semua venue" (venueId tetap '') agar semua PO tampil sekaligus
   if (isApprover.value) {
     try {
       const { data } = await client.get('/treasury/accounts')
@@ -70,9 +70,9 @@ async function loadBase() {
     } catch (_) { /* treasury belum disetup */ }
   }
 }
-async function loadProducts() {
+async function loadProducts(vid) {
   const params = {}
-  if (!isManager.value && venueId.value) params.venue_id = venueId.value
+  if (!isManager.value && vid) params.venue_id = vid
   const { data } = await client.get('/procurement/products', { params })
   products.value = data.products
 }
@@ -94,9 +94,14 @@ const cErr = ref('')
 const saving = ref(false)
 const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0))
 async function openCreate() {
-  try { await loadProducts() } catch (e) { products.value = [] }  // tetap buka modal walau produk gagal (bisa item non-stok)
-  cForm.value = { supplier_id: suppliers.value[0]?.id || '', notes: '', items: [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }] }
+  const vid = venueId.value || venues.value[0]?.id
+  try { await loadProducts(vid) } catch (e) { products.value = [] }  // tetap buka modal walau produk gagal (bisa item non-stok)
+  cForm.value = { venue_id: vid, supplier_id: suppliers.value[0]?.id || '', notes: '', items: [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }] }
   cFiles.value = []; cErr.value = ''; showCreate.value = true
+}
+async function onModalVenueChange() {
+  try { await loadProducts(cForm.value.venue_id) } catch (e) { products.value = [] }
+  cForm.value.items = [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }]
 }
 function addRow() { cForm.value.items.push({ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }) }
 // saat pilih produk → auto isi supplier PO dari supplier default produk
@@ -113,7 +118,7 @@ async function submitCreate() {
       ? { product_id: i.product_id, quantity: i.quantity, unit: i.unit, unit_price: i.unit_price, note: i.note }
       : { item_name: i.item_name, quantity: i.quantity, unit: i.unit, unit_price: i.unit_price, note: i.note })
     const payload = { supplier_id: cForm.value.supplier_id || null, notes: cForm.value.notes, items }
-    if (!isManager.value) payload.venue_id = venueId.value
+    if (!isManager.value) payload.venue_id = cForm.value.venue_id
     const { data } = await client.post('/procurement/pos', payload)
     for (const f of cFiles.value) { const fd = new FormData(); fd.append('file', f); await client.post(`/procurement/pos/${data.po.id}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }) }
     showCreate.value = false; await loadPo(); flash('PO dibuat')
@@ -168,6 +173,7 @@ watch(tab, reloadTab)
         <p class="text-slate-500 mt-1">Purchase order, supplier, dan stok menipis.</p>
       </div>
       <select v-if="!isManager" v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        <option value="">Semua venue</option>
         <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
       </select>
     </div>
@@ -185,14 +191,17 @@ watch(tab, reloadTab)
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-              <th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Supplier</th>
+              <th class="px-4 py-3 font-medium">Kode</th>
+              <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
+              <th class="px-4 py-3 font-medium">Supplier</th>
               <th class="px-4 py-3 font-medium text-right">Total</th><th class="px-4 py-3 font-medium text-center">Status</th><th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="loadingPo"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!pos.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Belum ada PO.</td></tr>
+              <tr v-if="loadingPo"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!pos.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada PO.</td></tr>
               <tr v-for="p in pos" :key="p.id" @click="openDetail(p)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ p.code }}</td>
+                <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===p.venue_id)?.code || '—' }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ p.supplier_name || '—' }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(p.total_amount) }}</td>
                 <td class="px-4 py-3 text-center"><span :class="statusMap[p.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[p.status]?.[0] }}</span></td>
@@ -209,12 +218,15 @@ watch(tab, reloadTab)
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-            <th class="px-4 py-3 font-medium">Produk</th><th class="px-4 py-3 font-medium text-right">Stok</th><th class="px-4 py-3 font-medium text-right">Min</th><th class="px-4 py-3 font-medium text-right">Kurang</th>
+            <th class="px-4 py-3 font-medium">Produk</th>
+            <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
+            <th class="px-4 py-3 font-medium text-right">Stok</th><th class="px-4 py-3 font-medium text-right">Min</th><th class="px-4 py-3 font-medium text-right">Kurang</th>
           </tr></thead>
           <tbody>
-            <tr v-if="!reorder.length"><td colspan="4" class="px-4 py-8 text-center text-emerald-600">Semua stok aman 🎉</td></tr>
+            <tr v-if="!reorder.length"><td colspan="5" class="px-4 py-8 text-center text-emerald-600">Semua stok aman 🎉</td></tr>
             <tr v-for="p in reorder" :key="p.id" class="border-t">
               <td class="px-4 py-3 font-medium text-slate-700">{{ p.name }}</td>
+              <td v-if="!isManager" class="px-4 py-3 text-slate-500">{{ venues.find(v=>v.id===p.venue_id)?.code || '—' }}</td>
               <td class="px-4 py-3 text-right text-red-600 font-medium">{{ p.stock_qty }}</td>
               <td class="px-4 py-3 text-right text-slate-500">{{ p.min_stock }}</td>
               <td class="px-4 py-3 text-right text-amber-600">{{ Math.max(0, p.min_stock - p.stock_qty) }}</td>
@@ -257,11 +269,15 @@ watch(tab, reloadTab)
       <div class="bg-white w-full max-w-2xl rounded-2xl p-5 max-h-[92vh] overflow-auto">
         <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">Buat Purchase Order</h3><button @click="showCreate = false" class="text-slate-400 text-xl">✕</button></div>
         <div class="grid grid-cols-2 gap-3 mb-3">
+          <div v-if="!isManager"><label class="block text-xs text-slate-500 mb-1">Venue</label>
+            <select v-model="cForm.venue_id" @change="onModalVenueChange" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+              <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+            </select></div>
           <div><label class="block text-xs text-slate-500 mb-1">Supplier</label>
             <select v-model="cForm.supplier_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
               <option value="">— pilih —</option><option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select></div>
-          <div><label class="block text-xs text-slate-500 mb-1">Catatan</label><input v-model="cForm.notes" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <div class="col-span-2"><label class="block text-xs text-slate-500 mb-1">Catatan</label><input v-model="cForm.notes" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
         </div>
         <p class="text-xs font-medium text-slate-500 mb-1">Item</p>
         <div v-for="(it, i) in cForm.items" :key="i" class="border rounded-lg p-2 mb-2">

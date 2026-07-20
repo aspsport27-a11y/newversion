@@ -89,6 +89,15 @@ function openEdit(p) {
   error.value = ''
   showForm.value = true
 }
+async function removeProduct(p) {
+  if (!window.confirm(`Hapus produk "${p.name}"?`)) return
+  try {
+    await client.delete(`/admin/products/${p.id}`)
+    await loadProducts()
+  } catch (e) {
+    alert(e?.response?.data?.message || 'Gagal menghapus.')
+  }
+}
 async function save() {
   saving.value = true
   error.value = ''
@@ -161,8 +170,9 @@ async function save() {
                   {{ p.is_active ? 'Aktif' : 'Nonaktif' }}
                 </span>
               </td>
-              <td class="px-4 py-3 text-right">
-                <button @click="openEdit(p)" class="text-brand-600 text-sm hover:underline">Edit</button>
+              <td class="px-4 py-3 text-right whitespace-nowrap">
+                <button @click="openEdit(p)" class="text-brand-600 text-sm hover:underline mr-3">Edit</button>
+                <button @click="removeProduct(p)" class="text-red-500 text-sm hover:underline">Hapus</button>
               </td>
             </tr>
           </tbody>

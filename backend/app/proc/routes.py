@@ -174,8 +174,18 @@ def suppliers_delete(sid):
     s = db.session.get(Supplier, sid)
     if not s:
         return _err("Supplier tidak ditemukan", "not_found", 404)
-    if PurchaseOrder.query.filter_by(supplier_id=sid).first():
-        return _err("Supplier dipakai di PO — nonaktifkan saja.", "in_use", 409)
+    pos = (
+        db.session.query(PurchaseOrder, Venue)
+        .join(Venue, PurchaseOrder.venue_id == Venue.id)
+        .filter(PurchaseOrder.supplier_id == sid).all()
+    )
+    if pos:
+        detail = ", ".join(f"{po.code} @ {v.code}" for po, v in pos[:5])
+        more = f" (+{len(pos) - 5} lainnya)" if len(pos) > 5 else ""
+        return _err(
+            f"Supplier dipakai di PO: {detail}{more} — nonaktifkan saja (jangan hapus).",
+            "in_use", 409,
+        )
     db.session.delete(s)
     db.session.commit()
     return jsonify(message="Supplier dihapus"), 200
