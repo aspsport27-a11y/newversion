@@ -683,6 +683,38 @@ def employee_account_reset(eid):
     return jsonify(message=msg, account={"username": u.username, "role": u.role}), 200
 
 
+@admin_bp.delete("/employees/<int:eid>/account")
+@jwt_required()
+@MANAGE_HR
+def employee_account_delete(eid):
+    """Putuskan akun login dari karyawan (supaya karyawan bisa dihapus).
+    Hapus penuh bila akun tak punya riwayat; kalau ada riwayat → nonaktifkan & lepas."""
+    from sqlalchemy.exc import IntegrityError
+
+    e = db.session.get(Employee, eid)
+    if not e:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and e.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    u = _emp_account(eid)
+    if not u:
+        return _err("Karyawan belum punya akun", "no_account", 404)
+    try:
+        db.session.delete(u)
+        db.session.flush()
+        db.session.commit()
+        return jsonify(message="Akun dihapus"), 200
+    except IntegrityError:
+        db.session.rollback()
+        u = _emp_account(eid)
+        u.active = False
+        u.employee_id = None
+        u.username = f"{u.username}__off{u.id}"  # bebaskan username utk dipakai lagi
+        db.session.commit()
+        return jsonify(message="Akun punya riwayat transaksi → dinonaktifkan & diputuskan"), 200
+
+
 # ==================================================================
 # PROMOS
 # ==================================================================

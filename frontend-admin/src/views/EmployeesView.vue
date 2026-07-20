@@ -110,6 +110,14 @@ async function createAccount() {
     await reloadDetail(); await load(); flash('Akun login dibuat')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
+async function disconnectAccount() {
+  if (!confirm(`Putuskan akun "${detail.value.account.username}" dari ${detail.value.name}? Akun tak bisa login lagi.`)) return
+  busy.value = true
+  try {
+    const { data } = await client.delete(`/admin/employees/${detail.value.id}/account`)
+    await reloadDetail(); await load(); flash(data.message || 'Akun diputuskan')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+}
 const resetCred = ref('')
 async function resetAccount() {
   const isStaff = detail.value?.account?.role === 'staff'
@@ -275,6 +283,7 @@ async function resetAccount() {
                 {{ detail.account.role === 'staff' ? 'Reset PIN' : 'Ganti Password' }}
               </button>
             </div>
+            <button @click="disconnectAccount" :disabled="busy" class="text-xs text-red-500 hover:text-red-700">Putuskan akun (agar karyawan bisa dihapus)</button>
           </div>
           <div v-else class="space-y-2">
             <div class="flex gap-2">
