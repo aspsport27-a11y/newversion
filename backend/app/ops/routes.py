@@ -32,6 +32,7 @@ ops_bp = Blueprint("ops", __name__)
 VIEW = require_perm("ops.view")
 CREATE = require_perm("ops.create")
 APPROVE = require_perm("ops.approve")
+BUDGET = require_perm("ops.budget")
 
 ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
 
@@ -183,7 +184,7 @@ def budgets_list():
 
 @ops_bp.post("/budgets")
 @jwt_required()
-@APPROVE
+@BUDGET
 def budgets_set():
     """Set/ubah plafon per kategori untuk venue/bulan (upsert)."""
     d = request.get_json(silent=True) or {}
@@ -193,6 +194,9 @@ def budgets_set():
     items = d.get("items") or []  # [{category_id, amount}]
     if not vid or not year or not month:
         return _err("venue_id, year, month wajib")
+    vids = _scope_vids(_user())
+    if vids is not None and int(vid) not in vids:
+        return _err("Venue di luar cakupan Anda", "forbidden", 403)
     for it in items:
         cid = it.get("category_id")
         amt = _D(it.get("amount"))

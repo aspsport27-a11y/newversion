@@ -7,6 +7,7 @@ const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 const isApprover = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
+const canBudget = computed(() => auth.hasPerm('ops.budget'))
 
 const tab = ref('requests')
 const venues = ref([])
@@ -142,7 +143,8 @@ async function saveBudget() {
   savingBudget.value = true
   try {
     const { year, month } = ym()
-    await client.post('/ops/budgets', { venue_id: venueId.value, year, month, items: budgetRows.value.map((r) => ({ category_id: r.category_id, amount: Number(r.budget) || 0 })) })
+    const vid = isManager.value ? auth.user?.venue_id : venueId.value
+    await client.post('/ops/budgets', { venue_id: vid, year, month, items: budgetRows.value.map((r) => ({ category_id: r.category_id, amount: Number(r.budget) || 0 })) })
     await loadBudget(); flash('Budget disimpan')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { savingBudget.value = false }
 }
@@ -286,7 +288,7 @@ watch(statusFilter, loadRequests)
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <div class="flex justify-between items-center px-4 py-3 border-b">
           <span class="text-sm text-slate-500">Plafon budget per kategori — {{ period }}</span>
-          <button v-if="isApprover" @click="saveBudget" :disabled="savingBudget" class="bg-brand-600 hover:bg-brand-700 text-white text-xs rounded-lg px-4 py-1.5 font-medium disabled:opacity-50">Simpan Budget</button>
+          <button v-if="canBudget" @click="saveBudget" :disabled="savingBudget" class="bg-brand-600 hover:bg-brand-700 text-white text-xs rounded-lg px-4 py-1.5 font-medium disabled:opacity-50">Simpan Budget</button>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -298,7 +300,7 @@ watch(statusFilter, loadRequests)
               <tr v-for="r in budgetRows" :key="r.category_id" class="border-t">
                 <td class="px-4 py-2.5 text-slate-700">{{ r.category_name }}</td>
                 <td class="px-4 py-2.5 text-right">
-                  <input v-if="isApprover" v-model.number="r.budget" type="number" class="w-32 rounded border border-slate-300 px-2 py-1 text-right text-sm outline-none focus:border-brand-500" />
+                  <input v-if="canBudget" v-model.number="r.budget" type="number" class="w-32 rounded border border-slate-300 px-2 py-1 text-right text-sm outline-none focus:border-brand-500" />
                   <span v-else>{{ rupiah(r.budget) }}</span>
                 </td>
                 <td class="px-4 py-2.5 text-right text-slate-600">{{ rupiah(r.used) }}</td>
