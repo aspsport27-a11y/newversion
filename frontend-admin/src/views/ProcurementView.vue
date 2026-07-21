@@ -120,15 +120,24 @@ const cFiles = ref([])
 const cErr = ref('')
 const saving = ref(false)
 const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0))
+// supplier itu tabel global — di form PO, prioritaskan supplier yg sudah pernah
+// dipakai produk venue ini; kalau venue belum punya supplier terkait sama sekali
+// (venue baru dsb), tetap tampilkan semua supplier biar tak menghalangi PO ke supplier baru
+const availablePoSuppliers = computed(() => {
+  const ids = new Set(products.value.filter((p) => p.supplier_id).map((p) => p.supplier_id))
+  const scoped = suppliers.value.filter((s) => ids.has(s.id))
+  return scoped.length ? scoped : suppliers.value
+})
 async function openCreate() {
   const vid = venueId.value || venues.value[0]?.id
   try { await loadProducts(vid) } catch (e) { products.value = [] }  // tetap buka modal walau produk gagal (bisa item non-stok)
-  cForm.value = { venue_id: vid, supplier_id: suppliers.value[0]?.id || '', notes: '', items: [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }] }
+  cForm.value = { venue_id: vid, supplier_id: availablePoSuppliers.value[0]?.id || '', notes: '', items: [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }] }
   cFiles.value = []; cErr.value = ''; showCreate.value = true
 }
 async function onModalVenueChange() {
   try { await loadProducts(cForm.value.venue_id) } catch (e) { products.value = [] }
   cForm.value.items = [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }]
+  cForm.value.supplier_id = availablePoSuppliers.value[0]?.id || ''
 }
 function addRow() { cForm.value.items.push({ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }) }
 // saat pilih produk → auto isi supplier PO dari supplier default produk
@@ -521,7 +530,7 @@ watch(tab, reloadTab)
             </select></div>
           <div><label class="block text-xs text-slate-500 mb-1">Supplier</label>
             <select v-model="cForm.supplier_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-              <option value="">— pilih —</option><option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+              <option value="">— pilih —</option><option v-for="s in availablePoSuppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select></div>
           <div class="col-span-2"><label class="block text-xs text-slate-500 mb-1">Catatan</label><input v-model="cForm.notes" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
         </div>
