@@ -240,6 +240,25 @@ const ksgLoading = ref(false)
 const ksgGenerating = ref(false)
 const ksgDetail = ref(null)
 
+// supplier itu tabel global (bukan per-venue) — dropdown supplier di sini cuma
+// tampilkan supplier yang benar2 punya produk konsinyasi di venue yg dipilih
+const ksgProducts = ref([])
+async function loadKsgProducts() {
+  ksgProducts.value = []
+  if (!ksgVenueId.value) return
+  try {
+    const { data } = await client.get('/procurement/products', { params: { venue_id: ksgVenueId.value } })
+    ksgProducts.value = data.products
+  } catch (_) { /* ignore */ }
+}
+const ksgConsignmentProducts = computed(() => ksgProducts.value.filter((p) => p.is_consignment))
+const availableKsgSuppliers = computed(() => {
+  const ids = new Set(ksgConsignmentProducts.value.filter((p) => p.supplier_id).map((p) => p.supplier_id))
+  return suppliers.value.filter((s) => ids.has(s.id))
+})
+// produk konsinyasi tanpa supplier tak akan pernah kehitung di settlement manapun
+const ksgProductsMissingSupplier = computed(() => ksgConsignmentProducts.value.filter((p) => !p.supplier_id))
+
 async function loadKsgLastSettled() {
   ksgLastSettled.value = null
   if (!ksgVenueId.value || !ksgSupplierId.value) return
@@ -294,6 +313,10 @@ async function deleteKsg() {
     await loadKsgSettlements(); flash('Settlement dihapus')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
 }
+watch(ksgVenueId, async () => {
+  ksgSupplierId.value = ''
+  await loadKsgProducts()
+})
 watch([ksgVenueId, ksgSupplierId], () => { loadKsgLastSettled(); loadKsgSettlements() })
 
 function reloadTab() {
@@ -437,8 +460,12 @@ watch(tab, reloadTab)
             <label class="block text-xs text-slate-500 mb-1">Supplier</label>
             <select v-model="ksgSupplierId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
               <option value="">— pilih —</option>
-              <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+              <option v-for="s in availableKsgSuppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select>
+            <p v-if="ksgVenueId && !availableKsgSuppliers.length && !ksgProductsMissingSupplier.length" class="text-xs text-amber-600 mt-1">Venue ini belum punya produk konsinyasi.</p>
+            <p v-else-if="ksgVenueId && ksgProductsMissingSupplier.length" class="text-xs text-amber-600 mt-1">
+              {{ ksgProductsMissingSupplier.length }} produk konsinyasi di venue ini belum ada supplier-nya ({{ ksgProductsMissingSupplier.map(p => p.name).join(', ') }}) — tidak akan terhitung di settlement manapun sampai supplier diisi di menu Produk.
+            </p>
           </div>
           <div>
             <label class="block text-xs text-slate-500 mb-1">Dari</label>
