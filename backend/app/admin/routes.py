@@ -2,7 +2,7 @@
 
 Akses: admin & head_office (kelola); reports juga manager_unit.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -34,6 +34,9 @@ from ..pos.models import (
     Shift,
     StockMovement,
 )
+from ..ops.models import OpRequest
+from ..payroll.models import PayrollRun
+from ..proc.models import PurchaseOrder
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -1375,6 +1378,78 @@ def attendance_photo(aid, which):
     if not os.path.exists(path):
         return _err("File tidak ada", "not_found", 404)
     return send_file(path, mimetype="image/jpeg")
+
+
+# ==================================================================
+# DASHBOARD
+# ==================================================================
+@admin_bp.get("/dashboard/summary")
+@jwt_required()
+def dashboard_summary():
+    u = _current_user()
+    vids = _scope_vids(u)  # None = semua venue (admin/head_office)
+
+    def _scoped(q, model):
+        if vids is None:
+            return q
+        if not vids:
+            return q.filter(db.false())
+        return q.filter(model.venue_id.in_(vids))
+
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    pay_today_q = _scoped(
+        db.session.query(func.coalesce(func.sum(Payment.amount), 0))
+        .join(Order, Payment.order_id == Order.id)
+        .filter(Payment.status == "paid", func.date(Payment.paid_at) == today),
+        Order,
+    )
+    pay_yesterday_q = _scoped(
+        db.session.query(func.coalesce(func.sum(Payment.amount), 0))
+        .join(Order, Payment.order_id == Order.id)
+        .filter(Payment.status == "paid", func.date(Payment.paid_at) == yesterday),
+        Order,
+    )
+    revenue_today = float(pay_today_q.scalar() or 0)
+    revenue_yesterday = float(pay_yesterday_q.scalar() or 0)
+
+    order_count_today = _scoped(
+        Order.query.filter(Order.status == "paid", func.date(Order.created_at) == today),
+        Order,
+    ).count()
+
+    ops_pending = _scoped(OpRequest.query.filter_by(status="submitted"), OpRequest).count()
+    payroll_pending = _scoped(PayrollRun.query.filter_by(status="submitted"), PayrollRun).count()
+    proc_pending = _scoped(PurchaseOrder.query.filter_by(status="submitted"), PurchaseOrder).count()
+
+    low_stock_q = _scoped(
+        Product.query.filter(
+            Product.is_active.is_(True),
+            Product.track_stock.is_(True),
+            Product.stock_qty <= Product.min_stock,
+        ),
+        Product,
+    )
+    low_stock_count = low_stock_q.count()
+    low_stock_items = [
+        {"id": p.id, "name": p.name, "stock_qty": p.stock_qty, "min_stock": p.min_stock}
+        for p in low_stock_q.order_by(Product.stock_qty).limit(8).all()
+    ]
+
+    return jsonify(
+        date=today.isoformat(),
+        revenue_today=round(revenue_today, 2),
+        revenue_yesterday=round(revenue_yesterday, 2),
+        order_count_today=order_count_today,
+        approvals_pending={
+            "ops": ops_pending,
+            "payroll": payroll_pending,
+            "procurement": proc_pending,
+            "total": ops_pending + payroll_pending + proc_pending,
+        },
+        low_stock={"count": low_stock_count, "items": low_stock_items},
+    ), 200
 
 
 # ==================================================================
