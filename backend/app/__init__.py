@@ -28,6 +28,7 @@ def create_app(config_class: type = Config) -> Flask:
     from .payroll import models as payroll_models  # noqa: F401
     from .pos import models as pos_models  # noqa: F401
     from .proc import models as proc_models  # noqa: F401
+    from .stations import models as stations_models  # noqa: F401
     from .treasury import models as treasury_models  # noqa: F401
 
     # blueprint
@@ -39,6 +40,7 @@ def create_app(config_class: type = Config) -> Flask:
     from .payroll.routes import payroll_bp
     from .pos.routes import pos_bp
     from .proc.routes import proc_bp
+    from .stations.routes import stations_bp
     from .treasury.routes import treasury_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -50,6 +52,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(payroll_bp, url_prefix="/api/payroll")
     app.register_blueprint(treasury_bp, url_prefix="/api/treasury")
     app.register_blueprint(financial_bp, url_prefix="/api/financial")
+    app.register_blueprint(stations_bp, url_prefix="/api/stations")
 
     _register_jwt_handlers(app)
     _register_error_handlers(app)

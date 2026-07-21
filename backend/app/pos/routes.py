@@ -410,3 +410,93 @@ def order_cancel(order_id):
         raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
     cancel_order(order)
     return jsonify(order=order.to_dict()), 200
+
+
+# ------------------------------------------------------------------
+# Station Gaming (arena esport) — sesi main per stasiun, dioperasikan kasir.
+# Data master station dikelola via /api/stations (portal admin/HO/manager).
+# ------------------------------------------------------------------
+@pos_bp.get("/stations")
+@jwt_required()
+def stations_list():
+    from ..stations.models import GameSession, GameStation
+
+    terminal = _current_terminal()
+    stations = (
+        GameStation.query.filter_by(venue_id=terminal.venue_id, is_active=True)
+        .order_by(GameStation.tier, GameStation.code)
+        .all()
+    )
+    active = {
+        r.station_id: r
+        for r in GameSession.query.filter(
+            GameSession.station_id.in_([s.id for s in stations]), GameSession.status == "ongoing"
+        ).all()
+    } if stations else {}
+    return jsonify(count=len(stations), stations=[s.to_dict(active.get(s.id)) for s in stations]), 200
+
+
+@pos_bp.post("/stations/<int:sid>/start")
+@jwt_required()
+def station_start(sid):
+    from ..stations.models import GameSession, GameStation
+
+    terminal = _current_terminal()
+    station = db.session.get(GameStation, sid)
+    if station is None or station.venue_id != terminal.venue_id or not station.is_active:
+        raise PosError("Station tidak ditemukan", "not_found", 404)
+    if GameSession.query.filter_by(station_id=sid, status="ongoing").first():
+        raise PosError("Station sedang dipakai", "in_use", 409)
+    data = request.get_json(silent=True) or {}
+    session = GameSession(
+        station_id=sid, venue_id=terminal.venue_id,
+        customer_name=(data.get("customer_name") or None),
+        rate_per_hour=station.hourly_rate, opened_by=int(get_jwt_identity()),
+    )
+    db.session.add(session)
+    db.session.commit()
+    return jsonify(session=session.to_dict()), 201
+
+
+def _current_ongoing_session(sid, venue_id):
+    from ..stations.models import GameSession
+
+    session = GameSession.query.filter_by(station_id=sid, status="ongoing").first()
+    if session is None:
+        raise PosError("Tidak ada sesi berjalan di station ini", "no_session", 409)
+    if session.venue_id != venue_id:
+        raise PosError("Station bukan milik venue ini", "wrong_venue", 403)
+    return session
+
+
+@pos_bp.post("/stations/<int:sid>/topup")
+@jwt_required()
+def station_topup(sid):
+    from ..stations.models import GameSessionTopup
+
+    terminal = _current_terminal()
+    session = _current_ongoing_session(sid, terminal.venue_id)
+    data = request.get_json(silent=True) or {}
+    duration = data.get("duration_minutes")
+    total = data.get("total_amount")
+    if not duration or total in (None, ""):
+        raise PosError("duration_minutes & total_amount wajib diisi", "bad_request")
+    topup = GameSessionTopup(
+        session_id=session.id, duration_minutes=int(duration),
+        discount_amount=float(data.get("discount_amount") or 0),
+        total_amount=float(total), created_by=int(get_jwt_identity()),
+    )
+    db.session.add(topup)
+    db.session.commit()
+    return jsonify(session=session.to_dict()), 201
+
+
+@pos_bp.post("/stations/<int:sid>/stop")
+@jwt_required()
+def station_stop(sid):
+    terminal = _current_terminal()
+    session = _current_ongoing_session(sid, terminal.venue_id)
+    session.status = "stopped"
+    session.stopped_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(session=session.to_dict()), 200

@@ -23,6 +23,7 @@ PERMISSIONS = [
     ("setup.manage", "Kelola Setup Kasir (terminal & akun kasir)", "Master Data"),
     ("order.cancel", "Batalkan order/booking", "Master Data"),
     ("hr.manage", "Kelola karyawan & kasbon", "Master Data"),
+    ("station.manage", "Kelola Station Gaming (arena esport)", "Master Data"),
     # Operasional
     ("ops.view", "Lihat pengajuan dana", "Operasional"),
     ("ops.create", "Buat pengajuan dana", "Operasional"),
@@ -57,7 +58,7 @@ DEFAULT_GRANTS = {
     "manager_unit": {
         "master.view", "hr.manage", "ops.view", "ops.create", "ops.budget",
         "proc.view", "proc.create", "payroll.view", "payroll.generate",
-        "report.business",
+        "report.business", "station.manage",
     },
     "admin_unit": {"ops.view", "ops.create", "product.manage", "facility.manage", "promo.manage"},
     "staff": set(),
