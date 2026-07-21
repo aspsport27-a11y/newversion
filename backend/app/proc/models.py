@@ -91,3 +91,71 @@ class PoAttachment(db.Model):
 
     def to_dict(self):
         return {"id": self.id, "filename": self.filename, "content_type": self.content_type, "size_bytes": self.size_bytes}
+
+
+class ConsignmentSettlement(db.Model):
+    """Bagi hasil produk konsinyasi (titip barang). Dibuat MANUAL: hitung
+    penjualan produk is_consignment milik satu supplier pada satu venue,
+    dalam rentang tanggal, dikali harga_bagi_hasil per produk (bukan %)."""
+    __tablename__ = "consignment_settlements"
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(30), unique=True, nullable=False)
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
+    supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id"), nullable=False)
+    period_from = db.Column(db.Date, nullable=False)
+    period_to = db.Column(db.Date, nullable=False)
+    total_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    notes = db.Column(db.Text)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    paid_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    paid_at = db.Column(db.DateTime)
+    source_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"))
+
+    items = db.relationship(
+        "ConsignmentSettlementItem", backref="settlement",
+        lazy="selectin", cascade="all, delete-orphan",
+    )
+
+    def to_dict(self, supplier_name=None):
+        f = lambda v: float(v) if v is not None else None
+        return {
+            "id": self.id,
+            "code": self.code,
+            "venue_id": self.venue_id,
+            "supplier_id": self.supplier_id,
+            "supplier_name": supplier_name,
+            "period_from": self.period_from.isoformat() if self.period_from else None,
+            "period_to": self.period_to.isoformat() if self.period_to else None,
+            "total_amount": f(self.total_amount),
+            "notes": self.notes,
+            "status": "paid" if self.paid_at else "unpaid",
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "paid_at": self.paid_at.isoformat() if self.paid_at else None,
+            "items": [i.to_dict() for i in self.items],
+        }
+
+
+class ConsignmentSettlementItem(db.Model):
+    __tablename__ = "consignment_settlement_items"
+
+    id = db.Column(db.Integer, primary_key=True)
+    settlement_id = db.Column(
+        db.Integer, db.ForeignKey("consignment_settlements.id", ondelete="CASCADE"), nullable=False
+    )
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id", ondelete="SET NULL"))
+    product_name = db.Column(db.String(120), nullable=False)
+    quantity_sold = db.Column(db.Numeric(10, 2), nullable=False)
+    unit_price = db.Column(db.Numeric(15, 2), nullable=False)  # snapshot harga_bagi_hasil
+    subtotal = db.Column(db.Numeric(15, 2), nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "product_id": self.product_id,
+            "product_name": self.product_name,
+            "quantity_sold": float(self.quantity_sold),
+            "unit_price": float(self.unit_price),
+            "subtotal": float(self.subtotal),
+        }

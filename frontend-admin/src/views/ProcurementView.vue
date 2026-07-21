@@ -227,7 +227,80 @@ async function loadReorder() {
   const { data } = await client.get('/procurement/reorder', { params }); reorder.value = data.products
 }
 
-function reloadTab() { tab.value === 'po' ? loadPo() : tab.value === 'reorder' ? loadReorder() : null }
+// -------- Konsinyasi (titip barang) — settlement bagi hasil --------
+const ksgVenueId = ref('')
+const ksgSupplierId = ref('')
+const today = new Date().toISOString().slice(0, 10)
+const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10)
+const ksgFrom = ref(monthAgo)
+const ksgTo = ref(today)
+const ksgLastSettled = ref(null)
+const ksgSettlements = ref([])
+const ksgLoading = ref(false)
+const ksgGenerating = ref(false)
+const ksgDetail = ref(null)
+
+async function loadKsgLastSettled() {
+  ksgLastSettled.value = null
+  if (!ksgVenueId.value || !ksgSupplierId.value) return
+  try {
+    const { data } = await client.get('/procurement/consignment/last-settled', {
+      params: { venue_id: ksgVenueId.value, supplier_id: ksgSupplierId.value },
+    })
+    ksgLastSettled.value = data.last_period_to
+  } catch (_) { /* ignore */ }
+}
+async function loadKsgSettlements() {
+  ksgLoading.value = true
+  try {
+    const params = {}
+    if (!isManager.value && ksgVenueId.value) params.venue_id = ksgVenueId.value
+    if (ksgSupplierId.value) params.supplier_id = ksgSupplierId.value
+    const { data } = await client.get('/procurement/consignment/settlements', { params })
+    ksgSettlements.value = data.settlements
+  } finally { ksgLoading.value = false }
+}
+async function generateKsg() {
+  if (!ksgVenueId.value || !ksgSupplierId.value) { alert('Pilih venue & supplier dulu'); return }
+  ksgGenerating.value = true
+  try {
+    const { data } = await client.post('/procurement/consignment/settlements', {
+      venue_id: ksgVenueId.value, supplier_id: ksgSupplierId.value,
+      period_from: ksgFrom.value, period_to: ksgTo.value,
+    })
+    await loadKsgSettlements(); await loadKsgLastSettled()
+    ksgDetail.value = data.settlement
+    flash('Settlement dibuat')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal membuat settlement.') } finally { ksgGenerating.value = false }
+}
+async function openKsgDetail(s) {
+  const { data } = await client.get(`/procurement/consignment/settlements/${s.id}`)
+  ksgDetail.value = data.settlement
+}
+async function payKsg() {
+  if (!window.confirm(`Bayar settlement ${ksgDetail.value.code} sebesar ${rupiah(ksgDetail.value.total_amount)}?`)) return
+  busy.value = true
+  try {
+    const { data } = await client.post(`/procurement/consignment/settlements/${ksgDetail.value.id}/pay`, { source_account_id: sourceAccount.value })
+    ksgDetail.value = data.settlement
+    await loadKsgSettlements(); flash('Settlement dibayar')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal membayar.') } finally { busy.value = false }
+}
+async function deleteKsg() {
+  if (!window.confirm(`Hapus settlement ${ksgDetail.value.code}?`)) return
+  try {
+    await client.delete(`/procurement/consignment/settlements/${ksgDetail.value.id}`)
+    ksgDetail.value = null
+    await loadKsgSettlements(); flash('Settlement dihapus')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
+}
+watch([ksgVenueId, ksgSupplierId], () => { loadKsgLastSettled(); loadKsgSettlements() })
+
+function reloadTab() {
+  if (tab.value === 'po') loadPo()
+  else if (tab.value === 'reorder') loadReorder()
+  else if (tab.value === 'konsinyasi') { if (!ksgVenueId.value) ksgVenueId.value = venueId.value || venues.value[0]?.id; loadKsgSettlements() }
+}
 onMounted(async () => { await loadBase(); await loadPo() })
 watch([venueId], () => { searchPo.value = ''; searchReorder.value = ''; reloadTab() })
 watch(tab, reloadTab)
@@ -250,6 +323,7 @@ watch(tab, reloadTab)
       <button @click="tab = 'po'" :class="tab === 'po' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Purchase Order</button>
       <button @click="tab = 'reorder'" :class="tab === 'reorder' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Stok Menipis</button>
       <button @click="tab = 'supplier'" :class="tab === 'supplier' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Supplier</button>
+      <button @click="tab = 'konsinyasi'" :class="tab === 'konsinyasi' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Konsinyasi</button>
     </div>
 
     <!-- ===== PO ===== -->
@@ -316,7 +390,7 @@ watch(tab, reloadTab)
     </div>
 
     <!-- ===== Supplier ===== -->
-    <div v-else>
+    <div v-else-if="tab === 'supplier'">
       <div class="flex justify-between items-center gap-2 mb-3 flex-wrap">
         <input v-model="searchSup" type="text" placeholder="🔍 Cari nama, kode, atau kontak…"
           class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
@@ -342,6 +416,67 @@ watch(tab, reloadTab)
               <td class="px-4 py-3 text-slate-600">{{ s.contact_person || '—' }} {{ s.phone ? '· ' + s.phone : '' }}</td>
               <td class="px-4 py-3 text-slate-500">{{ s.bank_account || '—' }}</td>
               <td class="px-4 py-3 text-right whitespace-nowrap"><template v-if="canSupplier"><button @click="openSupEdit(s)" class="text-brand-600 text-sm hover:underline">Edit</button><button @click="removeSup(s)" class="text-red-500 text-sm hover:underline ml-3">Hapus</button></template><span v-else class="text-slate-300 text-xs">—</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===== Konsinyasi ===== -->
+    <div v-else-if="tab === 'konsinyasi'">
+      <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
+        <p class="text-xs text-slate-400 mb-3">Bagi hasil produk titipan — jumlah TETAP per unit terjual (bukan %), dihitung dari penjualan lunas pada rentang tanggal.</p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Venue</label>
+            <select v-model="ksgVenueId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+              <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Supplier</label>
+            <select v-model="ksgSupplierId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+              <option value="">— pilih —</option>
+              <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Dari</label>
+            <input v-model="ksgFrom" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Sampai</label>
+            <input v-model="ksgTo" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+        </div>
+        <p v-if="ksgVenueId && ksgSupplierId" class="text-xs mb-3" :class="ksgLastSettled ? 'text-amber-600' : 'text-slate-400'">
+          {{ ksgLastSettled ? `⚠️ Terakhir disettle sampai: ${ksgLastSettled} — pastikan rentang di atas tidak tumpang tindih.` : 'Belum pernah ada settlement utk kombinasi venue+supplier ini.' }}
+        </p>
+        <button @click="generateKsg" :disabled="ksgGenerating" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">
+          {{ ksgGenerating ? 'Menghitung…' : '🧮 Hitung & Buat Settlement' }}
+        </button>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <h3 class="font-semibold text-slate-700 px-4 py-3 border-b">Riwayat Settlement</h3>
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+            <th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Supplier</th>
+            <th class="px-4 py-3 font-medium">Periode</th><th class="px-4 py-3 font-medium text-right">Total</th>
+            <th class="px-4 py-3 font-medium text-center">Status</th><th class="px-4 py-3"></th>
+          </tr></thead>
+          <tbody>
+            <tr v-if="ksgLoading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!ksgSettlements.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada settlement.</td></tr>
+            <tr v-for="s in ksgSettlements" :key="s.id" @click="openKsgDetail(s)" class="border-t hover:bg-slate-50 cursor-pointer">
+              <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ s.code }}</td>
+              <td class="px-4 py-3 text-slate-600">{{ s.supplier_name || '—' }}</td>
+              <td class="px-4 py-3 text-slate-500">{{ s.period_from }} → {{ s.period_to }}</td>
+              <td class="px-4 py-3 text-right font-medium">{{ rupiah(s.total_amount) }}</td>
+              <td class="px-4 py-3 text-center">
+                <span class="text-xs rounded-full px-2 py-0.5" :class="s.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">{{ s.status === 'paid' ? 'Lunas' : 'Belum Lunas' }}</span>
+              </td>
+              <td class="px-4 py-3 text-right text-brand-600 text-sm">Detail</td>
             </tr>
           </tbody>
         </table>
@@ -447,6 +582,45 @@ watch(tab, reloadTab)
         <div v-if="canDeletePo(detail)" class="flex gap-2 pt-2">
           <button @click="removePo(detail)" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium">Hapus PO</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Detail Settlement Konsinyasi modal -->
+    <div v-if="ksgDetail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="ksgDetail = null">
+      <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
+        <div class="flex justify-between items-start mb-3">
+          <div><h3 class="text-lg font-bold text-slate-800">{{ ksgDetail.code }}</h3><p class="text-sm text-slate-500">{{ ksgDetail.supplier_name || '—' }} · {{ ksgDetail.period_from }} → {{ ksgDetail.period_to }}</p></div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs rounded-full px-2 py-1" :class="ksgDetail.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">{{ ksgDetail.status === 'paid' ? 'Lunas' : 'Belum Lunas' }}</span>
+            <button @click="ksgDetail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+          </div>
+        </div>
+        <div class="border rounded-lg overflow-hidden mb-3">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left text-xs"><tr>
+              <th class="px-3 py-2">Produk</th><th class="px-3 py-2 text-right">Terjual</th>
+              <th class="px-3 py-2 text-right">Bagi Hasil/unit</th><th class="px-3 py-2 text-right">Subtotal</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="it in ksgDetail.items" :key="it.id" class="border-t">
+                <td class="px-3 py-2 text-slate-700">{{ it.product_name }}</td>
+                <td class="px-3 py-2 text-right">{{ it.quantity_sold }}</td>
+                <td class="px-3 py-2 text-right">{{ rupiah(it.unit_price) }}</td>
+                <td class="px-3 py-2 text-right">{{ rupiah(it.subtotal) }}</td>
+              </tr>
+            </tbody>
+            <tfoot><tr class="border-t bg-slate-50 font-semibold"><td class="px-3 py-2" colspan="3">Total ke Supplier</td><td class="px-3 py-2 text-right">{{ rupiah(ksgDetail.total_amount) }}</td></tr></tfoot>
+          </table>
+        </div>
+        <div v-if="ksgDetail.status !== 'paid' && isApprover" class="pt-2 border-t">
+          <label class="block text-xs text-slate-500 mb-1">Sumber dana</label>
+          <select v-model="sourceAccount" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-2">
+            <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option>
+          </select>
+          <button @click="payKsg" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50 mb-2">Bayar ke Supplier</button>
+          <button @click="deleteKsg" class="w-full py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium text-sm">Hapus Settlement</button>
+        </div>
+        <p v-else-if="ksgDetail.status !== 'paid'" class="text-sm text-slate-400 text-center pt-2 border-t">Menunggu pembayaran HO.</p>
       </div>
     </div>
 

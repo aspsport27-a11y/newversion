@@ -2,7 +2,7 @@
 bayar HO), lampiran, reorder alert. Prefix: /api/procurement"""
 import os
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from flask import Blueprint, current_app, jsonify, request, send_file
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -11,9 +11,15 @@ from werkzeug.utils import secure_filename
 
 from ..extensions import db
 from ..models import Supplier, User, Venue
-from ..pos.models import Product, StockMovement
+from ..pos.models import Order, OrderItem, Product, StockMovement
 from ..security import ROLE_ADMIN_UNIT, ROLE_MANAGER, require_perm
-from .models import PoAttachment, PurchaseOrder, PurchaseOrderItem
+from .models import (
+    ConsignmentSettlement,
+    ConsignmentSettlementItem,
+    PoAttachment,
+    PurchaseOrder,
+    PurchaseOrderItem,
+)
 
 proc_bp = Blueprint("proc", __name__)
 
@@ -564,3 +570,187 @@ def po_attachment_get(aid):
     if not os.path.exists(path):
         return _err("File hilang di server", "not_found", 404)
     return send_file(path, download_name=att.filename, mimetype=att.content_type)
+
+
+# ======================================================================
+# KONSINYASI (titip barang) — settlement bagi hasil, MANUAL (on-demand)
+# Bagi hasil = jumlah TETAP per unit terjual (consignment_price di produk),
+# BUKAN persentase. Basis kas: hitung dari Order status='paid' dlm rentang
+# tanggal (sama pola dgn laporan penjualan).
+# ======================================================================
+def _gen_settlement_code(venue):
+    prefix = f"KSG-{venue.code}-"
+    n = db.session.query(func.count(ConsignmentSettlement.id)).filter(
+        ConsignmentSettlement.code.like(prefix + "%")
+    ).scalar() or 0
+    return f"{prefix}{n + 1:04d}"
+
+
+def _check_venue_id(venue_id):
+    vids = _scope_vids(_user())
+    if vids is not None and venue_id not in vids:
+        return _err("Venue di luar cakupan Anda", "forbidden", 403)
+    return None
+
+
+@proc_bp.get("/consignment/last-settled")
+@jwt_required()
+@VIEW
+def consignment_last_settled():
+    """Tanggal 'period_to' terakhir yg sudah pernah disettle utk venue+supplier
+    ini — dipakai frontend menampilkan 'Terakhir disettle sampai: X' spy user
+    tak sengaja pilih rentang yg tumpang tindih (dobel hitung)."""
+    venue_id = request.args.get("venue_id", type=int)
+    supplier_id = request.args.get("supplier_id", type=int)
+    if not venue_id or not supplier_id:
+        return _err("venue_id & supplier_id wajib")
+    err = _check_venue_id(venue_id)
+    if err:
+        return err
+    last = (
+        ConsignmentSettlement.query.filter_by(venue_id=venue_id, supplier_id=supplier_id)
+        .order_by(ConsignmentSettlement.period_to.desc()).first()
+    )
+    return jsonify(last_period_to=last.period_to.isoformat() if last else None), 200
+
+
+@proc_bp.get("/consignment/settlements")
+@jwt_required()
+@VIEW
+def consignment_settlements_list():
+    q = ConsignmentSettlement.query
+    vids = _scope_vids(_user())
+    if vids is not None:
+        q = q.filter(ConsignmentSettlement.venue_id.in_(vids)) if vids else q.filter(db.false())
+    elif request.args.get("venue_id", type=int):
+        q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
+    if request.args.get("supplier_id", type=int):
+        q = q.filter_by(supplier_id=request.args.get("supplier_id", type=int))
+    rows = q.order_by(ConsignmentSettlement.created_at.desc()).all()
+    sm = _sup_map()
+    return jsonify(count=len(rows), settlements=[s.to_dict(sm.get(s.supplier_id)) for s in rows]), 200
+
+
+@proc_bp.get("/consignment/settlements/<int:sid>")
+@jwt_required()
+@VIEW
+def consignment_settlement_detail(sid):
+    s = db.session.get(ConsignmentSettlement, sid)
+    if not s:
+        return _err("Settlement tidak ditemukan", "not_found", 404)
+    err = _check_venue_id(s.venue_id)
+    if err:
+        return err
+    return jsonify(settlement=s.to_dict(_sup_map().get(s.supplier_id))), 200
+
+
+@proc_bp.post("/consignment/settlements")
+@jwt_required()
+@CREATE
+def consignment_settlement_create():
+    d = request.get_json(silent=True) or {}
+    venue_id = d.get("venue_id")
+    supplier_id = d.get("supplier_id")
+    period_from = d.get("period_from")
+    period_to = d.get("period_to")
+    if not all([venue_id, supplier_id, period_from, period_to]):
+        return _err("venue_id, supplier_id, period_from, period_to wajib")
+    venue_id = int(venue_id)
+    err = _check_venue_id(venue_id)
+    if err:
+        return err
+    venue = db.session.get(Venue, venue_id)
+    if not venue:
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    if not db.session.get(Supplier, supplier_id):
+        return _err("Supplier tidak ditemukan", "not_found", 404)
+
+    products = Product.query.filter_by(
+        venue_id=venue_id, supplier_id=supplier_id, is_consignment=True,
+    ).all()
+    if not products:
+        return _err("Tidak ada produk konsinyasi utk supplier ini di venue ini", "no_products", 404)
+
+    # basis kas: order LUNAS yg dibuat dlm rentang (sama pola laporan penjualan)
+    paid_ids = [
+        o.id for o in Order.query.filter(
+            Order.venue_id == venue_id, Order.status == "paid",
+            func.date(Order.created_at).between(period_from, period_to),
+        ).with_entities(Order.id).all()
+    ]
+
+    items = []
+    total = 0.0
+    if paid_ids:
+        for p in products:
+            qty = (
+                db.session.query(func.coalesce(func.sum(OrderItem.quantity), 0))
+                .filter(OrderItem.order_id.in_(paid_ids), OrderItem.product_id == p.id)
+                .scalar() or 0
+            )
+            qty = float(qty)
+            if qty <= 0:
+                continue
+            unit_price = float(p.consignment_price or 0)
+            subtotal = round(qty * unit_price, 2)
+            items.append(ConsignmentSettlementItem(
+                product_id=p.id, product_name=p.name,
+                quantity_sold=qty, unit_price=unit_price, subtotal=subtotal,
+            ))
+            total += subtotal
+
+    if not items:
+        return _err(
+            "Tidak ada penjualan produk konsinyasi ini pada rentang tanggal tersebut",
+            "no_sales", 404,
+        )
+
+    s = ConsignmentSettlement(
+        code=_gen_settlement_code(venue), venue_id=venue_id, supplier_id=supplier_id,
+        period_from=date.fromisoformat(period_from), period_to=date.fromisoformat(period_to),
+        total_amount=round(total, 2), notes=d.get("notes"), created_by=_user().id,
+    )
+    s.items = items
+    db.session.add(s)
+    db.session.commit()
+    return jsonify(settlement=s.to_dict(_sup_map().get(supplier_id))), 201
+
+
+@proc_bp.post("/consignment/settlements/<int:sid>/pay")
+@jwt_required()
+@PAY
+def consignment_settlement_pay(sid):
+    s = db.session.get(ConsignmentSettlement, sid)
+    if not s:
+        return _err("Settlement tidak ditemukan", "not_found", 404)
+    if s.paid_at:
+        return _err("Settlement sudah dibayar", "bad_status", 409)
+    src = (request.get_json(silent=True) or {}).get("source_account_id")
+    if not src:
+        return _err("Sumber dana wajib dipilih")
+    from ..treasury.service import pay_expense
+    ok, perr = pay_expense(src, float(s.total_amount), "consignment", s.id, f"Bagi hasil konsinyasi {s.code}", _user().id)
+    if perr:
+        return _err(perr)
+    s.source_account_id = src
+    s.paid_by = _user().id
+    s.paid_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(settlement=s.to_dict(_sup_map().get(s.supplier_id))), 200
+
+
+@proc_bp.delete("/consignment/settlements/<int:sid>")
+@jwt_required()
+@CREATE
+def consignment_settlement_delete(sid):
+    s = db.session.get(ConsignmentSettlement, sid)
+    if not s:
+        return _err("Settlement tidak ditemukan", "not_found", 404)
+    err = _check_venue_id(s.venue_id)
+    if err:
+        return err
+    if s.paid_at:
+        return _err("Settlement sudah dibayar — tidak bisa dihapus.", "bad_status", 409)
+    db.session.delete(s)
+    db.session.commit()
+    return jsonify(message="Settlement dihapus"), 200

@@ -52,6 +52,8 @@ class Product(db.Model):
     supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id", ondelete="SET NULL"))
     is_ticket = db.Column(db.Boolean, nullable=False, default=False)  # tiket masuk (waterpark)
     weekend_price = db.Column(db.Numeric(15, 2))  # harga weekend/libur (khusus tiket)
+    is_consignment = db.Column(db.Boolean, nullable=False, default=False)  # produk titipan/konsinyasi
+    consignment_price = db.Column(db.Numeric(15, 2))  # jumlah tetap ke supplier per unit terjual
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
@@ -71,6 +73,8 @@ class Product(db.Model):
             "supplier_id": self.supplier_id,
             "is_ticket": self.is_ticket,
             "weekend_price": float(self.weekend_price) if self.weekend_price is not None else None,
+            "is_consignment": self.is_consignment,
+            "consignment_price": float(self.consignment_price) if self.consignment_price is not None else None,
             "is_active": self.is_active,
         }
 

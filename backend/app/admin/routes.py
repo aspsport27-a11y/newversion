@@ -439,6 +439,8 @@ def products_create():
         supplier_id=d.get("supplier_id") or None,
         is_ticket=bool(d.get("is_ticket", False)),
         weekend_price=_promo(d.get("weekend_price")),
+        is_consignment=bool(d.get("is_consignment", False)),
+        consignment_price=_promo(d.get("consignment_price")),
         is_active=bool(d.get("is_active", True)),
     )
     db.session.add(p)
@@ -488,6 +490,10 @@ def products_update(pid):
         p.is_ticket = bool(d["is_ticket"])
     if "weekend_price" in d:
         p.weekend_price = _promo(d["weekend_price"])
+    if "is_consignment" in d:
+        p.is_consignment = bool(d["is_consignment"])
+    if "consignment_price" in d:
+        p.consignment_price = _promo(d["consignment_price"])
     if "is_active" in d:
         p.is_active = bool(d["is_active"])
     p.updated_at = datetime.utcnow()
