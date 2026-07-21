@@ -20,14 +20,27 @@ const filteredProducts = computed(() => {
     list = list.filter((p) => String(p.category_id || '') === String(categoryFilter.value))
   }
   const q = search.value.trim().toLowerCase()
-  if (!q) return list
-  return list.filter((p) =>
-    p.name.toLowerCase().includes(q) ||
-    p.sku.toLowerCase().includes(q) ||
-    (p.category_name || '').toLowerCase().includes(q) ||
-    supName(p.supplier_id).toLowerCase().includes(q)
-  )
+  if (q) {
+    list = list.filter((p) =>
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      (p.category_name || '').toLowerCase().includes(q) ||
+      supName(p.supplier_id).toLowerCase().includes(q)
+    )
+  }
+  return list
 })
+
+// ---- Paging ----
+const page = ref(1)
+const pageSize = ref(20)
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredProducts.value.length / pageSize.value)))
+const pagedProducts = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredProducts.value.slice(start, start + pageSize.value)
+})
+watch([search, categoryFilter, pageSize], () => { page.value = 1 })
+watch(totalPages, (tp) => { if (page.value > tp) page.value = tp })
 function supName(id) { const s = suppliers.value.find((x) => x.id === id); return s ? s.name : '—' }
 const showForm = ref(false)
 const editing = ref(null)
@@ -113,7 +126,7 @@ onMounted(async () => {
   await loadVenues()
   await loadProducts()
 })
-watch(venueId, () => { search.value = ''; categoryFilter.value = ''; loadProducts() })
+watch(venueId, () => { search.value = ''; categoryFilter.value = ''; page.value = 1; loadProducts() })
 
 function openCreate() {
   editing.value = null
@@ -202,7 +215,7 @@ async function save() {
             <tr v-if="loading"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
             <tr v-else-if="!products.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada produk.</td></tr>
             <tr v-else-if="!filteredProducts.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Tidak ada produk yang cocok dengan pencarian.</td></tr>
-            <tr v-for="p in filteredProducts" :key="p.id" class="border-t hover:bg-slate-50">
+            <tr v-for="p in pagedProducts" :key="p.id" class="border-t hover:bg-slate-50">
               <td class="px-4 py-3 font-mono text-slate-500">{{ p.sku }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">
                 {{ p.name }}
@@ -231,6 +244,24 @@ async function save() {
             </tr>
           </tbody>
         </table>
+      </div>
+      <div v-if="filteredProducts.length" class="flex items-center justify-between gap-3 px-4 py-3 border-t flex-wrap">
+        <p class="text-xs text-slate-500">
+          Menampilkan {{ (page - 1) * pageSize + 1 }}–{{ Math.min(page * pageSize, filteredProducts.length) }} dari {{ filteredProducts.length }} produk
+        </p>
+        <div class="flex items-center gap-2">
+          <select v-model.number="pageSize" class="rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-brand-500">
+            <option :value="10">10 / halaman</option>
+            <option :value="20">20 / halaman</option>
+            <option :value="50">50 / halaman</option>
+            <option :value="100">100 / halaman</option>
+          </select>
+          <button @click="page = 1" :disabled="page === 1" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">«</button>
+          <button @click="page--" :disabled="page === 1" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">‹ Sebelumnya</button>
+          <span class="text-xs text-slate-500">Halaman {{ page }} / {{ totalPages }}</span>
+          <button @click="page++" :disabled="page === totalPages" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">Berikutnya ›</button>
+          <button @click="page = totalPages" :disabled="page === totalPages" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">»</button>
+        </div>
       </div>
     </div>
 
