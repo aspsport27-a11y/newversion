@@ -14,6 +14,18 @@ const categories = ref([])
 const loading = ref(false)
 const search = ref('')
 const categoryFilter = ref('')
+// kategori punya tabel global (bukan per-venue) — dropdown filter cuma tampilkan
+// kategori yang benar2 dipakai produk di venue yg sedang dipilih, biar tak numpuk
+// duplikat mirip dari venue lain (mis. "CAFE" vs "Café")
+const availableCategories = computed(() => {
+  const seen = new Map()
+  for (const p of products.value) {
+    if (p.category_id != null && !seen.has(p.category_id)) {
+      seen.set(p.category_id, p.category_name || '—')
+    }
+  }
+  return Array.from(seen, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+})
 const filteredProducts = computed(() => {
   let list = products.value
   if (categoryFilter.value) {
@@ -192,7 +204,7 @@ async function save() {
         class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
       <select v-model="categoryFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
         <option value="">Semua kategori</option>
-        <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+        <option v-for="c in availableCategories" :key="c.id" :value="c.id">{{ c.name }}</option>
       </select>
     </div>
 
