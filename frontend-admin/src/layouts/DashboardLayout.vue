@@ -3,10 +3,12 @@ import { onMounted, ref, computed } from 'vue'
 import { RouterView, RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import client from '../api/client'
+import AskAiDialog from '../components/AskAiDialog.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
 const sidebarOpen = ref(false)
+const showAskAi = ref(false)
 
 // Ganti password akun sendiri (semua role login-portal, termasuk super admin)
 const showPwd = ref(false)
@@ -181,6 +183,12 @@ function toggleGroup(label) {
         <button class="lg:hidden text-2xl" @click="sidebarOpen = true">☰</button>
         <div class="flex-1" />
         <div class="flex items-center gap-3">
+          <button
+            @click="showAskAi = true"
+            class="text-sm text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-100 rounded-lg px-3 py-1.5 transition"
+          >
+            🤖 Ask AI
+          </button>
           <div class="text-right leading-tight">
             <p class="text-sm font-medium text-slate-700">{{ auth.user?.username }}</p>
             <p class="text-xs text-slate-400">{{ auth.roleLabel }}</p>
@@ -203,6 +211,8 @@ function toggleGroup(label) {
           </button>
         </div>
       </header>
+
+      <AskAiDialog v-if="showAskAi" @close="showAskAi = false" />
 
       <main class="flex-1 p-4 lg:p-8 overflow-auto">
         <RouterView />
