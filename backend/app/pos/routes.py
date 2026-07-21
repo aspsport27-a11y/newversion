@@ -1,5 +1,5 @@
 """Endpoint POS — Fase M1. Prefix: /api/pos"""
-from datetime import datetime
+from datetime import date, datetime
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import (
@@ -8,11 +8,12 @@ from flask_jwt_extended import (
     get_jwt_identity,
     jwt_required,
 )
+from sqlalchemy import func
 
 from ..extensions import db
 from ..models import Employee, User, Venue
 from ..security import verify_password
-from .models import Attendance, Facility, FacilityBooking, PosTerminal, Product, ProductCategory, Shift
+from .models import Attendance, Facility, FacilityBooking, Order, OrderItem, PosTerminal, Product, ProductCategory, Shift
 from .services import (
     PosError,
     add_cash_movement,
@@ -248,6 +249,62 @@ def pos_products():
             d["effective_price"] = ticket_unit_price(p)
         out.append(d)
     return jsonify(count=len(out), products=out), 200
+
+
+# ------------------------------------------------------------------
+# Laporan penjualan hari ini per kategori (untuk kasir, tanpa detail item)
+# ------------------------------------------------------------------
+_REPORT_LABELS = {"ticket": "Tiket Masuk", "booking": "Booking Lapangan", "rental": "Station Gaming"}
+
+
+@pos_bp.get("/reports/category-daily")
+@jwt_required()
+def report_category_daily():
+    terminal = _current_terminal()
+    today = date.today()
+
+    order_ids = [
+        oid
+        for (oid,) in Order.query.filter(
+            Order.venue_id == terminal.venue_id,
+            Order.status == "paid",
+            func.date(Order.created_at) == today,
+        ).with_entities(Order.id).all()
+    ]
+
+    groups = {}
+    total = 0.0
+    if order_ids:
+        cat_names = {c.id: c.name for c in ProductCategory.query.all()}
+        rows = (
+            db.session.query(
+                OrderItem.item_type,
+                Product.category_id,
+                func.coalesce(func.sum(OrderItem.quantity), 0),
+                func.coalesce(func.sum(OrderItem.line_total), 0),
+            )
+            .outerjoin(Product, OrderItem.product_id == Product.id)
+            .filter(OrderItem.order_id.in_(order_ids))
+            .group_by(OrderItem.item_type, Product.category_id)
+            .all()
+        )
+        for item_type, category_id, qty, amount in rows:
+            if item_type == "product":
+                label = cat_names.get(category_id, "Tanpa Kategori")
+            else:
+                label = _REPORT_LABELS.get(item_type, item_type)
+            g = groups.setdefault(label, {"category": label, "qty": 0.0, "amount": 0.0})
+            g["qty"] += float(qty)
+            g["amount"] += float(amount)
+            total += float(amount)
+
+    by_category = sorted(groups.values(), key=lambda x: -x["amount"])
+    return jsonify(
+        date=today.isoformat(),
+        order_count=len(order_ids),
+        total=round(total, 2),
+        by_category=by_category,
+    ), 200
 
 
 # ------------------------------------------------------------------
