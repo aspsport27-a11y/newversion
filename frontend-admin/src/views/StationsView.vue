@@ -23,7 +23,9 @@ const tierLabel = (t) => TIERS.find((x) => x.value === t)?.label || t
 
 async function loadVenues() {
   const { data } = await client.get('/venues')
-  venues.value = data.venues
+  // Station Gaming cuma relevan utk venue tipe esport — venue lain (futsal/padel/
+  // waterpark dll) tak pernah punya station, jadi tak perlu muncul di pilihan
+  venues.value = data.venues.filter((v) => /esport/i.test(v.type || ''))
   if (isManager.value) venues.value = venues.value.filter((x) => x.id === auth.user?.venue_id)
   else if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   if (venues.value.length && !venueId.value) venueId.value = venues.value[0].id
