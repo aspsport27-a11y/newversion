@@ -14,7 +14,7 @@ function print() {
   <div class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
     <div class="bg-white w-full max-w-xs rounded-2xl overflow-hidden">
       <!-- struk -->
-      <div id="receipt" class="p-5 text-sm">
+      <div class="printable p-5 text-sm">
         <div class="text-center mb-2">
           <img src="/asp-logo.png" alt="ASP Sports" class="h-8 mx-auto mb-1" />
           <p class="text-xs">{{ terminal?.name }}</p>
