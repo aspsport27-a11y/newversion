@@ -27,6 +27,8 @@ const editable = computed(() => detail.value && ['draft', 'submitted'].includes(
 
 const accounts = ref([])
 const sourceAccount = ref('')
+const transferAmount = ref(null)
+watch(detail, (d) => { transferAmount.value = d?.total_net ?? null })
 async function loadVenues() {
   const { data } = await client.get('/venues')
   venues.value = data.venues
@@ -234,7 +236,10 @@ function slip(it) {
                 <td class="px-3 py-2 text-right"><button @click="slip(it)" class="text-brand-600 text-xs hover:underline">Slip</button></td>
               </tr>
             </tbody>
-            <tfoot><tr class="border-t bg-slate-50 font-semibold"><td class="px-3 py-2" colspan="5">Total Gaji Bersih</td><td class="px-3 py-2 text-right">{{ rupiah(detail.total_net) }}</td><td></td></tr></tfoot>
+            <tfoot>
+              <tr class="border-t bg-slate-50 font-semibold"><td class="px-3 py-2" colspan="5">Total Gaji Bersih</td><td class="px-3 py-2 text-right">{{ rupiah(detail.total_net) }}</td><td></td></tr>
+              <tr v-if="detail.paid_amount != null && detail.paid_amount !== detail.total_net" class="border-t bg-amber-50 font-semibold text-amber-700"><td class="px-3 py-2" colspan="5">Nominal Ditransfer (Aktual)</td><td class="px-3 py-2 text-right">{{ rupiah(detail.paid_amount) }}</td><td></td></tr>
+            </tfoot>
           </table>
         </div>
         <p v-if="detail.rejection_reason" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">Ditolak: {{ detail.rejection_reason }}</p>
@@ -260,7 +265,10 @@ function slip(it) {
             <select v-model="sourceAccount" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-2">
               <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option>
             </select>
-            <button @click="act('pay', { source_account_id: sourceAccount })" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Bayar (Transfer) — potong kasbon</button>
+            <label class="block text-xs text-slate-500 mb-1">Jumlah transfer</label>
+            <input v-model.number="transferAmount" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-right outline-none focus:border-brand-500 mb-1" />
+            <p class="text-xs text-slate-400 mb-2">Default = Total Gaji Bersih ({{ rupiah(detail.total_net) }}). Bisa diubah manual (mis. karena pembulatan) — tetap dianggap Lunas berapa pun nominalnya, dan tetap memotong rekening di Kas &amp; Bank sebesar ini.</p>
+            <button @click="act('pay', { source_account_id: sourceAccount, amount: transferAmount })" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Bayar (Transfer) — potong kasbon</button>
           </div>
           <p v-else class="text-sm text-slate-400 py-2 text-center w-full">Status: {{ statusMap[detail.status]?.[0] }}<span v-if="detail.status === 'submitted'"> — menunggu Head Office</span></p>
         </div>

@@ -222,18 +222,27 @@ def run_reject(rid):
 @jwt_required()
 @APPROVE
 def run_pay(rid):
-    """Bayar (transfer). Eksekusi potong kasbon → employee_debts repayment."""
+    """Bayar (transfer). Nominal transfer bisa dientry manual (mis. beda krn
+    pembulatan/penyesuaian di luar sistem) — default = total gaji bersih
+    kalau tak diisi. Status tetap langsung 'paid' penuh berapa pun nominalnya
+    (sistem tak melacak sisa kekurangan). Eksekusi potong kasbon → employee_debts
+    repayment tetap dihitung dari total_net (bukan nominal transfer)."""
     r, err = _transition(rid, "approved", "paid")
     if err:
         return err
     uid = _user().id
-    src = (request.get_json(silent=True) or {}).get("source_account_id")
+    d = request.get_json(silent=True) or {}
+    src = d.get("source_account_id")
+    amount = _D(d.get("amount")) if d.get("amount") not in (None, "", 0, "0") else float(r.total_net)
+    if amount <= 0:
+        return _err("Nominal transfer harus lebih dari 0")
     if src:
         from ..treasury.service import pay_expense
-        ok, perr = pay_expense(src, float(r.total_net), "payroll", r.id, f"Gaji {r.code}", uid)
+        ok, perr = pay_expense(src, amount, "payroll", r.id, f"Gaji {r.code}", uid)
         if perr:
             return _err(perr)
         r.source_account_id = src
+    r.paid_amount = amount
     for item in r.items:
         if _D(item.kasbon_deduction) > 0 and item.employee_id:
             bal = _kasbon_balance(item.employee_id)
@@ -277,13 +286,17 @@ def run_revert(rid):
                 ))
         if r.source_account_id:
             from ..treasury.service import record_tx
+            # balikkan nominal yg BENAR2 keluar (paid_amount, bisa beda dr total_net
+            # kalau waktu bayar di-entry manual) — fallback total_net utk run lama
+            reversed_amount = float(r.paid_amount) if r.paid_amount is not None else float(r.total_net)
             record_tx(
-                r.source_account_id, "in", float(r.total_net), "payroll_cancel",
+                r.source_account_id, "in", reversed_amount, "payroll_cancel",
                 ref_type="payroll", ref_id=r.id, note=f"Pembatalan pembayaran {r.code}",
                 user_id=uid,
             )
         r.paid_by = None
         r.paid_at = None
+        r.paid_amount = None
         r.source_account_id = None
 
     r.status = "draft"

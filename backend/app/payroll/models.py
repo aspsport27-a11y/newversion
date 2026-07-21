@@ -21,6 +21,7 @@ class PayrollRun(db.Model):
     rejection_reason = db.Column(db.Text)
     paid_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     paid_at = db.Column(db.DateTime)
+    paid_amount = db.Column(db.Numeric(15, 2))  # nominal RIL yg ditransfer (manual, bisa beda dr total_net)
     source_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -37,6 +38,7 @@ class PayrollRun(db.Model):
             "rejection_reason": self.rejection_reason,
             "approved_at": self.approved_at.isoformat() if self.approved_at else None,
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
+            "paid_amount": f(self.paid_amount),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "employee_count": len(self.items),
             "attachments": [a.to_dict() for a in self.attachments],
