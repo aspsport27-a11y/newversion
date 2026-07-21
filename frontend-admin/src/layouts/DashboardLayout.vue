@@ -59,6 +59,7 @@ const navGroups = [
       { name: 'products', label: 'Produk', icon: '📦', perm: 'product.manage' },
       { name: 'promos', label: 'Promo', icon: '🎉', perm: 'promo.manage' },
       { name: 'facilities', label: 'Lapangan & Tiket', icon: '⚽', perm: 'facility.manage' },
+      { name: 'stations', label: 'Station Gaming', icon: '🎮', perm: 'station.manage' },
     ],
   },
   {
