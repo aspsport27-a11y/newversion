@@ -7,7 +7,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from ..extensions import db
 from ..models import User, Venue
 from ..security import ROLE_ADMIN_UNIT, ROLE_MANAGER, require_perm
-from .models import TIERS, GameSession, GameStation
+from .models import TIERS, GameAddon, GameSession, GameStation
 
 stations_bp = Blueprint("stations", __name__)
 
@@ -137,3 +137,85 @@ def stations_delete(sid):
     db.session.delete(s)
     db.session.commit()
     return jsonify(message="Station dihapus"), 200
+
+
+# ------------------------------------------------------------------
+# Add-on perangkat tambahan (katalog) — stick ekstra, VR, setir racing dll.
+# Ditagih per jam mengikuti durasi sesi (lihat GameSession.addon_charge).
+# ------------------------------------------------------------------
+@stations_bp.get("/addons")
+@jwt_required()
+@MANAGE
+def addons_list():
+    q = GameAddon.query
+    vid = request.args.get("venue_id", type=int)
+    vids = _scope_vids(_current_user())
+    if vid:
+        if vids is not None and vid not in vids:
+            return _err("Venue di luar cakupan Anda", "forbidden", 403)
+        q = q.filter_by(venue_id=vid)
+    elif vids is not None:
+        q = q.filter(GameAddon.venue_id.in_(vids)) if vids else q.filter(db.false())
+    addons = q.order_by(GameAddon.name).all()
+    return jsonify(count=len(addons), addons=[a.to_dict() for a in addons]), 200
+
+
+@stations_bp.post("/addons")
+@jwt_required()
+@MANAGE
+def addons_create():
+    d = request.get_json(silent=True) or {}
+    for f in ("venue_id", "name"):
+        if not d.get(f):
+            return _err(f"{f} wajib diisi")
+    vids = _scope_vids(_current_user())
+    if vids is not None and int(d["venue_id"]) not in vids:
+        return _err("Venue di luar cakupan Anda", "forbidden", 403)
+    if not db.session.get(Venue, d["venue_id"]):
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    a = GameAddon(venue_id=d["venue_id"], name=d["name"], hourly_rate=float(d.get("hourly_rate") or 0), is_active=True)
+    db.session.add(a)
+    db.session.commit()
+    return jsonify(addon=a.to_dict()), 201
+
+
+@stations_bp.put("/addons/<int:aid>")
+@jwt_required()
+@MANAGE
+def addons_update(aid):
+    a = db.session.get(GameAddon, aid)
+    if not a:
+        return _err("Add-on tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and a.venue_id not in vids:
+        return _err("Add-on di luar cakupan Anda", "forbidden", 403)
+    d = request.get_json(silent=True) or {}
+    if "name" in d and d["name"]:
+        a.name = d["name"]
+    if "hourly_rate" in d:
+        a.hourly_rate = float(d["hourly_rate"] or 0)
+    if "is_active" in d:
+        a.is_active = bool(d["is_active"])
+    db.session.commit()
+    return jsonify(addon=a.to_dict()), 200
+
+
+@stations_bp.delete("/addons/<int:aid>")
+@jwt_required()
+@MANAGE
+def addons_delete(aid):
+    a = db.session.get(GameAddon, aid)
+    if not a:
+        return _err("Add-on tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and a.venue_id not in vids:
+        return _err("Add-on di luar cakupan Anda", "forbidden", 403)
+    from .models import GameSessionAddon
+    if GameSessionAddon.query.filter_by(addon_id=aid).first():
+        return _err(
+            "Add-on ini punya riwayat pemakaian — nonaktifkan saja (jangan hapus) agar riwayat tak hilang.",
+            "has_dependencies", 409,
+        )
+    db.session.delete(a)
+    db.session.commit()
+    return jsonify(message="Add-on dihapus"), 200

@@ -491,6 +491,57 @@ def station_topup(sid):
     return jsonify(session=session.to_dict()), 201
 
 
+@pos_bp.get("/addons")
+@jwt_required()
+def addons_list():
+    from ..stations.models import GameAddon
+
+    terminal = _current_terminal()
+    addons = (
+        GameAddon.query.filter_by(venue_id=terminal.venue_id, is_active=True)
+        .order_by(GameAddon.name).all()
+    )
+    return jsonify(count=len(addons), addons=[a.to_dict() for a in addons]), 200
+
+
+@pos_bp.post("/stations/<int:sid>/addons")
+@jwt_required()
+def station_addon_attach(sid):
+    from ..stations.models import GameAddon, GameSessionAddon
+
+    terminal = _current_terminal()
+    session = _current_ongoing_session(sid, terminal.venue_id)
+    data = request.get_json(silent=True) or {}
+    addon = db.session.get(GameAddon, data.get("addon_id"))
+    if addon is None or addon.venue_id != terminal.venue_id or not addon.is_active:
+        raise PosError("Add-on tidak ditemukan", "not_found", 404)
+    qty = int(data.get("quantity") or 1)
+    if qty <= 0:
+        raise PosError("Quantity harus > 0", "bad_quantity")
+    sa = GameSessionAddon(
+        session_id=session.id, addon_id=addon.id, name_snapshot=addon.name,
+        rate_per_hour=addon.hourly_rate, quantity=qty, created_by=int(get_jwt_identity()),
+    )
+    db.session.add(sa)
+    db.session.commit()
+    return jsonify(session=session.to_dict()), 201
+
+
+@pos_bp.delete("/stations/<int:sid>/addons/<int:said>")
+@jwt_required()
+def station_addon_detach(sid, said):
+    from ..stations.models import GameSessionAddon
+
+    terminal = _current_terminal()
+    session = _current_ongoing_session(sid, terminal.venue_id)
+    sa = db.session.get(GameSessionAddon, said)
+    if sa is None or sa.session_id != session.id:
+        raise PosError("Add-on pada sesi ini tidak ditemukan", "not_found", 404)
+    db.session.delete(sa)
+    db.session.commit()
+    return jsonify(session=session.to_dict()), 200
+
+
 @pos_bp.post("/stations/<int:sid>/stop")
 @jwt_required()
 def station_stop(sid):
@@ -514,6 +565,14 @@ def station_stop(sid):
         items.append({
             "item_type": "rental", "name": f"Tambah waktu {t.duration_minutes} menit — {station.name}",
             "unit_price": float(t.total_amount), "quantity": 1,
+        })
+    for a in session.addons:
+        # add-on ditagih per jam mengikuti durasi sesi utama (sama basis dgn elapsed_minutes di atas)
+        charge = round(session.elapsed_minutes() / 60 * float(a.rate_per_hour) * a.quantity, 2)
+        items.append({
+            "item_type": "rental",
+            "name": f"{a.name_snapshot} x{a.quantity} ({session.elapsed_minutes()} menit)",
+            "unit_price": charge, "quantity": 1,
         })
     items.extend(data.get("extra_items") or [])
 
