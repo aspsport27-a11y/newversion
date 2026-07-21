@@ -20,7 +20,7 @@ const toast = ref('')
 
 function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
-function ym() { const [y, m] = period.value.split('-'); return { year: +y, month: +m } }
+function ym() { const [y, m] = period.value.split('-'); return { period_year: +y, period_month: +m } }
 const MONTHS = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
 const statusMap = { draft: ['Draft', 'bg-slate-100 text-slate-600'], submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], paid: ['Dibayar', 'bg-emerald-100 text-emerald-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'] }
 const editable = computed(() => detail.value && ['draft', 'submitted'].includes(detail.value.status))
