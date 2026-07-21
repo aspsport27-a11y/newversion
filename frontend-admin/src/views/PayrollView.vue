@@ -6,6 +6,7 @@ import { useAuthStore } from '../stores/auth'
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const isApprover = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
+const canRevert = computed(() => auth.hasPerm('payroll.approve'))
 
 const venues = ref([])
 const venueId = ref('')
@@ -27,9 +28,8 @@ const editable = computed(() => detail.value && ['draft', 'submitted'].includes(
 const accounts = ref([])
 const sourceAccount = ref('')
 async function loadVenues() {
-  const { data } = await client.get('/admin/venues')
+  const { data } = await client.get('/venues')
   venues.value = data.venues
-  if (!isManager.value && venues.value.length && !venueId.value) venueId.value = venues.value[0].id
   if (isApprover.value) {
     try {
       const { data: acc } = await client.get('/treasury/accounts')
@@ -73,6 +73,46 @@ async function act(action, extra = {}) {
 }
 function doReject() { const reason = prompt('Alasan penolakan:'); if (reason !== null) act('reject', { reason }) }
 
+async function revertRun() {
+  const warn = detail.value.status === 'paid'
+    ? 'Ini akan membalikkan pembayaran (uang masuk lagi ke Kas & Bank) dan mengembalikan potongan kasbon karyawan. Lanjutkan?'
+    : 'Kembalikan status payroll ke Draft?'
+  if (!window.confirm(warn)) return
+  busy.value = true
+  try {
+    await client.post(`/payroll/runs/${detail.value.id}/revert`)
+    const { data } = await client.get(`/payroll/runs/${detail.value.id}`); detail.value = data.run
+    await loadRuns(); flash('Pengajuan dibatalkan — kembali ke Draft')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan.') } finally { busy.value = false }
+}
+const canDeleteRun = (r) => ['draft', 'submitted', 'approved', 'rejected'].includes(r.status)
+async function removeRun(r, ev) {
+  ev?.stopPropagation()
+  if (!window.confirm(`Hapus payroll ${r.code}?`)) return
+  try {
+    await client.delete(`/payroll/runs/${r.id}`)
+    if (detail.value?.id === r.id) detail.value = null
+    await loadRuns(); flash('Payroll dihapus')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
+}
+
+const uploadInput = ref(null)
+const uploading = ref(false)
+function triggerUpload() { uploadInput.value?.click() }
+async function onUpload(e) {
+  const file = e.target.files[0]
+  e.target.value = ''
+  if (!file || !detail.value) return
+  uploading.value = true
+  try {
+    const fd = new FormData(); fd.append('file', file)
+    await client.post(`/payroll/runs/${detail.value.id}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    const { data } = await client.get(`/payroll/runs/${detail.value.id}`); detail.value = data.run
+    flash('Data diunggah')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal mengunggah.') } finally { uploading.value = false }
+}
+async function viewAtt(a) { const res = await client.get(`/payroll/attachments/${a.id}`, { responseType: 'blob' }); window.open(URL.createObjectURL(res.data), '_blank') }
+
 function slip(it) {
   const r = detail.value
   const venue = venues.value.find((v) => v.id === r.venue_id)
@@ -105,6 +145,7 @@ function slip(it) {
       </div>
       <div class="flex gap-2 items-center">
         <select v-if="!isManager" v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="">Semua venue</option>
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
         <input v-model="period" type="month" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
@@ -116,20 +157,26 @@ function slip(it) {
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-            <th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Periode</th>
+            <th class="px-4 py-3 font-medium">Kode</th>
+            <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
+            <th class="px-4 py-3 font-medium">Periode</th>
             <th class="px-4 py-3 font-medium text-center">Karyawan</th><th class="px-4 py-3 font-medium text-right">Total Net</th>
             <th class="px-4 py-3 font-medium text-center">Status</th><th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!runs.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada payroll. Klik "Generate Gaji".</td></tr>
+            <tr v-if="loading"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!runs.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada payroll. Klik "Generate Gaji".</td></tr>
             <tr v-for="r in runs" :key="r.id" @click="openDetail(r)" class="border-t hover:bg-slate-50 cursor-pointer">
               <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ r.code }}</td>
+              <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===r.venue_id)?.code || '—' }}</td>
               <td class="px-4 py-3 text-slate-600">{{ MONTHS[r.period_month] }} {{ r.period_year }}</td>
               <td class="px-4 py-3 text-center">{{ r.employee_count }}</td>
               <td class="px-4 py-3 text-right font-medium">{{ rupiah(r.total_net) }}</td>
               <td class="px-4 py-3 text-center"><span :class="statusMap[r.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[r.status]?.[0] }}</span></td>
-              <td class="px-4 py-3 text-right text-brand-600 text-sm">Detail</td>
+              <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
+                <span class="text-brand-600">Detail</span>
+                <button v-if="canDeleteRun(r)" @click="removeRun(r, $event)" class="text-red-500 hover:underline ml-3">Hapus</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -141,7 +188,10 @@ function slip(it) {
       <div class="bg-white w-full max-w-3xl rounded-2xl p-5 max-h-[92vh] overflow-auto">
         <div class="flex justify-between items-start mb-3">
           <div><h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3><p class="text-sm text-slate-500">{{ MONTHS[detail.period_month] }} {{ detail.period_year }}</p></div>
-          <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
+          <div class="flex items-center gap-2">
+            <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
+            <button @click="detail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+          </div>
         </div>
         <div class="border rounded-lg overflow-x-auto mb-3">
           <table class="w-full text-sm">
@@ -171,6 +221,16 @@ function slip(it) {
         </div>
         <p v-if="detail.rejection_reason" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">Ditolak: {{ detail.rejection_reason }}</p>
 
+        <div class="mb-3">
+          <div class="flex items-center justify-between mb-1">
+            <p class="text-xs font-medium text-slate-500">Data / Bukti Transfer</p>
+            <input ref="uploadInput" type="file" accept="image/*,.pdf" class="hidden" @change="onUpload" />
+            <button @click="triggerUpload" :disabled="uploading" class="text-xs text-brand-600 hover:underline disabled:opacity-50">{{ uploading ? 'Mengunggah…' : '+ Upload data' }}</button>
+          </div>
+          <div v-if="!detail.attachments.length" class="text-sm text-slate-400">Tidak ada lampiran.</div>
+          <div v-else class="flex flex-wrap gap-2"><button v-for="a in detail.attachments" :key="a.id" @click="viewAtt(a)" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded px-2 py-1">📎 {{ a.filename }}</button></div>
+        </div>
+
         <div class="flex gap-2 pt-2 border-t">
           <button v-if="detail.status === 'draft'" @click="act('submit')" :disabled="busy" class="flex-1 py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Ajukan ke HO</button>
           <template v-else-if="detail.status === 'submitted' && isApprover">
@@ -185,6 +245,12 @@ function slip(it) {
             <button @click="act('pay', { source_account_id: sourceAccount })" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Bayar (Transfer) — potong kasbon</button>
           </div>
           <p v-else class="text-sm text-slate-400 py-2 text-center w-full">Status: {{ statusMap[detail.status]?.[0] }}<span v-if="detail.status === 'submitted'"> — menunggu Head Office</span></p>
+        </div>
+        <div v-if="detail.status !== 'draft' && canRevert" class="flex gap-2 pt-2">
+          <button @click="revertRun" :disabled="busy" class="flex-1 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium disabled:opacity-50">↩️ Batal Pengajuan (kembali ke Draft)</button>
+        </div>
+        <div v-if="canDeleteRun(detail)" class="flex gap-2 pt-2">
+          <button @click="removeRun(detail)" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium">Hapus Payroll</button>
         </div>
       </div>
     </div>

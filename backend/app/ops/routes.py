@@ -359,6 +359,69 @@ def request_disburse(rid):
     return jsonify(request=r.to_dict(_cat_map())), 200
 
 
+@ops_bp.post("/requests/<int:rid>/revert")
+@jwt_required()
+@APPROVE
+def request_revert(rid):
+    """Batalkan proses pengajuan — kembalikan status ke 'submitted' (Menunggu).
+    Kalau sudah 'disbursed', balikkan uang yg sudah keluar dicatat balik masuk
+    di Kas & Bank (bukan dihapus dari riwayat)."""
+    r = db.session.get(OpRequest, rid)
+    if not r:
+        return _err("Pengajuan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_user())
+    if vids is not None and r.venue_id not in vids:
+        return _err("Bukan pengajuan dalam cakupan Anda", "forbidden", 403)
+    if r.status == "submitted":
+        return _err("Pengajuan sudah berstatus Menunggu", "bad_status", 409)
+    uid = _user().id
+
+    if r.status == "disbursed" and r.source_account_id:
+        from ..treasury.service import record_tx
+        record_tx(
+            r.source_account_id, "in", float(r.total_amount), "op_cancel",
+            ref_type="op_request", ref_id=r.id, note=f"Pembatalan pencairan {r.code}",
+            user_id=uid,
+        )
+        r.disbursed_by = None
+        r.disbursed_at = None
+        r.source_account_id = None
+
+    r.status = "submitted"
+    r.approved_by = None
+    r.approved_at = None
+    r.rejection_reason = None
+    r.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(request=r.to_dict(_cat_map())), 200
+
+
+@ops_bp.delete("/requests/<int:rid>")
+@jwt_required()
+@CREATE
+def request_delete(rid):
+    """Hapus pengajuan — hanya sebelum dicairkan (blm ada efek kas).
+    Pengajuan yg sudah 'disbursed' TIDAK bisa dihapus (akan merusak riwayat kas)."""
+    r = db.session.get(OpRequest, rid)
+    if not r:
+        return _err("Pengajuan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_user())
+    if vids is not None and r.venue_id not in vids:
+        return _err("Bukan pengajuan dalam cakupan Anda", "forbidden", 403)
+    if r.status not in ("submitted", "approved", "rejected"):
+        return _err(
+            f"Pengajuan sudah {r.status} — tidak bisa dihapus (sudah ada efek kas).",
+            "bad_status", 409,
+        )
+    for att in r.attachments:
+        path = os.path.join(_upload_dir(), att.stored_name)
+        if os.path.exists(path):
+            os.remove(path)
+    db.session.delete(r)  # items & attachments (DB rows) ikut terhapus, ondelete=CASCADE
+    db.session.commit()
+    return jsonify(message="Pengajuan dihapus"), 200
+
+
 # ------------------------------------------------------------------
 # Lampiran bukti
 # ------------------------------------------------------------------

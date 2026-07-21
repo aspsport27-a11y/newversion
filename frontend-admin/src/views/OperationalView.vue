@@ -101,6 +101,28 @@ async function viewAttachment(a) {
   const res = await client.get(`/ops/attachments/${a.id}`, { responseType: 'blob' })
   window.open(URL.createObjectURL(res.data), '_blank')
 }
+async function revertRequest() {
+  const warn = detail.value.status === 'disbursed'
+    ? 'Ini akan membalikkan pencairan dana (uang masuk lagi ke Kas & Bank). Lanjutkan?'
+    : 'Kembalikan status pengajuan ke Menunggu?'
+  if (!window.confirm(warn)) return
+  busy.value = true
+  try {
+    await client.post(`/ops/requests/${detail.value.id}/revert`)
+    const { data } = await client.get(`/ops/requests/${detail.value.id}`); detail.value = data.request
+    await loadRequests(); flash('Pengajuan dibatalkan — kembali ke Menunggu')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan.') } finally { busy.value = false }
+}
+const canDeleteRequest = (r) => ['submitted', 'approved', 'rejected'].includes(r.status)
+async function removeRequest(r, ev) {
+  ev?.stopPropagation()
+  if (!window.confirm(`Hapus pengajuan ${r.code}?`)) return
+  try {
+    await client.delete(`/ops/requests/${r.id}`)
+    if (detail.value?.id === r.id) detail.value = null
+    await loadRequests(); flash('Pengajuan dihapus')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
+}
 
 // ---------- Budget ----------
 const budgetRows = ref([])
@@ -247,7 +269,10 @@ watch(statusFilter, loadRequests)
                 <td class="px-4 py-3 text-slate-600 max-w-xs truncate">{{ r.description || '—' }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(r.total_amount) }}</td>
                 <td class="px-4 py-3 text-center"><span :class="statusMap[r.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[r.status]?.[0] }}</span></td>
-                <td class="px-4 py-3 text-right text-brand-600 text-sm">Detail</td>
+                <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
+                  <span class="text-brand-600">Detail</span>
+                  <button v-if="canDeleteRequest(r)" @click="removeRequest(r, $event)" class="text-red-500 hover:underline ml-3">Hapus</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -325,7 +350,10 @@ watch(statusFilter, loadRequests)
       <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
         <div class="flex justify-between items-start mb-3">
           <div><h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3><p class="text-sm text-slate-500">Periode {{ detail.period_month }}/{{ detail.period_year }}</p></div>
-          <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
+          <div class="flex items-center gap-2">
+            <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
+            <button @click="detail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+          </div>
         </div>
         <p v-if="detail.description" class="text-sm text-slate-600 mb-3">{{ detail.description }}</p>
 
@@ -370,6 +398,12 @@ watch(statusFilter, loadRequests)
             <button @click="act('disburse', { source_account_id: sourceAccount })" :disabled="busy" class="w-full py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Cairkan Dana</button>
           </template>
           <p v-else class="text-sm text-slate-400 py-2">Status: {{ statusMap[detail.status]?.[0] }}</p>
+        </div>
+        <div v-if="detail.status !== 'submitted' && isApprover" class="flex gap-2 pt-2">
+          <button @click="revertRequest" :disabled="busy" class="flex-1 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium disabled:opacity-50">↩️ Batal (kembali ke Menunggu)</button>
+        </div>
+        <div v-if="canDeleteRequest(detail)" class="flex gap-2 pt-2">
+          <button @click="removeRequest(detail)" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium">Hapus Pengajuan</button>
         </div>
       </div>
     </div>

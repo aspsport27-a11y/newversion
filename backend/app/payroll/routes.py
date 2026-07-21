@@ -1,15 +1,20 @@
 """Payroll — generate gaji (auto hitung + potong kasbon), approval, pembayaran.
 Prefix: /api/payroll"""
+import os
+import uuid
 from datetime import datetime
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
+from werkzeug.utils import secure_filename
 
 from ..extensions import db
 from ..models import Employee, EmployeeDebt, User, Venue
 from ..security import ROLE_MANAGER, require_perm
-from .models import PayrollItem, PayrollRun
+from .models import PayrollAttachment, PayrollItem, PayrollRun
+
+ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
 
 payroll_bp = Blueprint("payroll", __name__)
 
@@ -244,3 +249,129 @@ def run_pay(rid):
     r.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(run=r.to_dict()), 200
+
+
+@payroll_bp.post("/runs/<int:rid>/revert")
+@jwt_required()
+@APPROVE
+def run_revert(rid):
+    """Batalkan pengajuan — kembalikan status ke 'draft'. Kalau sudah 'paid',
+    balikkan efek kas (uang keluar dicatat balik masuk) & repayment kasbon
+    yg sudah dipotong (dicatat sbg advance balik, bukan dihapus dr riwayat)."""
+    r = db.session.get(PayrollRun, rid)
+    if not r:
+        return _err("Payroll tidak ditemukan", "not_found", 404)
+    err = _check_venue(r)
+    if err:
+        return err
+    if r.status == "draft":
+        return _err("Payroll sudah berstatus draft", "bad_status", 409)
+    uid = _user().id
+
+    if r.status == "paid":
+        for item in r.items:
+            if _D(item.kasbon_deduction) > 0 and item.employee_id:
+                db.session.add(EmployeeDebt(
+                    employee_id=item.employee_id, type="advance", amount=_D(item.kasbon_deduction),
+                    note=f"Pembatalan potong gaji {r.code}", created_by=uid,
+                ))
+        if r.source_account_id:
+            from ..treasury.service import record_tx
+            record_tx(
+                r.source_account_id, "in", float(r.total_net), "payroll_cancel",
+                ref_type="payroll", ref_id=r.id, note=f"Pembatalan pembayaran {r.code}",
+                user_id=uid,
+            )
+        r.paid_by = None
+        r.paid_at = None
+        r.source_account_id = None
+
+    r.status = "draft"
+    r.approved_by = None
+    r.approved_at = None
+    r.rejection_reason = None
+    r.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(run=r.to_dict()), 200
+
+
+@payroll_bp.delete("/runs/<int:rid>")
+@jwt_required()
+@CREATE
+def run_delete(rid):
+    """Hapus payroll run — hanya sebelum dibayar (blm ada efek kas).
+    Run yg sudah 'paid' TIDAK bisa dihapus (akan merusak riwayat kas)."""
+    r = db.session.get(PayrollRun, rid)
+    if not r:
+        return _err("Payroll tidak ditemukan", "not_found", 404)
+    err = _check_venue(r)
+    if err:
+        return err
+    if r.status not in ("draft", "submitted", "approved", "rejected"):
+        return _err(
+            f"Payroll sudah {r.status} — tidak bisa dihapus (sudah ada efek kas).",
+            "bad_status", 409,
+        )
+    for att in r.attachments:
+        path = os.path.join(_upload_dir(), att.stored_name)
+        if os.path.exists(path):
+            os.remove(path)
+    db.session.delete(r)  # items & attachments (DB rows) ikut terhapus, ondelete=CASCADE
+    db.session.commit()
+    return jsonify(message="Payroll dihapus"), 200
+
+
+# ------------------------------------------------------------------
+# Lampiran (bukti transfer/dokumen)
+# ------------------------------------------------------------------
+def _upload_dir():
+    d = os.path.join(current_app.config["UPLOAD_FOLDER"], "payroll")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+@payroll_bp.post("/runs/<int:rid>/attachment")
+@jwt_required()
+@CREATE
+def run_attachment_upload(rid):
+    r = db.session.get(PayrollRun, rid)
+    if not r:
+        return _err("Payroll tidak ditemukan", "not_found", 404)
+    err = _check_venue(r)
+    if err:
+        return err
+    if "file" not in request.files:
+        return _err("File tidak ada")
+    f = request.files["file"]
+    if not f.filename:
+        return _err("Nama file kosong")
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ALLOWED_EXT:
+        return _err(f"Tipe tidak didukung ({', '.join(sorted(ALLOWED_EXT))})")
+    stored = f"{uuid.uuid4().hex}.{ext}"
+    path = os.path.join(_upload_dir(), stored)
+    f.save(path)
+    att = PayrollAttachment(
+        run_id=rid, filename=secure_filename(f.filename), stored_name=stored,
+        content_type=f.content_type, size_bytes=os.path.getsize(path),
+    )
+    db.session.add(att)
+    db.session.commit()
+    return jsonify(attachment=att.to_dict()), 201
+
+
+@payroll_bp.get("/attachments/<int:aid>")
+@jwt_required()
+@VIEW
+def run_attachment_get(aid):
+    att = db.session.get(PayrollAttachment, aid)
+    if not att:
+        return _err("Lampiran tidak ditemukan", "not_found", 404)
+    r = db.session.get(PayrollRun, att.run_id)
+    err = _check_venue(r) if r else None
+    if err:
+        return err
+    path = os.path.join(_upload_dir(), att.stored_name)
+    if not os.path.exists(path):
+        return _err("File hilang di server", "not_found", 404)
+    return send_file(path, download_name=att.filename, mimetype=att.content_type)

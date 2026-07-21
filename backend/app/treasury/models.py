@@ -101,3 +101,33 @@ class QrisSettlement(db.Model):
             "variance": round(f(self.actual_amount) - f(self.system_amount), 2),
             "status": self.status,
         }
+
+
+class BankReconciliation(db.Model):
+    """Rekonsiliasi bank — bandingkan saldo sistem vs rekening koran per tanggal.
+    ADMIN ONLY (bukan RBAC configurable)."""
+    __tablename__ = "bank_reconciliations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id", ondelete="CASCADE"), nullable=False)
+    period_to = db.Column(db.Date, nullable=False)
+    statement_balance = db.Column(db.Numeric(15, 2), nullable=False)
+    system_balance = db.Column(db.Numeric(15, 2), nullable=False)
+    difference = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    note = db.Column(db.Text)
+    status = db.Column(db.String(10), nullable=False, default="open")  # open|resolved
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    resolved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    resolved_at = db.Column(db.DateTime)
+
+    def to_dict(self):
+        f = lambda v: float(v) if v is not None else 0.0
+        return {
+            "id": self.id, "account_id": self.account_id,
+            "period_to": self.period_to.isoformat() if self.period_to else None,
+            "statement_balance": f(self.statement_balance), "system_balance": f(self.system_balance),
+            "difference": f(self.difference), "note": self.note, "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+        }

@@ -9,12 +9,13 @@ from sqlalchemy import func
 from ..extensions import db
 from ..models import User, Venue
 from ..pos.models import Order, Payment, Shift
-from ..security import require_perm
-from .models import AccountTransaction, BankAccount, CashDeposit, QrisSettlement
-from .service import account_balance, holding_account, record_tx
+from ..security import ROLE_ADMIN, require_perm, roles_required
+from .models import AccountTransaction, BankAccount, BankReconciliation, CashDeposit, QrisSettlement
+from .service import account_balance, account_balance_asof, holding_account, record_tx
 
 treasury_bp = Blueprint("treasury", __name__)
 MANAGE = require_perm("treasury.manage")  # RBAC configurable
+ADMIN_ONLY = roles_required(ROLE_ADMIN)  # rekonsiliasi bank & penyesuaian jurnal — hard restricted admin saja
 
 
 def _err(msg, code="bad_request", status=400):
@@ -93,8 +94,20 @@ def account_ledger(aid):
     a = db.session.get(BankAccount, aid)
     if not a:
         return _err("Rekening tidak ditemukan", "not_found", 404)
-    txs = AccountTransaction.query.filter_by(account_id=aid).order_by(AccountTransaction.tx_date.desc(), AccountTransaction.id.desc()).limit(200).all()
-    return jsonify(account=a.to_dict(balance=account_balance(aid)), transactions=[t.to_dict() for t in txs]), 200
+    q = AccountTransaction.query.filter_by(account_id=aid)
+    f, t = request.args.get("from"), request.args.get("to")
+    if f:
+        q = q.filter(AccountTransaction.tx_date >= f)
+    if t:
+        q = q.filter(AccountTransaction.tx_date <= t)
+    txs = q.order_by(AccountTransaction.tx_date.desc(), AccountTransaction.id.desc()).limit(500).all()
+    total_in = round(sum(float(x.amount) for x in txs if x.direction == "in"), 2)
+    total_out = round(sum(float(x.amount) for x in txs if x.direction == "out"), 2)
+    return jsonify(
+        account=a.to_dict(balance=account_balance(aid)),
+        transactions=[x.to_dict() for x in txs],
+        total_in=total_in, total_out=total_out,
+    ), 200
 
 
 # ------------------------------------------------------------------
@@ -120,8 +133,10 @@ def transfer():
 
 @treasury_bp.post("/adjust")
 @jwt_required()
-@MANAGE
+@ADMIN_ONLY
 def adjust():
+    """Penyesuaian jurnal manual — HANYA admin (bisa mengubah saldo rekening
+    langsung, jadi dibatasi lebih ketat dari treasury.manage biasa)."""
     d = request.get_json(silent=True) or {}
     aid = d.get("account_id")
     direction = d.get("direction")
@@ -131,6 +146,87 @@ def adjust():
     record_tx(aid, direction, amt, "adjustment", "manual", None, d.get("note"), _uid())
     db.session.commit()
     return jsonify(message="Penyesuaian tercatat"), 201
+
+
+# ------------------------------------------------------------------
+# Rekonsiliasi Bank (saldo sistem vs rekening koran) — ADMIN ONLY
+# ------------------------------------------------------------------
+@treasury_bp.get("/reconciliations")
+@jwt_required()
+@ADMIN_ONLY
+def reconciliations_list():
+    q = BankReconciliation.query
+    aid = request.args.get("account_id", type=int)
+    if aid:
+        q = q.filter_by(account_id=aid)
+    if request.args.get("status"):
+        q = q.filter_by(status=request.args.get("status"))
+    rows = q.order_by(BankReconciliation.period_to.desc(), BankReconciliation.id.desc()).limit(100).all()
+    return jsonify(reconciliations=[x.to_dict() for x in rows]), 200
+
+
+@treasury_bp.post("/reconciliations")
+@jwt_required()
+@ADMIN_ONLY
+def reconciliations_create():
+    """Bandingkan saldo sistem per tanggal tertentu vs saldo rekening koran
+    (input manual dari mutasi bank). Selisih dicatat, bisa diselesaikan lewat
+    penyesuaian jurnal (/treasury/adjust) lalu ditandai 'resolved'."""
+    d = request.get_json(silent=True) or {}
+    aid = d.get("account_id")
+    period_to = d.get("period_to")
+    statement_balance = _D(d.get("statement_balance"))
+    if not aid or not period_to:
+        return _err("account_id & period_to wajib")
+    acc = db.session.get(BankAccount, aid)
+    if not acc:
+        return _err("Rekening tidak ditemukan", "not_found", 404)
+    system_balance = account_balance_asof(aid, period_to)
+    diff = round(statement_balance - system_balance, 2)
+    rec = BankReconciliation(
+        account_id=aid, period_to=period_to, statement_balance=statement_balance,
+        system_balance=system_balance, difference=diff, note=d.get("note"),
+        status="open" if diff else "resolved", created_by=_uid(),
+    )
+    if rec.status == "resolved":
+        rec.resolved_by = _uid()
+        rec.resolved_at = datetime.utcnow()
+    db.session.add(rec)
+    db.session.commit()
+    return jsonify(reconciliation=rec.to_dict()), 201
+
+
+@treasury_bp.post("/reconciliations/<int:rid>/resolve")
+@jwt_required()
+@ADMIN_ONLY
+def reconciliations_resolve(rid):
+    """Tandai selisih selesai — dipakai setelah penyesuaian jurnal diposting
+    lewat /treasury/adjust (atau selisih ternyata cuma beda pencatatan)."""
+    rec = db.session.get(BankReconciliation, rid)
+    if not rec:
+        return _err("Rekonsiliasi tidak ditemukan", "not_found", 404)
+    if rec.status == "resolved":
+        return _err("Sudah diselesaikan", "bad_status", 409)
+    rec.status = "resolved"
+    rec.resolved_by = _uid()
+    rec.resolved_at = datetime.utcnow()
+    d = request.get_json(silent=True) or {}
+    if d.get("note"):
+        rec.note = ((rec.note + "\n") if rec.note else "") + d["note"]
+    db.session.commit()
+    return jsonify(reconciliation=rec.to_dict()), 200
+
+
+@treasury_bp.delete("/reconciliations/<int:rid>")
+@jwt_required()
+@ADMIN_ONLY
+def reconciliations_delete(rid):
+    rec = db.session.get(BankReconciliation, rid)
+    if not rec:
+        return _err("Rekonsiliasi tidak ditemukan", "not_found", 404)
+    db.session.delete(rec)
+    db.session.commit()
+    return jsonify(message="Rekonsiliasi dihapus"), 200
 
 
 # ------------------------------------------------------------------
@@ -182,7 +278,13 @@ def setoran_create():
 @jwt_required()
 @MANAGE
 def setoran_list():
-    deps = CashDeposit.query.order_by(CashDeposit.created_at.desc()).limit(100).all()
+    q = CashDeposit.query
+    f, t = request.args.get("from"), request.args.get("to")
+    if f:
+        q = q.filter(CashDeposit.deposit_date >= f)
+    if t:
+        q = q.filter(CashDeposit.deposit_date <= t)
+    deps = q.order_by(CashDeposit.created_at.desc()).limit(100).all()
     return jsonify(deposits=[x.to_dict() for x in deps]), 200
 
 
@@ -215,7 +317,13 @@ def qris_pos_amount():
 @jwt_required()
 @MANAGE
 def qris_list():
-    items = QrisSettlement.query.order_by(QrisSettlement.created_at.desc()).limit(100).all()
+    q = QrisSettlement.query
+    f, t = request.args.get("from"), request.args.get("to")
+    if f:
+        q = q.filter(QrisSettlement.from_date >= f)
+    if t:
+        q = q.filter(QrisSettlement.to_date <= t)
+    items = q.order_by(QrisSettlement.created_at.desc()).limit(100).all()
     return jsonify(settlements=[x.to_dict() for x in items]), 200
 
 

@@ -26,6 +26,7 @@ class PayrollRun(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     items = db.relationship("PayrollItem", backref="run", lazy="selectin", cascade="all, delete-orphan")
+    attachments = db.relationship("PayrollAttachment", backref="run", lazy="selectin", cascade="all, delete-orphan")
 
     def to_dict(self, with_items=False):
         f = lambda v: float(v) if v is not None else None
@@ -38,6 +39,7 @@ class PayrollRun(db.Model):
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "employee_count": len(self.items),
+            "attachments": [a.to_dict() for a in self.attachments],
         }
         if with_items:
             d["items"] = [i.to_dict() for i in self.items]
@@ -71,3 +73,18 @@ class PayrollItem(db.Model):
             "net_salary": f(self.net_salary), "bank_name": self.bank_name, "bank_account": self.bank_account,
             "note": self.note,
         }
+
+
+class PayrollAttachment(db.Model):
+    __tablename__ = "payroll_attachments"
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, db.ForeignKey("payroll_runs.id", ondelete="CASCADE"), nullable=False)
+    filename = db.Column(db.String(255), nullable=False)
+    stored_name = db.Column(db.String(255), nullable=False)
+    content_type = db.Column(db.String(100))
+    size_bytes = db.Column(db.Integer)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {"id": self.id, "filename": self.filename, "content_type": self.content_type, "size_bytes": self.size_bytes}

@@ -16,6 +16,22 @@ def account_balance(account_id) -> float:
     return round(float(acc.opening_balance or 0) + float(ins) - float(outs), 2)
 
 
+def account_balance_asof(account_id, as_of_date) -> float:
+    """Saldo sistem per tanggal tertentu (utk rekonsiliasi bank vs rekening koran)."""
+    acc = db.session.get(BankAccount, account_id)
+    if not acc:
+        return 0.0
+    ins = db.session.query(func.coalesce(func.sum(AccountTransaction.amount), 0)).filter(
+        AccountTransaction.account_id == account_id, AccountTransaction.direction == "in",
+        AccountTransaction.tx_date <= as_of_date,
+    ).scalar() or 0
+    outs = db.session.query(func.coalesce(func.sum(AccountTransaction.amount), 0)).filter(
+        AccountTransaction.account_id == account_id, AccountTransaction.direction == "out",
+        AccountTransaction.tx_date <= as_of_date,
+    ).scalar() or 0
+    return round(float(acc.opening_balance or 0) + float(ins) - float(outs), 2)
+
+
 def record_tx(account_id, direction, amount, kind, ref_type=None, ref_id=None, note=None, user_id=None, tx_date=None):
     tx = AccountTransaction(
         account_id=account_id, direction=direction, amount=Decimal(str(amount)),

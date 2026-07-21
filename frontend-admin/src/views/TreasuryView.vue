@@ -1,6 +1,10 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.user?.role === 'admin')
 
 const tab = ref('accounts')
 const venues = ref([])
@@ -8,6 +12,12 @@ const accounts = ref([])
 const totalBalance = ref(0)
 const toast = ref('')
 const busy = ref(false)
+
+// filter periode tanggal — level menu (dipakai Setoran & QRIS, jadi default utk modal Buku Besar)
+const today = new Date().toISOString().slice(0, 10)
+const monthStart = `${today.slice(0, 7)}-01`
+const periodFrom = ref(monthStart)
+const periodTo = ref(today)
 
 function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
@@ -17,8 +27,13 @@ async function loadAccounts() {
   const { data } = await client.get('/treasury/accounts')
   accounts.value = data.accounts; totalBalance.value = data.total_balance
 }
-async function loadVenues() { const { data } = await client.get('/admin/venues'); venues.value = data.venues }
+async function loadVenues() { const { data } = await client.get('/venues'); venues.value = data.venues }
 onMounted(async () => { await loadVenues(); await loadAccounts() })
+function applyPeriod() {
+  if (tab.value === 'setoran') loadSetoran()
+  else if (tab.value === 'qris') loadQris()
+  else if (tab.value === 'reconciliation') loadReconciliations()
+}
 
 // account form
 const showAcc = ref(false)
@@ -37,7 +52,21 @@ async function saveAcc() {
 
 // ledger
 const ledger = ref(null)
-async function openLedger(a) { const { data } = await client.get(`/treasury/accounts/${a.id}/ledger`); ledger.value = data }
+const ledgerAccount = ref(null)
+const ledgerFrom = ref('')
+const ledgerTo = ref('')
+async function openLedger(a) {
+  ledgerAccount.value = a
+  ledgerFrom.value = periodFrom.value
+  ledgerTo.value = periodTo.value
+  await reloadLedger()
+}
+async function reloadLedger() {
+  const { data } = await client.get(`/treasury/accounts/${ledgerAccount.value.id}/ledger`, {
+    params: { from: ledgerFrom.value, to: ledgerTo.value },
+  })
+  ledger.value = data
+}
 
 // transfer
 const showTransfer = ref(false)
@@ -54,7 +83,10 @@ const setoranPending = ref({ expected_amount: 0, count: 0 })
 const counted = ref(null)
 const setoranList = ref([])
 async function loadSetoran() {
-  const [p, l] = await Promise.all([client.get('/treasury/setoran/pending'), client.get('/treasury/setoran')])
+  const [p, l] = await Promise.all([
+    client.get('/treasury/setoran/pending'),
+    client.get('/treasury/setoran', { params: { from: periodFrom.value, to: periodTo.value } }),
+  ])
   setoranPending.value = p.data; counted.value = p.data.expected_amount; setoranList.value = l.data.deposits
 }
 async function doSetoran() {
@@ -68,7 +100,10 @@ const qrisList = ref([])
 const showQris = ref(false)
 const qForm = ref({})
 const qSystem = ref(0)
-async function loadQris() { const { data } = await client.get('/treasury/qris'); qrisList.value = data.settlements }
+async function loadQris() {
+  const { data } = await client.get('/treasury/qris', { params: { from: periodFrom.value, to: periodTo.value } })
+  qrisList.value = data.settlements
+}
 function openQris() { const t = new Date(); qForm.value = { venue_id: venues.value[0]?.id, from_date: `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-01`, to_date: t.toISOString().slice(0, 10), actual_amount: null }; qSystem.value = 0; showQris.value = true; fetchSystem() }
 async function fetchSystem() {
   if (!qForm.value.venue_id) return
@@ -85,18 +120,82 @@ async function approveQris(s) {
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
 }
 
-function switchTab(t) { tab.value = t; if (t === 'setoran') loadSetoran(); if (t === 'qris') loadQris() }
+// rekonsiliasi bank — admin only
+const reconList = ref([])
+const showRecon = ref(false)
+const rForm = ref({})
+const rSystemBalance = ref(null)
+async function loadReconciliations() {
+  const { data } = await client.get('/treasury/reconciliations')
+  reconList.value = data.reconciliations
+}
+function openRecon() {
+  rForm.value = { account_id: accounts.value[0]?.id, period_to: today, statement_balance: null, note: '' }
+  rSystemBalance.value = null
+  showRecon.value = true
+}
+async function saveRecon() {
+  busy.value = true
+  try {
+    const { data } = await client.post('/treasury/reconciliations', rForm.value)
+    showRecon.value = false; await loadReconciliations()
+    flash(data.reconciliation.difference === 0 ? 'Rekonsiliasi cocok — tidak ada selisih' : 'Rekonsiliasi dibuat — ada selisih, perlu penyesuaian jurnal')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+}
+async function resolveRecon(r) {
+  if (!window.confirm(`Tandai rekonsiliasi ${r.period_to} sudah selesai?`)) return
+  try { await client.post(`/treasury/reconciliations/${r.id}/resolve`); await loadReconciliations(); flash('Ditandai selesai') }
+  catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
+}
+async function deleteRecon(r) {
+  if (!window.confirm(`Hapus rekonsiliasi ${r.period_to}?`)) return
+  try { await client.delete(`/treasury/reconciliations/${r.id}`); await loadReconciliations(); flash('Dihapus') }
+  catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
+}
+// penyesuaian jurnal manual — admin only, dipakai utk menyelesaikan selisih rekonsiliasi
+const showAdjust = ref(false)
+const adjForm = ref({})
+function openAdjust(accountId) {
+  adjForm.value = { account_id: accountId || accounts.value[0]?.id, direction: 'in', amount: null, note: '' }
+  showAdjust.value = true
+}
+async function saveAdjust() {
+  busy.value = true
+  try {
+    await client.post('/treasury/adjust', adjForm.value)
+    showAdjust.value = false; await loadAccounts(); flash('Penyesuaian jurnal tercatat')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+}
+
+function switchTab(t) {
+  tab.value = t
+  if (t === 'setoran') loadSetoran()
+  else if (t === 'qris') loadQris()
+  else if (t === 'reconciliation') loadReconciliations()
+}
 </script>
 
 <template>
   <div>
-    <h1 class="text-2xl font-bold text-slate-800 mb-1">Kas &amp; Bank</h1>
-    <p class="text-slate-500 mb-5">Rekening, setoran cash, rekonsiliasi QRIS. Total saldo: <span class="font-semibold text-brand-700">{{ rupiah(totalBalance) }}</span></p>
+    <div class="flex items-center justify-between flex-wrap gap-3 mb-1">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-800">Kas &amp; Bank</h1>
+        <p class="text-slate-500 mt-1">Rekening, setoran cash, rekonsiliasi QRIS. Total saldo: <span class="font-semibold text-brand-700">{{ rupiah(totalBalance) }}</span></p>
+      </div>
+      <div class="flex gap-2 items-end">
+        <div><label class="block text-xs text-slate-500 mb-1">Dari</label>
+          <input v-model="periodFrom" @change="applyPeriod" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+        <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
+          <input v-model="periodTo" @change="applyPeriod" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+      </div>
+    </div>
+    <p class="text-xs text-slate-400 mb-4">Filter periode berlaku untuk tab Setoran Cash, Rekonsiliasi QRIS &amp; Rekonsiliasi Bank — dan jadi default rentang saat buka Buku Besar.</p>
 
     <div class="flex gap-1 mb-4 border-b">
       <button @click="switchTab('accounts')" :class="tab === 'accounts' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Rekening</button>
       <button @click="switchTab('setoran')" :class="tab === 'setoran' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Setoran Cash</button>
       <button @click="switchTab('qris')" :class="tab === 'qris' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Rekonsiliasi QRIS</button>
+      <button v-if="isAdmin" @click="switchTab('reconciliation')" :class="tab === 'reconciliation' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Rekonsiliasi Bank</button>
     </div>
 
     <!-- Rekening -->
@@ -155,7 +254,7 @@ function switchTab(t) { tab.value = t; if (t === 'setoran') loadSetoran(); if (t
     </div>
 
     <!-- QRIS -->
-    <div v-else>
+    <div v-else-if="tab === 'qris'">
       <div class="flex justify-end mb-3"><button @click="openQris" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Rekonsiliasi QRIS</button></div>
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
@@ -170,6 +269,40 @@ function switchTab(t) { tab.value = t; if (t === 'setoran') loadSetoran(); if (t
               <td class="px-4 py-2 text-right" :class="s.variance === 0 ? 'text-emerald-600' : 'text-amber-600'">{{ rupiah(s.variance) }}</td>
               <td class="px-4 py-2 text-center"><span :class="s.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'" class="text-xs rounded-full px-2 py-0.5">{{ s.status === 'approved' ? 'Approved' : 'Draft' }}</span></td>
               <td class="px-4 py-2 text-right"><button v-if="s.status === 'draft'" @click="approveQris(s)" class="text-brand-600 text-sm hover:underline">Approve</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Rekonsiliasi Bank (admin only) -->
+    <div v-else-if="tab === 'reconciliation'">
+      <p class="text-sm text-slate-500 mb-3">Bandingkan saldo sistem per tanggal tertentu vs saldo di rekening koran (mutasi bank). Kalau ada selisih, posting penyesuaian jurnal lalu tandai selesai. Fitur ini hanya untuk admin.</p>
+      <div class="flex justify-end gap-2 mb-3">
+        <button @click="openAdjust()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">Penyesuaian Jurnal</button>
+        <button @click="openRecon" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Rekonsiliasi Bank</button>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+            <th class="px-4 py-3 font-medium">Rekening</th><th class="px-4 py-3 font-medium">Per tanggal</th>
+            <th class="px-4 py-3 font-medium text-right">Saldo Koran</th><th class="px-4 py-3 font-medium text-right">Saldo Sistem</th>
+            <th class="px-4 py-3 font-medium text-right">Selisih</th><th class="px-4 py-3 font-medium text-center">Status</th><th class="px-4 py-3"></th>
+          </tr></thead>
+          <tbody>
+            <tr v-if="!reconList.length"><td colspan="7" class="px-4 py-6 text-center text-slate-400">Belum ada rekonsiliasi.</td></tr>
+            <tr v-for="r in reconList" :key="r.id" class="border-t">
+              <td class="px-4 py-2 text-slate-700">{{ accounts.find(a=>a.id===r.account_id)?.name || '—' }}</td>
+              <td class="px-4 py-2 text-slate-600">{{ r.period_to }}</td>
+              <td class="px-4 py-2 text-right">{{ rupiah(r.statement_balance) }}</td>
+              <td class="px-4 py-2 text-right">{{ rupiah(r.system_balance) }}</td>
+              <td class="px-4 py-2 text-right font-medium" :class="r.difference === 0 ? 'text-emerald-600' : 'text-red-600'">{{ rupiah(r.difference) }}</td>
+              <td class="px-4 py-2 text-center"><span :class="r.status === 'resolved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'" class="text-xs rounded-full px-2 py-0.5">{{ r.status === 'resolved' ? 'Selesai' : 'Terbuka' }}</span></td>
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                <button v-if="r.status === 'open'" @click="openAdjust(r.account_id)" class="text-slate-500 text-xs hover:underline">Sesuaikan</button>
+                <button v-if="r.status === 'open'" @click="resolveRecon(r)" class="text-brand-600 text-xs hover:underline ml-2">Tandai Selesai</button>
+                <button @click="deleteRecon(r)" class="text-red-500 text-xs hover:underline ml-2">Hapus</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -231,6 +364,16 @@ function switchTab(t) { tab.value = t; if (t === 'setoran') loadSetoran(); if (t
       <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
         <div class="flex justify-between items-center mb-1"><h3 class="text-lg font-bold text-slate-800">{{ ledger.account.name }}</h3><button @click="ledger = null" class="text-slate-400 text-xl">✕</button></div>
         <p class="text-xl font-bold text-brand-700 mb-3">{{ rupiah(ledger.account.balance) }}</p>
+        <div class="flex items-end gap-2 mb-3">
+          <div><label class="block text-xs text-slate-500 mb-1">Dari</label>
+            <input v-model="ledgerFrom" @change="reloadLedger" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
+            <input v-model="ledgerTo" @change="reloadLedger" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div class="bg-emerald-50 rounded-lg px-3 py-2"><p class="text-xs text-emerald-700">Total Masuk</p><p class="font-bold text-emerald-700">{{ rupiah(ledger.total_in) }}</p></div>
+          <div class="bg-red-50 rounded-lg px-3 py-2"><p class="text-xs text-red-600">Total Keluar</p><p class="font-bold text-red-600">{{ rupiah(ledger.total_out) }}</p></div>
+        </div>
         <table class="w-full text-sm">
           <thead class="text-slate-400 text-xs text-left"><tr><th class="py-1">Tanggal</th><th class="py-1">Jenis</th><th class="py-1 text-right">Nominal</th></tr></thead>
           <tbody>
@@ -242,6 +385,42 @@ function switchTab(t) { tab.value = t; if (t === 'setoran') loadSetoran(); if (t
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Rekonsiliasi Bank modal -->
+    <div v-if="showRecon" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
+      <div class="bg-white w-full max-w-md rounded-2xl p-5">
+        <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">Rekonsiliasi Bank</h3><button @click="showRecon = false" class="text-slate-400 text-xl">✕</button></div>
+        <div class="space-y-2">
+          <select v-model="rForm.account_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+            <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option>
+          </select>
+          <div><label class="block text-xs text-slate-500 mb-1">Per tanggal (rekening koran)</label>
+            <input v-model="rForm.period_to" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <div><label class="block text-xs text-slate-500 mb-1">Saldo di rekening koran</label>
+            <input v-model.number="rForm.statement_balance" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-right outline-none focus:border-brand-500" /></div>
+          <textarea v-model="rForm.note" placeholder="Catatan (opsional)" rows="2" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"></textarea>
+          <button @click="saveRecon" :disabled="busy" class="w-full mt-2 py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Bandingkan &amp; Simpan</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Penyesuaian Jurnal modal (admin only) -->
+    <div v-if="showAdjust" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
+      <div class="bg-white w-full max-w-md rounded-2xl p-5">
+        <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">Penyesuaian Jurnal</h3><button @click="showAdjust = false" class="text-slate-400 text-xl">✕</button></div>
+        <div class="space-y-2">
+          <select v-model="adjForm.account_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+            <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option>
+          </select>
+          <select v-model="adjForm.direction" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+            <option value="in">Tambah saldo (masuk)</option><option value="out">Kurangi saldo (keluar)</option>
+          </select>
+          <input v-model.number="adjForm.amount" type="number" placeholder="Jumlah" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-right outline-none focus:border-brand-500" />
+          <textarea v-model="adjForm.note" placeholder="Alasan penyesuaian" rows="2" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"></textarea>
+          <button @click="saveAdjust" :disabled="busy" class="w-full mt-2 py-2.5 rounded-lg bg-brand-600 text-white font-medium disabled:opacity-50">Simpan Penyesuaian</button>
+        </div>
       </div>
     </div>
 
