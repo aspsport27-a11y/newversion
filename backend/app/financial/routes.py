@@ -9,6 +9,9 @@ Basis KAS (cash basis), konsisten dengan laporan penjualan:
     * Operasional  → OpRequest status=disbursed (disbursed_at), rincian per kategori.
     * Procurement  → PurchaseOrder status=paid (paid_at).
     * Payroll      → PayrollRun status=paid (paid_at), total_net.
+    * Konsinyasi   → ConsignmentSettlement paid_at terisi, total_amount (bagi hasil
+      ke supplier titipan — pendapatan penjualannya sudah masuk penuh/gross di atas,
+      jadi ini WAJIB dihitung sbg beban biar laba bersih tidak overstated).
 - Saldo Kas   = snapshot saldo rekening saat ini (dari treasury), bukan periodik.
 
 Akses: admin & head_office (semua venue); manager_unit (dibatasi ke venue-nya).
@@ -24,7 +27,7 @@ from ..models import User, Venue
 from ..security import ROLE_MANAGER, require_perm
 from ..pos.models import Order, Payment
 from ..ops.models import ExpenseCategory, OpRequest, OpRequestItem
-from ..proc.models import PurchaseOrder
+from ..proc.models import ConsignmentSettlement, PurchaseOrder
 from ..payroll.models import PayrollRun
 from ..treasury.models import BankAccount
 from ..treasury.service import account_balance, holding_account, record_tx
@@ -141,13 +144,25 @@ def report():
         pr_q.with_entities(func.coalesce(func.sum(PayrollRun.total_net), 0)).scalar()
     )
 
-    expense_total = operational_total + procurement_total + payroll_total
+    # ---------- BEBAN KONSINYASI (settlement bagi hasil sudah dibayar) ----------
+    ksg_q = ConsignmentSettlement.query.filter(
+        ConsignmentSettlement.paid_at.isnot(None),
+        func.date(ConsignmentSettlement.paid_at).between(d_from, d_to),
+    )
+    if vid:
+        ksg_q = ksg_q.filter(ConsignmentSettlement.venue_id == vid)
+    consignment_total = _f(
+        ksg_q.with_entities(func.coalesce(func.sum(ConsignmentSettlement.total_amount), 0)).scalar()
+    )
+
+    expense_total = operational_total + procurement_total + payroll_total + consignment_total
     net_profit = round(revenue_total - expense_total, 2)
 
     expense_breakdown = [
         {"group": "Operasional", "amount": round(operational_total, 2)},
         {"group": "Procurement", "amount": round(procurement_total, 2)},
         {"group": "Payroll", "amount": round(payroll_total, 2)},
+        {"group": "Konsinyasi (bagi hasil)", "amount": round(consignment_total, 2)},
     ]
 
     # ---------- SALDO KAS (snapshot, bukan periodik) ----------
@@ -177,6 +192,7 @@ def report():
             "operational_by_category": operational_by_category,
             "procurement": round(procurement_total, 2),
             "payroll": round(payroll_total, 2),
+            "consignment": round(consignment_total, 2),
             "total": round(expense_total, 2),
             "breakdown": expense_breakdown,
         },
@@ -350,8 +366,19 @@ def management_report():
         .group_by(PayrollRun.venue_id)
         .all()
     )
+    # --- konsinyasi (settlement bagi hasil sudah dibayar) ---
+    ksg_rows = dict(
+        db.session.query(
+            ConsignmentSettlement.venue_id,
+            func.coalesce(func.sum(ConsignmentSettlement.total_amount), 0),
+        )
+        .filter(ConsignmentSettlement.paid_at.isnot(None))
+        .filter(func.date(ConsignmentSettlement.paid_at).between(d_from, d_to))
+        .group_by(ConsignmentSettlement.venue_id)
+        .all()
+    )
 
-    venue_ids = set(rev_rows) | set(op_rows) | set(po_rows) | set(pr_rows)
+    venue_ids = set(rev_rows) | set(op_rows) | set(po_rows) | set(pr_rows) | set(ksg_rows)
     vnames = {
         v.id: {"code": v.code, "name": v.name}
         for v in Venue.query.filter(Venue.id.in_(venue_ids)).all()
@@ -361,7 +388,7 @@ def management_report():
     biz_revenue = biz_expense = 0.0
     for vid in venue_ids:
         rev = _f(rev_rows.get(vid))
-        exp = _f(op_rows.get(vid)) + _f(po_rows.get(vid)) + _f(pr_rows.get(vid))
+        exp = _f(op_rows.get(vid)) + _f(po_rows.get(vid)) + _f(pr_rows.get(vid)) + _f(ksg_rows.get(vid))
         biz_revenue += rev
         biz_expense += exp
         info = vnames.get(vid, {})
