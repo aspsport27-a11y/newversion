@@ -146,7 +146,7 @@ function logout() {
 </script>
 
 <template>
-  <div class="min-h-full flex flex-col">
+  <div class="h-full flex flex-col overflow-hidden">
     <!-- Header -->
     <header class="h-14 bg-brand-900 text-white flex items-center justify-between px-4 shrink-0">
       <div class="flex items-center gap-3">
