@@ -303,7 +303,7 @@ class Payment(db.Model):
     method = db.Column(db.String(10), nullable=False)  # cash|qris
     provider = db.Column(db.String(30), nullable=False, default="cash")
     amount = db.Column(db.Numeric(15, 2), nullable=False)
-    status = db.Column(db.String(10), nullable=False, default="pending")  # pending|paid|failed
+    status = db.Column(db.String(10), nullable=False, default="pending")  # pending|paid|failed|void
     reference = db.Column(db.String(100))
     confirmed_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     shift_id = db.Column(db.Integer, db.ForeignKey("shifts.id"))

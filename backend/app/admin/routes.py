@@ -1619,7 +1619,8 @@ def order_detail(order_id):
 @jwt_required()
 @ORDER_CANCEL
 def order_cancel_admin(order_id):
-    """Batalkan booking (no-show): void + lepas slot, DP hangus."""
+    """Batalkan transaksi: void + lepas slot. Kalau sudah lunas, balikkan stok
+    & akumulasi shift juga (lihat cancel_order untuk aturan lengkapnya)."""
     from ..pos.services import PosError, cancel_order
 
     order = db.session.get(Order, order_id)
@@ -1629,10 +1630,10 @@ def order_cancel_admin(order_id):
     if forced is not None and order.venue_id != forced:
         return _err("Bukan order venue Anda", "forbidden", 403)
     try:
-        cancel_order(order)
+        cancel_order(order, uid=_current_user().id)
     except PosError as e:
         return _err(e.message, e.code, e.status)
-    return jsonify(order=order.to_dict()), 200
+    return jsonify(order=order.to_dict(), message="Transaksi dibatalkan"), 200
 
 
 @admin_bp.get("/reports/outstanding")

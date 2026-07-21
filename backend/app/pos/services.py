@@ -312,12 +312,55 @@ def _apply_payment(order: Order, payment: Payment, shift: Shift, cashier_id: int
         order.status = "partial"
 
 
-def cancel_order(order: Order) -> Order:
-    """Batalkan booking (no-show): order → void, slot dilepas, DP hangus (tak di-refund)."""
-    if order.status not in ("open", "partial"):
-        raise PosError(
-            "Hanya order belum lunas yang bisa dibatalkan", "cannot_cancel", 409
-        )
+def cancel_order(order: Order, uid: int = None) -> Order:
+    """Batalkan transaksi → order jadi 'void', slot lapangan dilepas.
+    - open/partial: DP yg sudah masuk hangus (tak direfund), tak ada stok/shift
+      yg perlu dibalik (belum ada yg lunas penuh).
+    - paid: BALIKKAN efeknya — stok yg sudah terjual dikembalikan (dicatat sbg
+      penyesuaian, bukan dihapus dr riwayat) & akumulasi shift dikurangi lagi.
+      Payment yg sudah 'paid' ditandai 'void' (keluar dari perhitungan laporan
+      manapun, tapi barisnya tetap ada utk audit). DITOLAK kalau shift penerima
+      pembayarannya sudah ditutup (sudah masuk rekonsiliasi kas / disetor —
+      tak aman diubah retroaktif)."""
+    if order.status not in ("open", "partial", "paid"):
+        raise PosError("Order sudah dibatalkan/tidak valid", "cannot_cancel", 409)
+
+    if order.status == "paid":
+        paid_payments = [p for p in order.payments if p.status == "paid"]
+        shift_ids = {p.shift_id for p in paid_payments if p.shift_id}
+        if shift_ids:
+            closed = Shift.query.filter(Shift.id.in_(shift_ids), Shift.status == "closed").count()
+            if closed:
+                raise PosError(
+                    "Shift penerima pembayaran order ini sudah ditutup — tidak bisa "
+                    "dibatalkan otomatis (sudah masuk rekonsiliasi kas).",
+                    "shift_closed", 409,
+                )
+        # balikkan stok yg sudah dikurangi saat lunas
+        for item in order.items:
+            if item.item_type == "product" and item.product_id:
+                product = db.session.get(Product, item.product_id)
+                if product and product.track_stock:
+                    qty = int(item.quantity)
+                    product.stock_qty += qty
+                    db.session.add(StockMovement(
+                        product_id=product.id, venue_id=order.venue_id, type="adjustment",
+                        quantity=qty, balance_after=product.stock_qty,
+                        reference=order.order_number, created_by=uid,
+                    ))
+        # balikkan akumulasi shift & tandai payment void (tanpa hapus baris)
+        for p in paid_payments:
+            if p.shift_id:
+                shift = db.session.get(Shift, p.shift_id)
+                if shift:
+                    amt = Decimal(str(p.amount))
+                    shift.total_sales = Decimal(str(shift.total_sales or 0)) - amt
+                    if p.method == "cash":
+                        shift.total_cash_sales = Decimal(str(shift.total_cash_sales or 0)) - amt
+                    elif p.method == "qris":
+                        shift.total_qris_sales = Decimal(str(shift.total_qris_sales or 0)) - amt
+            p.status = "void"
+
     order.status = "void"
     order.updated_at = datetime.utcnow()
     # lepas slot lapangan yang terkait item order ini

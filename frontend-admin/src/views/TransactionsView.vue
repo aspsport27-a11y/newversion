@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
+const canCancel = computed(() => auth.hasPerm('order.cancel'))
 
 const venues = ref([])
 const venueId = ref('')
@@ -82,6 +83,21 @@ async function openDetail(o) {
   detail.value = data.order
 }
 function venueName(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
+
+const busy = ref(false)
+async function cancelOrder(o, ev) {
+  ev?.stopPropagation()
+  const warn = o.status === 'paid'
+    ? `Transaksi ${o.order_number} sudah LUNAS. Membatalkan akan mengembalikan stok produk yang sudah terjual dan mengurangi total kas shift terkait. Lanjutkan?`
+    : `Batalkan transaksi ${o.order_number}?`
+  if (!window.confirm(warn)) return
+  busy.value = true
+  try {
+    await client.post(`/admin/orders/${o.id}/cancel`)
+    if (detail.value?.id === o.id) detail.value = null
+    await loadOrders()
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan.') } finally { busy.value = false }
+}
 </script>
 
 <template>
@@ -155,7 +171,10 @@ function venueName(id) { const v = venues.value.find((x) => x.id === id); return
               <td class="px-4 py-3 text-slate-500 capitalize">{{ o.payment_methods.join(', ') || '—' }}</td>
               <td class="px-4 py-3 text-right font-medium">{{ rupiah(o.total_amount) }}</td>
               <td class="px-4 py-3 text-center"><span :class="statusMap[o.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[o.status]?.[0] || o.status }}</span></td>
-              <td class="px-4 py-3 text-right text-brand-600 text-sm">Detail</td>
+              <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
+                <span class="text-brand-600">Detail</span>
+                <button v-if="canCancel && o.status !== 'void'" @click="cancelOrder(o, $event)" :disabled="busy" class="text-red-500 hover:underline ml-3 disabled:opacity-50">Batalkan</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -214,13 +233,17 @@ function venueName(id) { const v = venues.value.find((x) => x.id === id); return
           </table>
         </div>
 
-        <div class="mb-1">
+        <div class="mb-3">
           <p class="text-xs font-medium text-slate-500 mb-1">Pembayaran</p>
           <div v-if="!detail.payments.length" class="text-sm text-slate-400">Belum ada pembayaran.</div>
-          <div v-for="p in detail.payments" :key="p.id" class="flex justify-between text-sm py-1 border-t">
-            <span class="capitalize text-slate-600">{{ p.method }} <span class="text-xs text-slate-400">{{ fmtTime(p.paid_at) }}</span></span>
+          <div v-for="p in detail.payments" :key="p.id" class="flex justify-between text-sm py-1 border-t" :class="{ 'opacity-50 line-through': p.status === 'void' }">
+            <span class="capitalize text-slate-600">{{ p.method }} <span class="text-xs text-slate-400">{{ fmtTime(p.paid_at) }}</span> <span v-if="p.status === 'void'" class="text-[10px] bg-red-100 text-red-600 rounded px-1 py-0.5 no-underline">Dibatalkan</span></span>
             <span class="font-medium">{{ rupiah(p.amount) }}</span>
           </div>
+        </div>
+
+        <div v-if="canCancel && detail.status !== 'void'" class="flex gap-2 pt-2 border-t">
+          <button @click="cancelOrder(detail)" :disabled="busy" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium disabled:opacity-50">Batalkan Transaksi</button>
         </div>
       </div>
     </div>
