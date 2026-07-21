@@ -205,9 +205,10 @@ async function resetAccount() {
               <option v-for="p in positions" :key="p" :value="p">{{ p }}</option>
             </select></div>
           <div v-if="!isManager"><label class="block text-xs text-slate-500 mb-1">Venue</label>
-            <select v-model="form.venue_id" :disabled="!!editing" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 disabled:bg-slate-50">
+            <select v-model="form.venue_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
               <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }}</option>
-            </select></div>
+            </select>
+            <p v-if="editing?.has_account && form.venue_id !== editing.venue_id" class="text-xs text-amber-600 mt-1">Akun login "{{ editing.username }}" ikut dipindah ke venue ini.</p></div>
           <div><label class="block text-xs text-slate-500 mb-1">Gaji pokok</label>
             <input v-model.number="form.salary" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
           <div><label class="block text-xs text-slate-500 mb-1">Tunjangan tetap</label>

@@ -739,8 +739,15 @@ def employees_update(eid):
         e.hire_date = _pdate(d["hire_date"])
     if "birth_date" in d:
         e.birth_date = _pdate(d["birth_date"])
-    if forced is None and "venue_id" in d:
+    if forced is None and "venue_id" in d and d["venue_id"] and int(d["venue_id"]) != e.venue_id:
+        if not _venue_or_404(d["venue_id"]):
+            return _err("Venue tidak ditemukan", "not_found", 404)
         e.venue_id = d["venue_id"]
+        # akun login (kalau ada) dibuat dgn venue_id disalin dr karyawan saat itu —
+        # tak pernah disinkron otomatis lagi, jadi ikutkan di sini spy tak mismatch
+        acc = _emp_account(eid)
+        if acc:
+            acc.venue_id = d["venue_id"]
     e.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(employee=e.to_dict()), 200
