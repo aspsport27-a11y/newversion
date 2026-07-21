@@ -494,9 +494,32 @@ def station_topup(sid):
 @pos_bp.post("/stations/<int:sid>/stop")
 @jwt_required()
 def station_stop(sid):
+    """Stop sesi lalu LANGSUNG gabung jadi 1 Order (biaya waktu + semua topup,
+    + F&B tambahan kalau ada di 'extra_items') — order status 'open' (belum
+    lunas), lanjut bayar lewat /pos/orders/<id>/pay spt order biasa."""
     terminal = _current_terminal()
+    shift = _current_open_shift(terminal.id)
     session = _current_ongoing_session(sid, terminal.venue_id)
+    station = session.station
+
     session.status = "stopped"
     session.stopped_at = datetime.utcnow()
+
+    data = request.get_json(silent=True) or {}
+    items = [{
+        "item_type": "rental", "name": f"Sewa {station.name} ({session.elapsed_minutes()} menit)",
+        "unit_price": session.time_charge(), "quantity": 1,
+    }]
+    for t in session.topups:
+        items.append({
+            "item_type": "rental", "name": f"Tambah waktu {t.duration_minutes} menit — {station.name}",
+            "unit_price": float(t.total_amount), "quantity": 1,
+        })
+    items.extend(data.get("extra_items") or [])
+
+    order = create_order(shift, int(get_jwt_identity()), {
+        "items": items, "customer_name": session.customer_name,
+    })
+    session.order_id = order.id
     db.session.commit()
-    return jsonify(session=session.to_dict()), 200
+    return jsonify(session=session.to_dict(), order=order.to_dict()), 200
