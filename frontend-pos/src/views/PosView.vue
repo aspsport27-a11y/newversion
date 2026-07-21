@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePosStore } from '../stores/pos'
 import PaymentDialog from '../components/PaymentDialog.vue'
@@ -8,6 +8,8 @@ import CloseShiftDialog from '../components/CloseShiftDialog.vue'
 import BookingDialog from '../components/BookingDialog.vue'
 import SettlementDialog from '../components/SettlementDialog.vue'
 import AbsenDialog from '../components/AbsenDialog.vue'
+import StationStartDialog from '../components/StationStartDialog.vue'
+import StationSessionDialog from '../components/StationSessionDialog.vue'
 
 const pos = usePosStore()
 const router = useRouter()
@@ -24,16 +26,47 @@ const showSettle = ref(false)
 const lastResult = ref(null)
 const toast = ref('')
 
+const startStation = ref(null)
+const sessionStation = ref(null)
+const pendingStationOrder = ref(null)
+
 onMounted(async () => {
   try {
     await pos.fetchMe()
     await pos.fetchProducts()
+    try { await pos.fetchStations() } catch (_) { /* venue tanpa station gaming */ }
   } catch (e) {
     /* interceptor 401 redirect */
   } finally {
     loading.value = false
   }
 })
+
+let stationPoll = null
+onMounted(() => { stationPoll = setInterval(() => { if (pos.hasStations && !sessionStation.value) pos.fetchStations() }, 5000) })
+onUnmounted(() => clearInterval(stationPoll))
+
+function openStation(s) {
+  if (s.status === 'ongoing') sessionStation.value = s
+  else startStation.value = s
+}
+function onStationStopped(result) {
+  sessionStation.value = null
+  pendingStationOrder.value = result.order
+  showPayment.value = true
+}
+async function onPayStation(payload) {
+  try {
+    const res = await pos.settle(pendingStationOrder.value.id, payload.method, payload.amount, payload.reference)
+    lastResult.value = res
+    showPayment.value = false
+    pendingStationOrder.value = null
+    showReceipt.value = true
+    await pos.fetchProducts()
+  } catch (e) {
+    flash(e?.response?.data?.message || 'Pembayaran gagal')
+  }
+}
 
 function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
@@ -56,6 +89,7 @@ async function submitOpenShift() {
 }
 
 async function onPay(payload) {
+  if (pendingStationOrder.value) return onPayStation(payload)
   try {
     const result = await pos.checkout(payload.method, {
       amount: payload.amount,
@@ -150,6 +184,24 @@ function logout() {
           </button>
         </div>
 
+        <!-- Station Gaming (arena esport) -->
+        <div v-if="pos.hasStations" class="mb-4">
+          <p class="text-xs font-semibold text-slate-400 mb-1.5">🎮 STATION</p>
+          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            <button v-for="s in pos.stations" :key="s.id" @click="openStation(s)"
+              class="rounded-xl border p-3 text-left active:scale-95 transition"
+              :class="s.status === 'ongoing' ? 'bg-emerald-50 border-emerald-200' : 'bg-white hover:border-brand-400'">
+              <div class="flex justify-between items-start">
+                <p class="font-semibold text-slate-800 text-sm">{{ s.name }}</p>
+                <span class="text-[10px] rounded px-1.5 py-0.5" :class="s.status === 'ongoing' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ s.status === 'ongoing' ? 'ONGOING' : 'READY' }}</span>
+              </div>
+              <p class="text-[11px] text-slate-400 capitalize mt-0.5">{{ s.tier }}</p>
+              <p v-if="s.status === 'ongoing'" class="text-xs text-emerald-700 font-medium mt-1 truncate">{{ s.session.customer_name || 'Tanpa nama' }}</p>
+              <p v-else class="text-xs text-slate-400 mt-1">{{ rupiah(s.hourly_rate) }}/jam</p>
+            </button>
+          </div>
+        </div>
+
         <!-- Tiket (klik = masuk keranjang, harga hari ini otomatis) -->
         <div v-if="pos.tickets.length" class="mb-4">
           <p class="text-xs font-semibold text-slate-400 mb-1.5">🎟️ TIKET MASUK</p>
@@ -235,12 +287,17 @@ function logout() {
     </div>
 
     <!-- Dialogs -->
-    <PaymentDialog v-if="showPayment" :total="pos.total" @close="showPayment = false" @pay="onPay" />
+    <PaymentDialog v-if="showPayment" :total="pendingStationOrder ? pendingStationOrder.total_amount : pos.total"
+      @close="showPayment = false; pendingStationOrder = null" @pay="onPay" />
     <ReceiptDialog v-if="showReceipt && lastResult" :order="lastResult.order" :payment="lastResult.payment"
       :terminal="pos.terminal" @close="showReceipt = false" />
     <CloseShiftDialog v-if="showClose" :shift="pos.openShift" @close="showClose = false" @submit="onCloseShift" />
     <BookingDialog v-if="showBooking" @close="showBooking = false" @added="flash('Booking ditambahkan ke keranjang')" />
     <SettlementDialog v-if="showSettle" @close="showSettle = false" @paid="onSettlePaid" />
+    <StationStartDialog v-if="startStation" :station="startStation" @close="startStation = null"
+      @started="startStation = null; pos.fetchStations()" />
+    <StationSessionDialog v-if="sessionStation" :station="sessionStation" @close="sessionStation = null; pos.fetchStations()"
+      @stopped="onStationStopped" />
 
     <!-- Toast -->
     <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">

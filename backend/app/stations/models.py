@@ -82,9 +82,9 @@ class GameSession(db.Model):
         return {
             "id": self.id, "station_id": self.station_id, "customer_name": self.customer_name,
             "rate_per_hour": float(self.rate_per_hour),
-            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "started_at": (self.started_at.isoformat() + "Z") if self.started_at else None,
             "status": self.status,
-            "stopped_at": self.stopped_at.isoformat() if self.stopped_at else None,
+            "stopped_at": (self.stopped_at.isoformat() + "Z") if self.stopped_at else None,
             "elapsed_minutes": self.elapsed_minutes(),
             "time_charge": self.time_charge(),
             "topup_charge": self.topup_charge(),
@@ -111,7 +111,7 @@ class GameSessionTopup(db.Model):
         return {
             "id": self.id, "duration_minutes": self.duration_minutes,
             "discount_amount": float(self.discount_amount or 0), "total_amount": float(self.total_amount),
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": (self.created_at.isoformat() + "Z") if self.created_at else None,
         }
 
 

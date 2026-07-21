@@ -11,6 +11,8 @@ export const usePosStore = defineStore('pos', {
     bookingEnabled: true, // false = mode tiketing (venue tanpa lapangan, mis. waterpark)
     products: [],
     facilities: [],
+    stations: [],
+    addons: [],
     cart: [], // {uid, item_type, name, unit_price, quantity, ...}
     discount: 0,
     customerName: '',
@@ -21,6 +23,7 @@ export const usePosStore = defineStore('pos', {
     cartCount: (s) => s.cart.reduce((n, i) => n + i.quantity, 0),
     tickets: (s) => s.products.filter((p) => p.is_ticket),
     fnbProducts: (s) => s.products.filter((p) => !p.is_ticket),
+    hasStations: (s) => s.stations.length > 0,
     // total per baris, memperhitungkan promo BELI-X-GRATIS-Y
     lineTotal: () => (i) => {
       const promo = i.promo
@@ -74,6 +77,40 @@ export const usePosStore = defineStore('pos', {
         params: { date },
       })
       return data.bookings
+    },
+    // --- station gaming (arena esport) ---
+    async fetchStations() {
+      const { data } = await client.get('/stations')
+      this.stations = data.stations
+    },
+    async fetchAddons() {
+      const { data } = await client.get('/addons')
+      this.addons = data.addons
+    },
+    async startStation(id, customerName) {
+      const { data } = await client.post(`/stations/${id}/start`, { customer_name: customerName || null })
+      await this.fetchStations()
+      return data.session
+    },
+    async topupStation(id, payload) {
+      const { data } = await client.post(`/stations/${id}/topup`, payload)
+      await this.fetchStations()
+      return data.session
+    },
+    async attachAddon(id, payload) {
+      const { data } = await client.post(`/stations/${id}/addons`, payload)
+      await this.fetchStations()
+      return data.session
+    },
+    async detachAddon(id, sessionAddonId) {
+      const { data } = await client.delete(`/stations/${id}/addons/${sessionAddonId}`)
+      await this.fetchStations()
+      return data.session
+    },
+    async stopStation(id, extraItems) {
+      const { data } = await client.post(`/stations/${id}/stop`, { extra_items: extraItems || [] })
+      await this.fetchStations()
+      return data // { session, order }
     },
     async doOpenShift(openingCash) {
       const { data } = await client.post('/shifts/open', { opening_cash: openingCash })
