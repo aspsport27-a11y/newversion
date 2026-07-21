@@ -2,6 +2,10 @@
 import { ref, onMounted, nextTick, computed } from 'vue'
 import client from '../api/client'
 import Chart from 'chart.js/auto'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
+const isManager = computed(() => auth.user?.role === 'manager_unit')
 
 const venues = ref([])
 const venueId = ref('')
@@ -19,8 +23,14 @@ function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 const isProfit = computed(() => (rep.value?.net_profit ?? 0) >= 0)
 
 async function loadVenues() {
-  const { data } = await client.get('/admin/venues')
+  const { data } = await client.get('/venues')
   venues.value = data.venues
+  // manager_unit dibatasi ke venue-nya sendiri (backend juga sudah memaksa ini,
+  // tapi picker "Semua venue" menyesatkan kalau tetap ditampilkan)
+  if (isManager.value) {
+    venues.value = venues.value.filter((x) => x.id === auth.user?.venue_id)
+    venueId.value = auth.user?.venue_id || ''
+  }
 }
 async function run() {
   loading.value = true
@@ -69,11 +79,13 @@ onMounted(async () => { await loadVenues(); await run() })
         <input v-model="from" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
       <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
         <input v-model="to" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
-      <div><label class="block text-xs text-slate-500 mb-1">Venue</label>
+      <div v-if="!isManager"><label class="block text-xs text-slate-500 mb-1">Venue</label>
         <select v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
           <option value="">Semua venue</option>
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select></div>
+      <div v-else><label class="block text-xs text-slate-500 mb-1">Venue</label>
+        <p class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">{{ venues[0]?.code }} — {{ venues[0]?.name }}</p></div>
       <button @click="run" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
     </div>
 
