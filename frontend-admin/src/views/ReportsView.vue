@@ -102,6 +102,30 @@ onMounted(async () => { await loadVenues(); await run() })
         </div>
       </div>
 
+      <!-- Konsinyasi vs Milik Sendiri -->
+      <div v-if="sales.consignment && (sales.consignment.own_revenue || sales.consignment.consignment_revenue)" class="bg-white rounded-xl shadow-sm border p-5 mb-5">
+        <h3 class="font-semibold text-slate-700 mb-3">Milik Sendiri vs Konsinyasi</h3>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div>
+            <p class="text-xs text-slate-500">Penjualan Milik Sendiri</p>
+            <p class="text-lg font-bold text-slate-800">{{ rupiah(sales.consignment.own_revenue) }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500">Penjualan Konsinyasi</p>
+            <p class="text-lg font-bold text-slate-800">{{ rupiah(sales.consignment.consignment_revenue) }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500">Estimasi ke Supplier</p>
+            <p class="text-lg font-bold text-amber-600">{{ rupiah(sales.consignment.consignment_owed) }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500">Estimasi Margin Konsinyasi</p>
+            <p class="text-lg font-bold text-emerald-600">{{ rupiah(sales.consignment.consignment_margin) }}</p>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 mt-3">"Estimasi ke Supplier" &amp; "Estimasi Margin" dihitung dari harga bagi hasil per produk — nilai pasti dibayar lewat menu Procurement → tab Konsinyasi.</p>
+      </div>
+
       <!-- Chart -->
       <div class="bg-white rounded-xl shadow-sm border p-6 mb-5">
         <h3 class="font-semibold text-slate-700 mb-4">Tren Harian</h3>

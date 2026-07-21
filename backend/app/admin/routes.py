@@ -1371,6 +1371,7 @@ def report_sales():
         ord_q = ord_q.filter(Order.venue_id == vid)
     paid_ids = [o.id for o in ord_q.with_entities(Order.id).all()]
     by_type = []
+    consignment = {"own_revenue": 0.0, "consignment_revenue": 0.0, "consignment_owed": 0.0}
     if paid_ids:
         by_type = [
             {"item_type": t, "amount": float(a)}
@@ -1379,10 +1380,36 @@ def report_sales():
             ).filter(OrderItem.order_id.in_(paid_ids)).group_by(OrderItem.item_type).all()
         ]
 
+        # --- breakdown konsinyasi vs milik venue sendiri ---
+        rows = (
+            db.session.query(
+                Product.is_consignment,
+                func.coalesce(func.sum(OrderItem.line_total), 0),
+                func.coalesce(func.sum(OrderItem.quantity * func.coalesce(Product.consignment_price, 0)), 0),
+            )
+            .select_from(OrderItem)
+            .outerjoin(Product, OrderItem.product_id == Product.id)
+            .filter(OrderItem.order_id.in_(paid_ids))
+            .group_by(Product.is_consignment)
+            .all()
+        )
+        for is_cons, revenue, owed in rows:
+            if is_cons:
+                consignment["consignment_revenue"] += float(revenue)
+                consignment["consignment_owed"] += float(owed)
+            else:
+                consignment["own_revenue"] += float(revenue)
+        consignment["consignment_margin"] = round(
+            consignment["consignment_revenue"] - consignment["consignment_owed"], 2
+        )
+        for k in ("own_revenue", "consignment_revenue", "consignment_owed"):
+            consignment[k] = round(consignment[k], 2)
+
     return jsonify(
         range={"from": d_from, "to": d_to},
         total_revenue=total_received,
         order_count=payment_count,
+        consignment=consignment,
         by_method=by_method,
         by_item_type=by_type,
         daily=daily,
