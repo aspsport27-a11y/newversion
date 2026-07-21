@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePosStore } from '../stores/pos'
 import PaymentDialog from '../components/PaymentDialog.vue'
@@ -29,6 +29,22 @@ const toast = ref('')
 const startStation = ref(null)
 const sessionStation = ref(null)
 const pendingStationOrder = ref(null)
+
+// --- pencarian & filter kategori F&B (biar tak perlu scroll daftar panjang) ---
+const fnbSearch = ref('')
+const fnbCategory = ref('')
+const fnbCategories = computed(() => {
+  const set = new Set()
+  for (const p of pos.fnbProducts) if (p.category_name) set.add(p.category_name)
+  return [...set].sort()
+})
+const filteredFnb = computed(() => {
+  let list = pos.fnbProducts
+  if (fnbCategory.value) list = list.filter((p) => p.category_name === fnbCategory.value)
+  const q = fnbSearch.value.trim().toLowerCase()
+  if (q) list = list.filter((p) => p.name.toLowerCase().includes(q))
+  return list
+})
 
 onMounted(async () => {
   try {
@@ -217,10 +233,33 @@ function logout() {
         <p v-if="pos.products.length === 0" class="text-center text-slate-400 mt-6 text-sm">
           Belum ada tiket/produk untuk venue ini. Tambahkan di admin.
         </p>
-        <p v-if="pos.fnbProducts.length" class="text-xs font-semibold text-slate-400 mb-1.5">🍔 F&amp;B</p>
+        <div v-if="pos.fnbProducts.length">
+          <p class="text-xs font-semibold text-slate-400 mb-1.5">🍔 F&amp;B</p>
+          <input
+            v-model="fnbSearch"
+            type="text"
+            placeholder="Cari produk..."
+            class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm mb-2 outline-none focus:border-brand-500"
+          />
+          <div v-if="fnbCategories.length" class="flex gap-1.5 overflow-x-auto pb-2 mb-1 -mx-0.5 px-0.5">
+            <button
+              @click="fnbCategory = ''"
+              :class="['shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition', fnbCategory === '' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200']"
+            >Semua</button>
+            <button
+              v-for="c in fnbCategories"
+              :key="c"
+              @click="fnbCategory = c"
+              :class="['shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition', fnbCategory === c ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200']"
+            >{{ c }}</button>
+          </div>
+        </div>
+        <p v-if="pos.fnbProducts.length && !filteredFnb.length" class="text-center text-slate-400 text-sm py-4">
+          Tidak ada produk yang cocok.
+        </p>
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           <button
-            v-for="p in pos.fnbProducts"
+            v-for="p in filteredFnb"
             :key="p.id"
             @click="pos.addProduct(p)"
             :disabled="p.track_stock && p.stock_qty <= 0"

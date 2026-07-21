@@ -12,7 +12,7 @@ from flask_jwt_extended import (
 from ..extensions import db
 from ..models import Employee, User, Venue
 from ..security import verify_password
-from .models import Attendance, Facility, FacilityBooking, PosTerminal, Product, Shift
+from .models import Attendance, Facility, FacilityBooking, PosTerminal, Product, ProductCategory, Shift
 from .services import (
     PosError,
     add_cash_movement,
@@ -238,9 +238,11 @@ def pos_products():
         .order_by(Product.name)
         .all()
     )
+    cat_names = {c.id: c.name for c in ProductCategory.query.all()}
     out = []
     for p in products:
         d = product_public(p)
+        d["category_name"] = cat_names.get(p.category_id)
         if p.is_ticket:
             # harga tiket berlaku hari ini (weekday/weekend/libur otomatis)
             d["effective_price"] = ticket_unit_price(p)
