@@ -131,6 +131,12 @@ onMounted(async () => { await loadVenues(); await run() })
             <div v-for="m in rep.revenue.by_method" :key="m.method" class="flex justify-between py-1 pl-4 text-slate-500">
               <span class="capitalize">— {{ m.method }}</span><span>{{ rupiah(m.amount) }}</span>
             </div>
+            <div v-if="rep.revenue.by_category.length" class="pl-4 mt-1 pt-1 border-t border-dashed">
+              <p class="text-xs text-slate-400 mb-1">Per kategori produk</p>
+              <div v-for="c in rep.revenue.by_category" :key="c.category" class="flex justify-between py-0.5 pl-2 text-slate-500 text-xs">
+                <span>— {{ c.category }}</span><span>{{ rupiah(c.amount) }}</span>
+              </div>
+            </div>
             <div class="flex justify-between py-1.5 border-b mt-2">
               <span class="text-slate-600 font-medium">Beban</span>
               <span class="font-semibold text-red-600">({{ rupiah(rep.expenses.total) }})</span>

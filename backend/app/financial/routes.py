@@ -25,7 +25,7 @@ from sqlalchemy import func
 from ..extensions import db
 from ..models import User, Venue
 from ..security import ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, require_perm
-from ..pos.models import Order, Payment
+from ..pos.models import Order, OrderItem, Payment, Product, ProductCategory
 from ..ops.models import ExpenseCategory, OpRequest, OpRequestItem
 from ..proc.models import ConsignmentSettlement, PurchaseOrder
 from ..payroll.models import PayrollRun
@@ -95,6 +95,30 @@ def report():
             func.date(Payment.paid_at), func.coalesce(func.sum(Payment.amount), 0)
         ).group_by(func.date(Payment.paid_at)).all()
     }
+
+    # ---------- PENDAPATAN PER KATEGORI PRODUK (basis: order lunas dibuat dlm
+    # rentang — sama pola dgn breakdown Milik Sendiri/Konsinyasi di Laporan Penjualan) ----------
+    rev_ord_q = Order.query.filter(
+        Order.status == "paid", func.date(Order.created_at).between(d_from, d_to)
+    )
+    if vid:
+        rev_ord_q = rev_ord_q.filter(Order.venue_id == vid)
+    paid_order_ids = [o.id for o in rev_ord_q.with_entities(Order.id).all()]
+    revenue_by_category = []
+    if paid_order_ids:
+        cat_rows = (
+            db.session.query(ProductCategory.name, func.coalesce(func.sum(OrderItem.line_total), 0))
+            .select_from(OrderItem)
+            .join(Product, OrderItem.product_id == Product.id)
+            .outerjoin(ProductCategory, Product.category_id == ProductCategory.id)
+            .filter(OrderItem.order_id.in_(paid_order_ids))
+            .group_by(ProductCategory.name)
+            .all()
+        )
+        revenue_by_category = sorted(
+            [{"category": (name or "Tanpa kategori"), "amount": _f(amt)} for name, amt in cat_rows],
+            key=lambda r: r["amount"], reverse=True,
+        )
 
     # ---------- BEBAN OPERASIONAL (disbursed, per kategori) ----------
     op_q = (
@@ -213,6 +237,7 @@ def report():
         revenue={
             "total": round(revenue_total, 2),
             "by_method": revenue_by_method,
+            "by_category": revenue_by_category,
             "daily": revenue_daily,
         },
         expenses={

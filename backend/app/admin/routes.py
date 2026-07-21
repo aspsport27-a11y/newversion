@@ -1538,15 +1538,81 @@ def bookings_list():
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), bookings=rows), 200
 
 
+@admin_bp.get("/orders")
+@jwt_required()
+@VIEW
+def orders_list():
+    """Riwayat transaksi POS — daftar order per venue, dgn tag kategori produk
+    per transaksi (utk filter di frontend). manager_unit dipaksa ke venue-nya."""
+    d_from, d_to = _date_range()
+    forced = _forced_venue()
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
+    q = Order.query.filter(func.date(Order.created_at).between(d_from, d_to))
+    if vid:
+        q = q.filter(Order.venue_id == vid)
+    status = request.args.get("status")
+    if status:
+        q = q.filter(Order.status == status)
+    orders = q.order_by(Order.created_at.desc()).limit(300).all()
+
+    uids = {o.cashier_id for o in orders if o.cashier_id}
+    users = {u.id: u.username for u in User.query.filter(User.id.in_(uids)).all()} if uids else {}
+
+    order_ids = [o.id for o in orders]
+    cats_by_order = {}
+    if order_ids:
+        cat_rows = (
+            db.session.query(OrderItem.order_id, ProductCategory.name)
+            .join(Product, OrderItem.product_id == Product.id)
+            .join(ProductCategory, Product.category_id == ProductCategory.id)
+            .filter(OrderItem.order_id.in_(order_ids))
+            .distinct()
+            .all()
+        )
+        for oid, cname in cat_rows:
+            cats_by_order.setdefault(oid, []).append(cname)
+
+    rows = []
+    for o in orders:
+        methods = sorted({p.method for p in o.payments if p.status == "paid"})
+        rows.append({
+            "id": o.id, "order_number": o.order_number, "venue_id": o.venue_id,
+            "status": o.status,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "total_amount": float(o.total_amount or 0),
+            "cashier": users.get(o.cashier_id),
+            "payment_methods": methods,
+            "item_count": len(o.items),
+            "categories": sorted(cats_by_order.get(o.id, [])),
+        })
+    return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), orders=rows), 200
+
+
 @admin_bp.get("/orders/<int:order_id>")
 @jwt_required()
 @VIEW
 def order_detail(order_id):
-    """Detail order + riwayat pembayaran (DP, pelunasan)."""
+    """Detail order + riwayat pembayaran (DP, pelunasan) + kategori per item."""
     order = db.session.get(Order, order_id)
     if not order:
         return _err("Order tidak ditemukan", "not_found", 404)
-    return jsonify(order=order.to_dict()), 200
+    forced = _forced_venue()
+    if forced is not None and order.venue_id != forced:
+        return _err("Bukan order venue Anda", "forbidden", 403)
+    d = order.to_dict()
+    prod_ids = [i.product_id for i in order.items if i.product_id]
+    cat_map = {}
+    if prod_ids:
+        cat_map = dict(
+            db.session.query(Product.id, ProductCategory.name)
+            .outerjoin(ProductCategory, Product.category_id == ProductCategory.id)
+            .filter(Product.id.in_(prod_ids)).all()
+        )
+    for it, item_dict in zip(order.items, d["items"]):
+        item_dict["category_name"] = cat_map.get(it.product_id)
+    cashier = db.session.get(User, order.cashier_id) if order.cashier_id else None
+    d["cashier"] = cashier.username if cashier else None
+    return jsonify(order=d), 200
 
 
 @admin_bp.post("/orders/<int:order_id>/cancel")
@@ -1559,6 +1625,9 @@ def order_cancel_admin(order_id):
     order = db.session.get(Order, order_id)
     if not order:
         return _err("Order tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and order.venue_id != forced:
+        return _err("Bukan order venue Anda", "forbidden", 403)
     try:
         cancel_order(order)
     except PosError as e:
