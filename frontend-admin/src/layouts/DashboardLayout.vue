@@ -56,9 +56,9 @@ const navGroups = [
     items: [
       { name: 'venues', label: 'Venue', icon: '🏟️', roles: ADMINS },
       { name: 'areas', label: 'Area', icon: '🗺️', roles: ADMINS },
-      { name: 'products', label: 'Produk', icon: '📦', roles: [...ADMINS, 'admin_unit'] },
-      { name: 'promos', label: 'Promo', icon: '🎉', roles: [...ADMINS, 'admin_unit'] },
-      { name: 'facilities', label: 'Lapangan & Tiket', icon: '⚽', roles: [...ADMINS, 'admin_unit'] },
+      { name: 'products', label: 'Produk', icon: '📦', perm: 'product.manage' },
+      { name: 'promos', label: 'Promo', icon: '🎉', perm: 'promo.manage' },
+      { name: 'facilities', label: 'Lapangan & Tiket', icon: '⚽', perm: 'facility.manage' },
     ],
   },
   {
@@ -93,16 +93,21 @@ const navGroups = [
     label: 'Pengaturan',
     icon: '⚙️',
     items: [
-      { name: 'setup', label: 'Setup Kasir', icon: '⚙️', roles: ADMINS },
+      { name: 'setup', label: 'Setup Kasir', icon: '⚙️', perm: 'setup.manage' },
       { name: 'permissions', label: 'Hak Akses', icon: '🔑', roles: ['admin'] },
     ],
   },
 ]
 
-const showTop = computed(() => topItem.roles.includes(auth.user?.role))
+// item bisa digembok pakai daftar role tetap (roles) ATAU izin RBAC configurable (perm)
+function canSee(n) {
+  if (n.perm) return auth.hasPerm(n.perm)
+  return n.roles.includes(auth.user?.role)
+}
+const showTop = computed(() => canSee(topItem))
 const visibleGroups = computed(() =>
   navGroups
-    .map((g) => ({ ...g, items: g.items.filter((n) => n.roles.includes(auth.user?.role)) }))
+    .map((g) => ({ ...g, items: g.items.filter(canSee) }))
     .filter((g) => g.items.length > 0),
 )
 

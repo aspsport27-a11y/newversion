@@ -1,6 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
+const isManager = computed(() => auth.user?.role === 'manager_unit')
+const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 
 const venues = ref([])
 const terminals = ref([])
@@ -27,6 +32,9 @@ async function loadAll() {
     client.get('/admin/cashiers'),
   ])
   venues.value = v.data.venues
+  // manager_unit dibatasi ke venue-nya sendiri; admin_unit hanya venue di areanya
+  if (isManager.value) venues.value = venues.value.filter((x) => x.id === auth.user?.venue_id)
+  else if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   terminals.value = t.data.terminals
   cashiers.value = c.data.cashiers
 }

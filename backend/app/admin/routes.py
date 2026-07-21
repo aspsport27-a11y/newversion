@@ -373,8 +373,13 @@ def product_categories_list():
 def products_list():
     q = Product.query
     vid = request.args.get("venue_id", type=int)
+    vids = _scope_vids(_current_user())
     if vid:
+        if vids is not None and vid not in vids:
+            return _err("Venue di luar cakupan Anda", "forbidden", 403)
         q = q.filter_by(venue_id=vid)
+    elif vids is not None:
+        q = q.filter(Product.venue_id.in_(vids)) if vids else q.filter(db.false())
     # filter jenis: ?ticket=1 (hanya tiket) / ?ticket=0 (hanya F&B) / tanpa = semua
     tk = request.args.get("ticket")
     if tk == "1":
@@ -933,9 +938,14 @@ def _pdate(s):
 @VIEW
 def promos_list():
     vid = request.args.get("venue_id", type=int)
+    vids = _scope_vids(_current_user())
     q = db.session.query(Promo, Product).join(Product, Promo.product_id == Product.id)
     if vid:
+        if vids is not None and vid not in vids:
+            return _err("Venue di luar cakupan Anda", "forbidden", 403)
         q = q.filter(Product.venue_id == vid)
+    elif vids is not None:
+        q = q.filter(Product.venue_id.in_(vids)) if vids else q.filter(db.false())
     q = q.order_by(Promo.id.desc())
     rows = []
     for promo, prod in q.all():
@@ -1031,8 +1041,13 @@ def promos_delete(pid):
 def facilities_list():
     q = Facility.query
     vid = request.args.get("venue_id", type=int)
+    vids = _scope_vids(_current_user())
     if vid:
+        if vids is not None and vid not in vids:
+            return _err("Venue di luar cakupan Anda", "forbidden", 403)
         q = q.filter_by(venue_id=vid)
+    elif vids is not None:
+        q = q.filter(Facility.venue_id.in_(vids)) if vids else q.filter(db.false())
     items = q.order_by(Facility.venue_id, Facility.name).all()
     return jsonify(count=len(items), facilities=[f.to_dict() for f in items]), 200
 
@@ -1103,7 +1118,11 @@ def facilities_update(fid):
 @jwt_required()
 @VIEW
 def terminals_list():
-    items = PosTerminal.query.order_by(PosTerminal.venue_id, PosTerminal.code).all()
+    q = PosTerminal.query
+    vids = _scope_vids(_current_user())
+    if vids is not None:
+        q = q.filter(PosTerminal.venue_id.in_(vids)) if vids else q.filter(db.false())
+    items = q.order_by(PosTerminal.venue_id, PosTerminal.code).all()
     return jsonify(terminals=[t.to_dict() for t in items]), 200
 
 
@@ -1115,6 +1134,9 @@ def terminals_create():
     for f in ("code", "name", "venue_id"):
         if not d.get(f):
             return _err(f"{f} wajib diisi")
+    vids = _scope_vids(_current_user())
+    if vids is not None and int(d["venue_id"]) not in vids:
+        return _err("Venue di luar cakupan Anda", "forbidden", 403)
     if PosTerminal.query.filter_by(code=d["code"]).first():
         return _err("Kode terminal sudah dipakai", "duplicate", 409)
     t = PosTerminal(code=d["code"], name=d["name"], venue_id=d["venue_id"], is_active=True)
@@ -1130,7 +1152,12 @@ def terminals_create():
 @jwt_required()
 @SETUP_MANAGE
 def cashiers_list():
-    users = User.query.filter_by(role="staff").order_by(User.username).all()
+    q = User.query.filter_by(role="staff")
+    vids = _scope_vids(_current_user())
+    if vids is not None:
+        # cakupan terbatas tak boleh lihat kasir "semua venue" (venue_id NULL) milik role lain
+        q = q.filter(User.venue_id.in_(vids)) if vids else q.filter(db.false())
+    users = q.order_by(User.username).all()
     return jsonify(cashiers=[u.to_dict() for u in users]), 200
 
 
@@ -1142,6 +1169,11 @@ def cashiers_create():
     for f in ("username", "email", "pin"):
         if not d.get(f):
             return _err(f"{f} wajib diisi")
+    vids = _scope_vids(_current_user())
+    if vids is not None:
+        # scope terbatas: wajib pilih venue (tak boleh bikin kasir "semua venue"), & venue itu harus di cakupannya
+        if not d.get("venue_id") or int(d["venue_id"]) not in vids:
+            return _err("Venue di luar cakupan Anda (atau belum dipilih)", "forbidden", 403)
     if len(str(d["pin"])) < 4:
         return _err("PIN minimal 4 digit")
     if User.query.filter((User.username == d["username"]) | (User.email == d["email"])).first():
@@ -1164,6 +1196,9 @@ def cashiers_set_pin(uid):
     u = db.session.get(User, uid)
     if not u:
         return _err("User tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and u.venue_id not in vids:
+        return _err("Kasir di luar cakupan Anda", "forbidden", 403)
     d = request.get_json(silent=True) or {}
     if len(str(d.get("pin", ""))) < 4:
         return _err("PIN minimal 4 digit")
@@ -1179,6 +1214,9 @@ def terminals_update(tid):
     t = db.session.get(PosTerminal, tid)
     if not t:
         return _err("Terminal tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and t.venue_id not in vids:
+        return _err("Terminal di luar cakupan Anda", "forbidden", 403)
     d = request.get_json(silent=True) or {}
     if "code" in d and d["code"] and d["code"] != t.code:
         if PosTerminal.query.filter_by(code=d["code"]).first():
@@ -1187,6 +1225,8 @@ def terminals_update(tid):
     if "name" in d and d["name"]:
         t.name = d["name"]
     if "venue_id" in d and d["venue_id"]:
+        if vids is not None and int(d["venue_id"]) not in vids:
+            return _err("Venue di luar cakupan Anda", "forbidden", 403)
         t.venue_id = d["venue_id"]
     if "is_active" in d:
         t.is_active = bool(d["is_active"])
@@ -1201,6 +1241,9 @@ def terminals_delete(tid):
     t = db.session.get(PosTerminal, tid)
     if not t:
         return _err("Terminal tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and t.venue_id not in vids:
+        return _err("Terminal di luar cakupan Anda", "forbidden", 403)
     n = Shift.query.filter_by(terminal_id=tid).count() + Order.query.filter_by(terminal_id=tid).count()
     if n:
         return _err(
@@ -1219,6 +1262,9 @@ def cashiers_update(uid):
     u = db.session.get(User, uid)
     if not u or u.role != "staff":
         return _err("Kasir tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and u.venue_id not in vids:
+        return _err("Kasir di luar cakupan Anda", "forbidden", 403)
     d = request.get_json(silent=True) or {}
     if "username" in d and d["username"] and d["username"] != u.username:
         if User.query.filter_by(username=d["username"]).first():
@@ -1229,7 +1275,10 @@ def cashiers_update(uid):
             return _err("Email sudah dipakai", "duplicate", 409)
         u.email = d["email"]
     if "venue_id" in d:
-        u.venue_id = d["venue_id"] or None
+        new_vid = d["venue_id"] or None
+        if vids is not None and (new_vid is None or int(new_vid) not in vids):
+            return _err("Venue di luar cakupan Anda (atau tak boleh kosongkan)", "forbidden", 403)
+        u.venue_id = new_vid
     if "active" in d:
         u.active = bool(d["active"])
     db.session.commit()
@@ -1243,6 +1292,9 @@ def cashiers_delete(uid):
     u = db.session.get(User, uid)
     if not u or u.role != "staff":
         return _err("Kasir tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and u.venue_id not in vids:
+        return _err("Kasir di luar cakupan Anda", "forbidden", 403)
     n = Shift.query.filter_by(cashier_id=uid).count() + Order.query.filter_by(cashier_id=uid).count()
     if n:
         return _err(

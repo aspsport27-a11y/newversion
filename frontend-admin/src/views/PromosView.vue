@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
+const isManager = computed(() => auth.user?.role === 'manager_unit')
 
 const venues = ref([])
 const venueId = ref(null)
@@ -37,8 +38,9 @@ function period(p) {
 async function loadVenues() {
   const { data } = await client.get('/venues')
   venues.value = data.venues
-  // admin_unit hanya venue di areanya
-  if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
+  // manager_unit dibatasi ke venue-nya sendiri; admin_unit hanya venue di areanya
+  if (isManager.value) venues.value = venues.value.filter((x) => x.id === auth.user?.venue_id)
+  else if (isAdminUnit.value) venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   if (venues.value.length && !venueId.value) venueId.value = venues.value[0].id
 }
 async function loadData() {
@@ -94,7 +96,7 @@ async function remove(p) {
         <p class="text-slate-500 mt-1">Diskon %, harga promo, beli-X-gratis-Y — dengan periode tanggal.</p>
       </div>
       <div class="flex gap-2">
-        <select v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        <select v-if="!isManager" v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
         <button @click="openCreate" :disabled="!products.length" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">+ Promo</button>
