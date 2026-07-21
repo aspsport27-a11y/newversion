@@ -13,10 +13,15 @@ const suppliers = ref([])
 const categories = ref([])
 const loading = ref(false)
 const search = ref('')
+const categoryFilter = ref('')
 const filteredProducts = computed(() => {
+  let list = products.value
+  if (categoryFilter.value) {
+    list = list.filter((p) => String(p.category_id || '') === String(categoryFilter.value))
+  }
   const q = search.value.trim().toLowerCase()
-  if (!q) return products.value
-  return products.value.filter((p) =>
+  if (!q) return list
+  return list.filter((p) =>
     p.name.toLowerCase().includes(q) ||
     p.sku.toLowerCase().includes(q) ||
     (p.category_name || '').toLowerCase().includes(q) ||
@@ -108,7 +113,7 @@ onMounted(async () => {
   await loadVenues()
   await loadProducts()
 })
-watch(venueId, () => { search.value = ''; loadProducts() })
+watch(venueId, () => { search.value = ''; categoryFilter.value = ''; loadProducts() })
 
 function openCreate() {
   editing.value = null
@@ -169,9 +174,13 @@ async function save() {
       </div>
     </div>
 
-    <div class="mb-3">
+    <div class="mb-3 flex flex-wrap gap-2">
       <input v-model="search" type="text" placeholder="🔍 Cari nama, SKU, atau supplier…"
         class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+      <select v-model="categoryFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        <option value="">Semua kategori</option>
+        <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+      </select>
     </div>
 
     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
