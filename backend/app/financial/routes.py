@@ -24,12 +24,12 @@ from sqlalchemy import func
 
 from ..extensions import db
 from ..models import User, Venue
-from ..security import ROLE_MANAGER, require_perm
+from ..security import ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, require_perm
 from ..pos.models import Order, Payment
 from ..ops.models import ExpenseCategory, OpRequest, OpRequestItem
 from ..proc.models import ConsignmentSettlement, PurchaseOrder
 from ..payroll.models import PayrollRun
-from ..treasury.models import BankAccount
+from ..treasury.models import AccountTransaction, BankAccount
 from ..treasury.service import account_balance, holding_account, record_tx
 from .models import HOLDING_CATEGORIES, HoldingExpense
 
@@ -166,18 +166,46 @@ def report():
     ]
 
     # ---------- SALDO KAS (snapshot, bukan periodik) ----------
+    # saldo rekening holding = data owner-sensitif (agregat seluruh venue) —
+    # HANYA admin/head_office boleh lihat. manager_unit cuma lihat rekening venuenya sendiri.
+    u = _current_user()
+    can_see_holding = bool(u and u.role in (ROLE_ADMIN, ROLE_HEAD_OFFICE))
     acc_q = BankAccount.query.filter_by(is_active=True)
     if vid:
-        # rekening venue tsb + rekening holding (uang bisa mengendap di holding)
-        acc_q = acc_q.filter(
-            (BankAccount.venue_id == vid) | (BankAccount.type == "holding")
-        )
+        if can_see_holding:
+            # rekening venue tsb + rekening holding (uang bisa mengendap di holding)
+            acc_q = acc_q.filter((BankAccount.venue_id == vid) | (BankAccount.type == "holding"))
+        else:
+            acc_q = acc_q.filter(BankAccount.venue_id == vid)
+    elif not can_see_holding:
+        acc_q = acc_q.filter(BankAccount.type != "holding")
     accounts = []
     cash_total = 0.0
+    venue_account_ids = []
     for acc in acc_q.order_by(BankAccount.type.desc(), BankAccount.name).all():
         bal = account_balance(acc.id)
         cash_total += bal
         accounts.append({**acc.to_dict(balance=bal)})
+        if acc.type == "venue":
+            venue_account_ids.append(acc.id)
+
+    # ---------- ARUS KAS OPERASIONAL (mutasi rekening venue akibat pengajuan
+    # dana operasional yg sudah dicairkan) — masuk/keluar dari rekening venue itu sendiri ----------
+    op_cash_in = op_cash_out = 0.0
+    if venue_account_ids:
+        op_tx_q = AccountTransaction.query.filter(
+            AccountTransaction.account_id.in_(venue_account_ids),
+            AccountTransaction.ref_type == "op_request",
+            AccountTransaction.tx_date.between(d_from, d_to),
+        )
+        op_cash_in = _f(
+            op_tx_q.filter(AccountTransaction.direction == "in")
+            .with_entities(func.coalesce(func.sum(AccountTransaction.amount), 0)).scalar()
+        )
+        op_cash_out = _f(
+            op_tx_q.filter(AccountTransaction.direction == "out")
+            .with_entities(func.coalesce(func.sum(AccountTransaction.amount), 0)).scalar()
+        )
 
     return jsonify(
         range={"from": d_from, "to": d_to},
@@ -203,7 +231,11 @@ def report():
             "out": round(expense_total, 2),
             "net": net_profit,
         },
-        cash={"total": round(cash_total, 2), "accounts": accounts},
+        cash={
+            "total": round(cash_total, 2),
+            "accounts": accounts,
+            "operational_flow": {"in": round(op_cash_in, 2), "out": round(op_cash_out, 2)},
+        },
     ), 200
 
 

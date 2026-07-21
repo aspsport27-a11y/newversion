@@ -163,6 +163,16 @@ onMounted(async () => { await loadVenues(); await run() })
           </table>
         </div>
 
+        <!-- Arus Kas Operasional (masuk/keluar rekening venue akibat pengajuan dana) -->
+        <div v-if="isManager" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <h3 class="font-semibold text-slate-700 px-4 py-3 border-b">Arus Kas Operasional (Rekening Venue)</h3>
+          <div class="grid grid-cols-2 gap-3 p-4">
+            <div class="bg-emerald-50 rounded-lg px-3 py-2"><p class="text-xs text-emerald-700">Masuk</p><p class="font-bold text-emerald-700">{{ rupiah(rep.cash.operational_flow.in) }}</p></div>
+            <div class="bg-red-50 rounded-lg px-3 py-2"><p class="text-xs text-red-600">Keluar</p><p class="font-bold text-red-600">{{ rupiah(rep.cash.operational_flow.out) }}</p></div>
+          </div>
+          <p class="text-xs text-slate-400 px-4 pb-3">Mutasi rekening venue ini yang berasal dari pengajuan dana operasional (disetujui &amp; dicairkan) pada periode di atas.</p>
+        </div>
+
         <!-- Saldo Kas per rekening -->
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
           <h3 class="font-semibold text-slate-700 px-4 py-3 border-b">Saldo Kas per Rekening</h3>
