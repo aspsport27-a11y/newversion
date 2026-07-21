@@ -65,7 +65,7 @@ const navGroups = [
     label: 'HR',
     icon: '🧑‍💼',
     items: [
-      { name: 'employees', label: 'Karyawan', icon: '👥', roles: ['admin', 'head_office', 'manager_unit'] },
+      { name: 'employees', label: 'Karyawan', icon: '👥', perm: 'hr.manage' },
       { name: 'attendance', label: 'Absensi', icon: '🕐', roles: ['admin', 'head_office', 'manager_unit'] },
       { name: 'payroll', label: 'Payroll', icon: '🧾', roles: ['admin', 'head_office', 'manager_unit'] },
     ],
