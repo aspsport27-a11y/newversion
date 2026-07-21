@@ -112,6 +112,21 @@ async function onUpload(e) {
     flash('Data diunggah')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal mengunggah.') } finally { uploading.value = false }
 }
+
+// CSV transfer bank — muncul otomatis begitu payroll disetujui (approved/paid)
+function downloadTransferCsv() {
+  const r = detail.value
+  const rows = [
+    ['no_rekening', 'nama_karyawan', 'nominal'],
+    ...r.items.map((it) => [it.bank_account || '', (it.employee_name || '').toUpperCase(), it.net_salary]),
+  ]
+  const csv = rows.map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `transfer-${r.code}.csv`; a.click()
+  URL.revokeObjectURL(url)
+}
 async function viewAtt(a) { const res = await client.get(`/payroll/attachments/${a.id}`, { responseType: 'blob' }); window.open(URL.createObjectURL(res.data), '_blank') }
 
 function slip(it) {
@@ -191,6 +206,7 @@ function slip(it) {
         <div class="flex justify-between items-start mb-3">
           <div><h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3><p class="text-sm text-slate-500">{{ MONTHS[detail.period_month] }} {{ detail.period_year }}</p></div>
           <div class="flex items-center gap-2">
+            <button v-if="isApprover && ['approved', 'paid'].includes(detail.status)" @click="downloadTransferCsv" title="Unduh CSV Transfer Bank" class="text-emerald-600 hover:text-emerald-700 text-xl leading-none">📄</button>
             <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
             <button @click="detail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
           </div>
