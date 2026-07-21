@@ -1574,12 +1574,17 @@ def orders_list():
 
     rows = []
     for o in orders:
+        # basis RIL: hanya payment yg statusnya masih 'paid' (uang yg benar2
+        # masuk & belum dibatalkan) — amount_paid di order bisa beda dari ini
+        # kalau order sudah dibatalkan setelah lunas (payment ditandai 'void').
+        real_paid = sum(float(p.amount) for p in o.payments if p.status == "paid")
         methods = sorted({p.method for p in o.payments if p.status == "paid"})
         rows.append({
             "id": o.id, "order_number": o.order_number, "venue_id": o.venue_id,
             "status": o.status,
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "total_amount": float(o.total_amount or 0),
+            "amount_paid": round(real_paid, 2),
             "cashier": users.get(o.cashier_id),
             "payment_methods": methods,
             "item_count": len(o.items),

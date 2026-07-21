@@ -152,13 +152,14 @@ async function cancelOrder(o, ev) {
             <th class="px-4 py-3 font-medium">Kategori</th>
             <th class="px-4 py-3 font-medium">Metode</th>
             <th class="px-4 py-3 font-medium text-right">Total</th>
+            <th class="px-4 py-3 font-medium text-right">Pembayaran (Ril)</th>
             <th class="px-4 py-3 font-medium text-center">Status</th>
             <th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!orders.length"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Tidak ada transaksi pada periode ini.</td></tr>
-            <tr v-else-if="!filtered.length"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Tidak ada transaksi yang cocok dengan filter.</td></tr>
+            <tr v-if="loading"><td colspan="10" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!orders.length"><td colspan="10" class="px-4 py-8 text-center text-slate-400">Tidak ada transaksi pada periode ini.</td></tr>
+            <tr v-else-if="!filtered.length"><td colspan="10" class="px-4 py-8 text-center text-slate-400">Tidak ada transaksi yang cocok dengan filter.</td></tr>
             <tr v-for="o in paged" :key="o.id" @click="openDetail(o)" class="border-t hover:bg-slate-50 cursor-pointer">
               <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ o.order_number }}</td>
               <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venueName(o.venue_id) }}</td>
@@ -169,7 +170,8 @@ async function cancelOrder(o, ev) {
                 <span v-if="!o.categories.length" class="text-slate-300 text-xs">—</span>
               </td>
               <td class="px-4 py-3 text-slate-500 capitalize">{{ o.payment_methods.join(', ') || '—' }}</td>
-              <td class="px-4 py-3 text-right font-medium">{{ rupiah(o.total_amount) }}</td>
+              <td class="px-4 py-3 text-right">{{ rupiah(o.total_amount) }}</td>
+              <td class="px-4 py-3 text-right font-medium" :class="o.amount_paid < o.total_amount ? 'text-amber-600' : 'text-emerald-600'">{{ rupiah(o.amount_paid) }}</td>
               <td class="px-4 py-3 text-center"><span :class="statusMap[o.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[o.status]?.[0] || o.status }}</span></td>
               <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
                 <span class="text-brand-600">Detail</span>
