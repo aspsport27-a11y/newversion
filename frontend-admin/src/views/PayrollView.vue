@@ -49,6 +49,7 @@ onMounted(async () => { await loadVenues(); await loadRuns() })
 watch([venueId], loadRuns)
 
 async function generate() {
+  if (!isManager.value && !venueId.value) { alert('Pilih venue dulu (bukan "Semua venue") untuk generate gaji.'); return }
   busy.value = true
   try {
     const payload = ym()
@@ -149,9 +150,10 @@ function slip(it) {
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
         <input v-model="period" type="month" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
-        <button @click="generate" :disabled="busy" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Generate Gaji</button>
+        <button @click="generate" :disabled="busy || (!isManager && !venueId)" :title="(!isManager && !venueId) ? 'Pilih venue dulu (bukan Semua venue)' : ''" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Generate Gaji</button>
       </div>
     </div>
+    <p v-if="!isManager && !venueId" class="text-xs text-amber-600 -mt-3 mb-3">Pilih venue tertentu (bukan "Semua venue") untuk bisa generate gaji.</p>
 
     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
       <div class="overflow-x-auto">
