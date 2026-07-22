@@ -15,6 +15,14 @@ const detail = ref(null)
 const detailLoading = ref(false)
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
+function waLink(phone) {
+  if (!phone) return null
+  let digits = phone.replace(/\D/g, '')
+  if (!digits) return null
+  if (digits.startsWith('0')) digits = '62' + digits.slice(1)
+  else if (!digits.startsWith('62')) digits = '62' + digits
+  return `https://wa.me/${digits}`
+}
 function venueCode(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
 function fmtDate(d) {
   return new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short' })
@@ -110,6 +118,7 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-3 font-medium">Jam</th>
               <th class="px-4 py-3 font-medium">Lapangan</th>
               <th class="px-4 py-3 font-medium">Customer</th>
+              <th class="px-4 py-3 font-medium">No. HP</th>
               <th class="px-4 py-3 font-medium text-right">Total</th>
               <th class="px-4 py-3 font-medium text-right">Sisa</th>
               <th class="px-4 py-3 font-medium text-center">Status</th>
@@ -117,13 +126,20 @@ onMounted(async () => { await loadVenues(); await run() })
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!shown.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
+            <tr v-if="loading"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!shown.length"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
             <tr v-for="b in shown" :key="b.id" @click="openDetail(b)" class="border-t hover:bg-slate-50 cursor-pointer">
               <td class="px-4 py-3 text-slate-700">{{ fmtDate(b.booking_date) }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ b.start_time }}–{{ b.end_time }}</td>
               <td class="px-4 py-3 text-slate-700">{{ b.facility_name }}</td>
               <td class="px-4 py-3 text-slate-600">{{ b.customer_name || '—' }}</td>
+              <td class="px-4 py-3">
+                <a v-if="waLink(b.customer_phone)" :href="waLink(b.customer_phone)" target="_blank" rel="noopener"
+                  @click.stop class="text-emerald-600 hover:underline whitespace-nowrap">
+                  💬 {{ b.customer_phone }}
+                </a>
+                <span v-else class="text-slate-400">—</span>
+              </td>
               <td class="px-4 py-3 text-right">{{ b.order_total != null ? rupiah(b.order_total) : '—' }}</td>
               <td class="px-4 py-3 text-right" :class="b.order_due > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'">
                 {{ b.order_due != null ? rupiah(b.order_due) : '—' }}
