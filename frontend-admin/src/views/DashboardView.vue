@@ -8,6 +8,7 @@ const auth = useAuthStore()
 const loading = ref(true)
 const error = ref('')
 const summary = ref(null)
+const growthView = ref('rupiah') // 'rupiah' | 'persen'
 
 const isManagerLike = computed(() => ['manager_unit', 'admin_unit'].includes(auth.user?.role))
 
@@ -113,13 +114,27 @@ onMounted(async () => {
 
     <!-- Sales Growth MoM per venue -->
     <div v-if="!loading && !error" class="bg-white rounded-xl shadow-sm border p-5 mt-4">
-      <div class="flex items-center justify-between mb-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h3 class="font-semibold text-slate-700">Sales Growth MoM per Venue</h3>
-        <p class="text-xs text-slate-400">
-          {{ fmtDate(summary.sales_growth_mom.this_month_range.from) }}–{{ fmtDate(summary.sales_growth_mom.this_month_range.to) }}
-          vs
-          {{ fmtDate(summary.sales_growth_mom.last_month_range.from) }}–{{ fmtDate(summary.sales_growth_mom.last_month_range.to) }}
-        </p>
+        <div class="flex items-center gap-3">
+          <p class="text-xs text-slate-400">
+            {{ fmtDate(summary.sales_growth_mom.this_month_range.from) }}–{{ fmtDate(summary.sales_growth_mom.this_month_range.to) }}
+            vs
+            {{ fmtDate(summary.sales_growth_mom.last_month_range.from) }}–{{ fmtDate(summary.sales_growth_mom.last_month_range.to) }}
+          </p>
+          <div class="flex rounded-lg border border-slate-200 overflow-hidden text-xs shrink-0">
+            <button
+              @click="growthView = 'rupiah'"
+              :class="growthView === 'rupiah' ? 'bg-brand-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'"
+              class="px-3 py-1.5 font-medium transition"
+            >Rupiah</button>
+            <button
+              @click="growthView = 'persen'"
+              :class="growthView === 'persen' ? 'bg-brand-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'"
+              class="px-3 py-1.5 font-medium transition border-l border-slate-200"
+            >Persentase</button>
+          </div>
+        </div>
       </div>
       <div v-if="!summary.sales_growth_mom.venues.length" class="text-sm text-slate-400 text-center py-4">
         Belum ada data venue untuk ditampilkan.
@@ -129,8 +144,8 @@ onMounted(async () => {
           <thead>
             <tr class="text-left text-slate-400 border-b">
               <th class="pb-2 font-medium">Venue</th>
-              <th class="pb-2 font-medium text-right">Bulan Ini</th>
-              <th class="pb-2 font-medium text-right">Bulan Lalu</th>
+              <th v-if="growthView === 'rupiah'" class="pb-2 font-medium text-right">Bulan Ini</th>
+              <th v-if="growthView === 'rupiah'" class="pb-2 font-medium text-right">Bulan Lalu</th>
               <th class="pb-2 font-medium text-right">Growth</th>
             </tr>
           </thead>
@@ -140,8 +155,8 @@ onMounted(async () => {
                 {{ v.venue_name }}
                 <span class="text-[11px] text-slate-400 ml-1">{{ v.venue_type }}</span>
               </td>
-              <td class="py-2.5 text-right text-slate-700">{{ rupiah(v.this_month) }}</td>
-              <td class="py-2.5 text-right text-slate-500">{{ rupiah(v.last_month) }}</td>
+              <td v-if="growthView === 'rupiah'" class="py-2.5 text-right text-slate-700">{{ rupiah(v.this_month) }}</td>
+              <td v-if="growthView === 'rupiah'" class="py-2.5 text-right text-slate-500">{{ rupiah(v.last_month) }}</td>
               <td class="py-2.5 text-right font-semibold">
                 <span v-if="v.is_new" class="text-emerald-600">Baru</span>
                 <span v-else-if="v.growth_pct === null" class="text-slate-400">–</span>
