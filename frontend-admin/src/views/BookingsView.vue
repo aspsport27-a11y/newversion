@@ -1,6 +1,10 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
+import { useAuthStore } from '../stores/auth'
+
+const auth = useAuthStore()
+const isManager = computed(() => auth.user?.role === 'manager_unit')
 
 const venues = ref([])
 const venueId = ref('')
@@ -73,6 +77,10 @@ function venueName(id) {
 async function loadVenues() {
   const { data } = await client.get('/admin/venues')
   venues.value = data.venues
+  if (isManager.value) {
+    venues.value = venues.value.filter((x) => x.id === auth.user?.venue_id)
+    venueId.value = auth.user?.venue_id || ''
+  }
 }
 async function run() {
   loading.value = true
@@ -125,7 +133,7 @@ onMounted(async () => { await loadVenues(); await run() })
         <input v-model="from" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
       <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
         <input v-model="to" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
-      <div><label class="block text-xs text-slate-500 mb-1">Venue</label>
+      <div v-if="!isManager"><label class="block text-xs text-slate-500 mb-1">Venue</label>
         <select v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
           <option value="">Semua venue</option>
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>

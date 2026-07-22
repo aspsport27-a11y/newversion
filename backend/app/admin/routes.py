@@ -1776,7 +1776,8 @@ def bookings_list():
     today = date.today()
     d_from = request.args.get("from") or today.isoformat()
     d_to = request.args.get("to") or (today + timedelta(days=30)).isoformat()
-    vid = request.args.get("venue_id", type=int)
+    forced = _forced_venue()
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
     fid = request.args.get("facility_id", type=int)
 
     q = (
@@ -1825,6 +1826,9 @@ def booking_delete(bid):
     fb = db.session.get(FacilityBooking, bid)
     if not fb:
         return _err("Booking tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and fb.venue_id not in vids:
+        return _err("Booking di luar cakupan venue Anda", "forbidden", 403)
     if fb.order_item_id is not None:
         return _err(
             "Booking ini terhubung ke order — tak bisa dihapus langsung dari sini.",
