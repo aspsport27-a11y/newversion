@@ -15,4 +15,12 @@ router.beforeEach((to) => {
   return true
 })
 
+// lihat frontend-admin: chunk lama yg dihapus rsync --delete saat redeploy
+// bisa gagal diam-diam di tab yg sudah lama terbuka → reload penuh utk pulih
+router.onError((err, to) => {
+  if (/Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i.test(err.message)) {
+    window.location.href = to.fullPath
+  }
+})
+
 export default router
