@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePosStore } from '../stores/pos'
+import { stationClock, playAlarmBeep } from '../utils/stationClock'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
@@ -63,6 +64,33 @@ onMounted(async () => {
 let stationPoll = null
 onMounted(() => { stationPoll = setInterval(() => { if (pos.hasStations && !sessionStation.value) pos.fetchStations() }, 5000) })
 onUnmounted(() => clearInterval(stationPoll))
+
+// jam & harga berjalan tiap detik di kartu grid station (bukan cuma di
+// dalam dialog sesi) — dipakai jg utk cek alarm waktu habis
+const nowTick = ref(Date.now())
+let clockTimer = null
+onMounted(() => { clockTimer = setInterval(() => (nowTick.value = Date.now()), 1000) })
+onUnmounted(() => clearInterval(clockTimer))
+
+function stationClockFor(s) {
+  return s.status === 'ongoing' ? stationClock(s.session, nowTick.value, s.hourly_rate) : null
+}
+
+// alarm bunyi begitu ada station yg waktunya habis (overtime), diulang tiap
+// 60 detik selama masih overtime & belum ditambah waktu/di-stop — spy kasir
+// pasti sadar tapi tak berisik terus-menerus tiap detik
+const lastAlarmAt = {}
+watch(nowTick, () => {
+  for (const s of pos.stations) {
+    const c = stationClockFor(s)
+    if (!c || !c.isOvertime) { delete lastAlarmAt[s.id]; continue }
+    const last = lastAlarmAt[s.id]
+    if (!last || Date.now() - last >= 60000) {
+      playAlarmBeep()
+      lastAlarmAt[s.id] = Date.now()
+    }
+  }
+})
 
 function openStation(s) {
   if (s.status === 'ongoing') sessionStation.value = s
@@ -216,13 +244,20 @@ function logout() {
           <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             <button v-for="s in pos.stations" :key="s.id" @click="openStation(s)"
               class="rounded-xl border p-3 text-left active:scale-95 transition"
-              :class="s.status === 'ongoing' ? 'bg-emerald-50 border-emerald-200' : 'bg-white hover:border-brand-400'">
+              :class="s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-200') : 'bg-white hover:border-brand-400'">
               <div class="flex justify-between items-start">
                 <p class="font-semibold text-slate-800 text-sm">{{ s.name }}</p>
-                <span class="text-[10px] rounded px-1.5 py-0.5" :class="s.status === 'ongoing' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ s.status === 'ongoing' ? 'ONGOING' : 'READY' }}</span>
+                <span class="text-[10px] rounded px-1.5 py-0.5"
+                  :class="s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700') : 'bg-slate-100 text-slate-500'">
+                  {{ s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'LEWAT WAKTU' : 'ONGOING') : 'READY' }}
+                </span>
               </div>
               <p class="text-[11px] text-slate-400 capitalize mt-0.5">{{ s.tier }}</p>
-              <p v-if="s.status === 'ongoing'" class="text-xs text-emerald-700 font-medium mt-1 truncate">{{ s.session.customer_name || 'Tanpa nama' }}</p>
+              <template v-if="s.status === 'ongoing'">
+                <p class="text-xs text-slate-600 font-medium mt-1 truncate">{{ s.session.customer_name || 'Tanpa nama' }}</p>
+                <p class="font-mono text-sm font-bold mt-0.5" :class="stationClockFor(s).isOvertime ? 'text-red-600' : 'text-emerald-700'">{{ stationClockFor(s).clockLabel }}</p>
+                <p class="text-xs text-brand-700 font-semibold">{{ rupiah(stationClockFor(s).runningTotal) }}</p>
+              </template>
               <p v-else class="text-xs text-slate-400 mt-1">{{ rupiah(s.hourly_rate) }}/jam</p>
             </button>
           </div>

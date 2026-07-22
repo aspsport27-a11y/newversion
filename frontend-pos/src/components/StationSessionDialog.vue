@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { usePosStore } from '../stores/pos'
-import { parseUTC } from '../utils/datetime'
+import { stationClock } from '../utils/stationClock'
 
 const props = defineProps({ station: Object })
 const emit = defineEmits(['close', 'stopped'])
@@ -13,36 +13,17 @@ let timer = null
 onMounted(() => { timer = setInterval(() => (now.value = Date.now()), 1000) })
 onUnmounted(() => clearInterval(timer))
 
-const elapsedSeconds = computed(() => {
-  const started = parseUTC(session.value.started_at).getTime()
-  return Math.max(0, Math.floor((now.value - started) / 1000))
-})
-const elapsedMinutes = computed(() => Math.floor(elapsedSeconds.value / 60))
-const timeCharge = computed(() => Math.round((elapsedMinutes.value / 60) * Number(props.station.hourly_rate) * 100) / 100)
-const topupCharge = computed(() => session.value.topups.reduce((s, t) => s + Number(t.total_amount), 0))
-const addonCharge = computed(() =>
-  session.value.addons.reduce((s, a) => s + (elapsedMinutes.value / 60) * Number(a.rate_per_hour) * a.quantity, 0)
-)
-
-// waktu yg sudah "dibeli" (jam awal + setiap kali Tambah Waktu) — begitu ada
-// minimal 1x Tambah Waktu, jam berubah jadi hitung MUNDUR sisa waktu yg
-// dibeli. Kalau belum pernah nambah jam sama sekali, tetap tampilkan hitung
-// maju (elapsed) spt biasa krn belum ada "paket waktu" yg bisa dihitung
-// mundur. Harga (timeCharge/addonCharge) TETAP berbasis elapsed sungguhan
-// (sama persis dgn yg dihitung ulang di server saat stop) — hitung mundur
-// ini murni info sisa waktu utk kasir, bukan sumber harga.
-const allocatedMinutes = computed(() => session.value.topups.reduce((s, t) => s + Number(t.duration_minutes || 0), 0))
-const isCountdown = computed(() => allocatedMinutes.value > 0)
-const remainingSeconds = computed(() => allocatedMinutes.value * 60 - elapsedSeconds.value)
-const clockLabel = computed(() => {
-  const s = Math.abs(isCountdown.value ? remainingSeconds.value : elapsedSeconds.value)
-  const h = String(Math.floor(s / 3600)).padStart(2, '0')
-  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
-  const sec = String(s % 60).padStart(2, '0')
-  const label = `${h}:${m}:${sec}`
-  return isCountdown.value && remainingSeconds.value < 0 ? `-${label}` : label
-})
-const isOvertime = computed(() => isCountdown.value && remainingSeconds.value < 0)
+// hitungan jam & harga sesi — sama persis dgn yg dipakai di grid station
+// (PosView), lihat utils/stationClock.js utk penjelasan lengkap logikanya
+const clock = computed(() => stationClock(session.value, now.value, props.station.hourly_rate))
+const elapsedMinutes = computed(() => clock.value.elapsedMinutes)
+const timeCharge = computed(() => clock.value.timeCharge)
+const topupCharge = computed(() => clock.value.topupCharge)
+const addonCharge = computed(() => clock.value.addonCharge)
+const allocatedMinutes = computed(() => clock.value.allocatedMinutes)
+const isCountdown = computed(() => clock.value.isCountdown)
+const clockLabel = computed(() => clock.value.clockLabel)
+const isOvertime = computed(() => clock.value.isOvertime)
 
 function rupiah(n) { return 'Rp ' + Math.round(Number(n) || 0).toLocaleString('id-ID') }
 
