@@ -8,6 +8,11 @@ const isManager = computed(() => auth.user?.role === 'manager_unit')
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 const isApprover = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
 const canBudget = computed(() => auth.hasPerm('ops.budget'))
+// admin/HO kelola kategori apa saja; manager (ops.category) cuma venue sendiri
+const canManageCategories = computed(() => isApprover.value || auth.hasPerm('ops.category'))
+function canEditCat(c) {
+  return isApprover.value || (!!c.venue_id && c.venue_id === auth.user?.venue_id)
+}
 
 const tab = ref('requests')
 const venues = ref([])
@@ -227,15 +232,18 @@ watch(statusFilter, loadRequests)
     <div class="flex gap-1 mb-4 border-b">
       <button @click="tab = 'requests'" :class="tab === 'requests' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Pengajuan</button>
       <button @click="tab = 'budget'" :class="tab === 'budget' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Budget</button>
-      <button v-if="isApprover" @click="tab = 'categories'" :class="tab === 'categories' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Kategori</button>
+      <button v-if="canManageCategories" @click="tab = 'categories'" :class="tab === 'categories' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Kategori</button>
     </div>
 
     <!-- Tab Kategori Beban -->
     <div v-if="tab === 'categories'">
-      <p class="text-slate-500 text-sm mb-3">Kategori rincian yang muncul saat mengajukan dana. "Global" berarti dipakai semua venue; pilih venue tertentu supaya kategori itu cuma muncul di venue tersebut. Nonaktifkan untuk menyembunyikan dari form (tidak menghapus riwayat).</p>
+      <p class="text-slate-500 text-sm mb-3">
+        Kategori rincian yang muncul saat mengajukan dana. "Global" berarti dipakai semua venue; pilih venue tertentu supaya kategori itu cuma muncul di venue tersebut. Nonaktifkan untuk menyembunyikan dari form (tidak menghapus riwayat).
+        <span v-if="!isApprover"> Anda cuma bisa kelola kategori venue Anda sendiri.</span>
+      </p>
       <div class="bg-white rounded-xl shadow-sm border p-4 mb-4 flex flex-wrap gap-2 max-w-2xl">
         <input v-model="newCatName" placeholder="Nama kategori baru (mis. Ops Kebersihan)" @keyup.enter="addCat" class="flex-1 min-w-[200px] rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
-        <select v-model="newCatVenueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        <select v-if="isApprover" v-model="newCatVenueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
           <option value="">Global (semua venue)</option>
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
@@ -253,17 +261,21 @@ watch(statusFilter, loadRequests)
             <tr v-for="c in catsAll" :key="c.id" class="border-t">
               <td class="px-4 py-2 text-slate-700" :class="{ 'text-slate-400 line-through': !c.is_active }">{{ c.name }}</td>
               <td class="px-4 py-2">
-                <select :value="c.venue_id || ''" @change="setCatVenue(c, $event.target.value)" class="text-xs rounded-lg border border-slate-300 px-2 py-1 outline-none focus:border-brand-500">
+                <select v-if="isApprover" :value="c.venue_id || ''" @change="setCatVenue(c, $event.target.value)" class="text-xs rounded-lg border border-slate-300 px-2 py-1 outline-none focus:border-brand-500">
                   <option value="">Global</option>
                   <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }}</option>
                 </select>
+                <span v-else class="text-xs text-slate-500">{{ c.venue_id ? (venues.find(v => v.id === c.venue_id)?.code || '—') : 'Global' }}</span>
               </td>
               <td class="px-4 py-2 text-center">
                 <span class="text-xs px-2 py-0.5 rounded-full" :class="c.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ c.is_active ? 'Aktif' : 'Nonaktif' }}</span>
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
-                <button @click="renameCat(c)" class="text-brand-600 text-xs hover:underline mr-3">Ubah Nama</button>
-                <button @click="toggleCat(c)" class="text-xs hover:underline" :class="c.is_active ? 'text-red-500' : 'text-emerald-600'">{{ c.is_active ? 'Nonaktifkan' : 'Aktifkan' }}</button>
+                <template v-if="canEditCat(c)">
+                  <button @click="renameCat(c)" class="text-brand-600 text-xs hover:underline mr-3">Ubah Nama</button>
+                  <button @click="toggleCat(c)" class="text-xs hover:underline" :class="c.is_active ? 'text-red-500' : 'text-emerald-600'">{{ c.is_active ? 'Nonaktifkan' : 'Aktifkan' }}</button>
+                </template>
+                <span v-else class="text-xs text-slate-300">—</span>
               </td>
             </tr>
           </tbody>

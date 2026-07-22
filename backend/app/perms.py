@@ -29,6 +29,7 @@ PERMISSIONS = [
     ("ops.create", "Buat pengajuan dana", "Operasional"),
     ("ops.approve", "Setujui & cairkan dana", "Operasional"),
     ("ops.budget", "Kelola plafon budget", "Operasional"),
+    ("ops.category", "Kelola kategori beban (venue sendiri)", "Operasional"),
     # Procurement
     ("proc.view", "Lihat PO & stok", "Procurement"),
     ("proc.create", "Buat/approve/terima PO", "Procurement"),
@@ -57,7 +58,7 @@ EDITABLE_ROLES = [
 DEFAULT_GRANTS = {
     "head_office": PERMISSION_CODES,
     "manager_unit": {
-        "master.view", "hr.manage", "ops.view", "ops.create", "ops.budget",
+        "master.view", "hr.manage", "ops.view", "ops.create", "ops.budget", "ops.category",
         "proc.view", "proc.create", "payroll.view", "payroll.generate",
         "report.business", "station.manage",
     },

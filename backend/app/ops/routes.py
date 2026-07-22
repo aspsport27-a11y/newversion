@@ -33,6 +33,9 @@ VIEW = require_perm("ops.view")
 CREATE = require_perm("ops.create")
 APPROVE = require_perm("ops.approve")
 BUDGET = require_perm("ops.budget")
+# ops.approve (admin/HO) = kelola kategori apa saja (global + semua venue);
+# ops.category (manager) = kelola kategori venue sendiri saja (lihat fungsi)
+CATEGORY = require_perm("ops.approve", "ops.category")
 
 ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
 
@@ -80,17 +83,26 @@ def _D(v):
 # ------------------------------------------------------------------
 # Kategori
 # ------------------------------------------------------------------
+def _is_category_admin(u):
+    """True kalau boleh kelola kategori global + semua venue (admin/HO)."""
+    from ..perms import has_perm
+    return has_perm(u.role, "ops.approve")
+
+
 @ops_bp.get("/categories")
 @jwt_required()
 @VIEW
 def categories_list():
     """venue_id opsional: kalau diisi, tampilkan kategori global + kategori
-    khusus venue itu saja (dipakai form pengajuan). Tanpa venue_id (mis.
-    ?all=1 di tab Kelola Kategori), tampilkan semua kategori apa adanya."""
+    khusus venue itu saja (dipakai form pengajuan). Tanpa venue_id dgn
+    ?all=1 (tab Kelola Kategori): admin/HO lihat semua venue; manager
+    (ops.category tanpa ops.approve) cuma lihat global + venue sendiri."""
     q = ExpenseCategory.query
     if not request.args.get("all"):
         q = q.filter_by(is_active=True)
     vid = request.args.get("venue_id", type=int)
+    if not vid and request.args.get("all") and not _is_category_admin(_user()):
+        vid = _user().venue_id
     if vid:
         q = q.filter(db.or_(ExpenseCategory.venue_id.is_(None), ExpenseCategory.venue_id == vid))
     cats = q.order_by(ExpenseCategory.sort_order, ExpenseCategory.name).all()
@@ -99,15 +111,22 @@ def categories_list():
 
 @ops_bp.post("/categories")
 @jwt_required()
-@APPROVE
+@CATEGORY
 def categories_create():
     d = request.get_json(silent=True) or {}
     name = (d.get("name") or "").strip()
     if not name:
         return _err("Nama kategori wajib")
-    venue_id = d.get("venue_id") or None
-    if venue_id and not db.session.get(Venue, int(venue_id)):
-        return _err("Venue tidak ditemukan", "not_found", 404)
+    u = _user()
+    if _is_category_admin(u):
+        venue_id = d.get("venue_id") or None
+        if venue_id and not db.session.get(Venue, int(venue_id)):
+            return _err("Venue tidak ditemukan", "not_found", 404)
+    else:
+        # manager: paksa ke venue sendiri, tak boleh global/venue lain
+        if not u.venue_id:
+            return _err("Venue Anda belum diset — hubungi admin", "no_venue", 409)
+        venue_id = u.venue_id
     if ExpenseCategory.query.filter_by(name=name, venue_id=venue_id).first():
         return _err("Kategori sudah ada", "duplicate", 409)
     c = ExpenseCategory(name=name, venue_id=venue_id, sort_order=int(d.get("sort_order", 99)))
@@ -118,14 +137,20 @@ def categories_create():
 
 @ops_bp.put("/categories/<int:cid>")
 @jwt_required()
-@APPROVE
+@CATEGORY
 def categories_update(cid):
     c = db.session.get(ExpenseCategory, cid)
     if not c:
         return _err("Kategori tidak ditemukan", "not_found", 404)
+    u = _user()
+    is_admin = _is_category_admin(u)
+    if not is_admin and (not c.venue_id or c.venue_id != u.venue_id):
+        return _err("Bukan kategori venue Anda", "forbidden", 403)
     d = request.get_json(silent=True) or {}
     new_venue_id = c.venue_id
     if "venue_id" in d:
+        if not is_admin:
+            return _err("Tidak boleh ubah venue kategori", "forbidden", 403)
         new_venue_id = d.get("venue_id") or None
         if new_venue_id and not db.session.get(Venue, int(new_venue_id)):
             return _err("Venue tidak ditemukan", "not_found", 404)
