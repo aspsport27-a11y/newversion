@@ -33,8 +33,11 @@ async function savePwd() {
 
 onMounted(async () => {
   try {
-    // refresh juga bila permissions belum ada (sesi lama sebelum fitur izin)
-    if (!auth.user || !auth.permissions.length) await auth.fetchMe()
+    // selalu tarik ulang user+permissions terbaru dari server saat app dimuat,
+    // supaya perubahan RBAC (grant/revoke izin) langsung berlaku tanpa perlu
+    // logout manual — sebelumnya cuma di-refresh kalau permissions kosong,
+    // jadi izin baru yg ditambahkan ke role tak muncul sampai re-login
+    await auth.fetchMe()
   } catch (_) {
     /* interceptor 401 akan redirect */
   }
