@@ -194,13 +194,17 @@ function logout() {
     <div v-else class="flex-1 flex flex-col lg:flex-row min-h-0">
       <!-- Produk -->
       <div class="flex-1 overflow-auto p-3">
-        <!-- Booking lapangan (venue punya lapangan) -->
-        <div v-if="pos.bookingEnabled" class="grid grid-cols-2 gap-2 mb-3">
-          <button @click="showBooking = true"
+        <!-- Booking lapangan (venue punya lapangan) + Pelunasan (order belum
+             lunas apa pun jenisnya — booking, station, dll — jadi tetap
+             ditampilkan meski venue tak punya lapangan, mis. venue Station
+             Gaming murni, supaya order yg sempat dibuat tapi dialog
+             pembayarannya ditutup tanpa bayar tak "hilang" dr jangkauan kasir) -->
+        <div v-if="pos.bookingEnabled || pos.hasStations" class="grid grid-cols-2 gap-2 mb-3">
+          <button v-if="pos.bookingEnabled" @click="showBooking = true"
             class="py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
             🏟️ Booking
           </button>
-          <button @click="showSettle = true"
+          <button @click="showSettle = true" :class="pos.bookingEnabled ? '' : 'col-span-2'"
             class="py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium border border-amber-100 flex items-center justify-center gap-2">
             💰 Pelunasan
           </button>

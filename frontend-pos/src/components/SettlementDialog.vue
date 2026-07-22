@@ -12,6 +12,8 @@ const selected = ref(null)
 const err = ref('')
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
+const ICONS = { booking: '🏟️', rental: '🎮', ticket: '🎟️', product: '🧾' }
+function itemIcon(type) { return ICONS[type] || '🧾' }
 
 async function load() {
   loading.value = true
@@ -51,13 +53,13 @@ async function cancel(o) {
   <div class="fixed inset-0 z-40 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[92vh] overflow-auto">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="text-lg font-bold text-slate-800">Pelunasan Booking</h3>
+        <h3 class="text-lg font-bold text-slate-800">Order Belum Bayar</h3>
         <button @click="emit('close')" class="text-slate-400 text-xl">✕</button>
       </div>
 
       <p v-if="loading" class="text-center text-slate-400 py-6">Memuat…</p>
       <p v-else-if="!orders.length" class="text-center text-slate-400 py-6">
-        Tidak ada booking yang belum lunas 🎉
+        Tidak ada order yang belum lunas 🎉
       </p>
 
       <div v-else class="space-y-2">
@@ -66,8 +68,8 @@ async function cancel(o) {
             <div>
               <p class="font-medium text-slate-800">{{ o.customer_name || 'Tanpa nama' }}</p>
               <p class="text-xs text-slate-400 font-mono">{{ o.order_number }}</p>
-              <p v-for="it in o.items.filter((x) => x.item_type === 'booking')" :key="it.id" class="text-xs text-slate-500">
-                🏟️ {{ it.name }}
+              <p v-for="it in o.items" :key="it.id" class="text-xs text-slate-500">
+                {{ itemIcon(it.item_type) }} {{ it.name }}
               </p>
             </div>
             <div class="text-right">

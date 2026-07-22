@@ -522,12 +522,18 @@ def order_create():
 @pos_bp.get("/orders/outstanding")
 @jwt_required()
 def orders_outstanding():
-    """Booking/order yang belum lunas (DP) di venue terminal — untuk pelunasan."""
+    """Order yang belum lunas di venue terminal — utk pelunasan. Termasuk
+    'open' (belum dibayar sama sekali, mis. order dr Station Gaming yg
+    sempat dibuat lewat STOP & Bayar tapi dialog pembayarannya ditutup
+    tanpa bayar) DAN 'partial' (sudah DP)."""
     from .models import Order
 
     terminal = _current_terminal()
     orders = (
-        Order.query.filter_by(venue_id=terminal.venue_id, status="partial")
+        Order.query.filter(
+            Order.venue_id == terminal.venue_id,
+            Order.status.in_(["open", "partial"]),
+        )
         .order_by(Order.created_at.desc())
         .all()
     )
