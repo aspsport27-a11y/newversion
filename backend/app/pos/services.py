@@ -2,8 +2,6 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func
-
 from ..extensions import db
 from ..models import Venue
 from .models import (
@@ -96,14 +94,22 @@ def _D(v) -> Decimal:
 def generate_order_number(venue: Venue) -> str:
     today = date.today()
     prefix = f"{venue.code}-{today:%Y%m%d}-"
-    # hitung dari prefix order_number (robust, tak tergantung created_at)
-    count = (
-        db.session.query(func.count(Order.id))
+    # ambil nomor urut TERBESAR yg sudah ada, BUKAN count — kalau ada order
+    # yg dihapus permanen (Hapus Permanen di Riwayat Transaksi), count turun
+    # tapi nomor yg lebih besar tetap ada, jadi count+1 bisa tabrakan dgn
+    # nomor yg masih hidup (UniqueViolation, order gagal dibuat)
+    existing = (
+        db.session.query(Order.order_number)
         .filter(Order.order_number.like(prefix + "%"))
-        .scalar()
-        or 0
+        .all()
     )
-    return f"{prefix}{count + 1:04d}"
+    max_seq = 0
+    for (num,) in existing:
+        try:
+            max_seq = max(max_seq, int(num.rsplit("-", 1)[-1]))
+        except ValueError:
+            continue
+    return f"{prefix}{max_seq + 1:04d}"
 
 
 # ------------------------------------------------------------------
