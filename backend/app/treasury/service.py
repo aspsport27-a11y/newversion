@@ -47,6 +47,12 @@ def holding_account():
     return BankAccount.query.filter_by(type="holding", is_active=True).first()
 
 
+def cash_ho_account():
+    """Pool kas fisik yg dipegang HO — titik singgah antara kas unit dan
+    rekening holding, supaya bisa dipakai opex sebelum disetor final."""
+    return BankAccount.query.filter_by(type="cash_ho", is_active=True).first()
+
+
 def venue_account(venue_id):
     return BankAccount.query.filter_by(type="venue", venue_id=venue_id, is_active=True).first()
 

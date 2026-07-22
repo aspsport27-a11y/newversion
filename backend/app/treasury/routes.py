@@ -11,7 +11,7 @@ from ..models import User, Venue
 from ..pos.models import Order, Payment, Shift
 from ..security import ROLE_ADMIN, require_perm, roles_required
 from .models import AccountTransaction, BankAccount, BankReconciliation, CashDeposit, QrisSettlement
-from .service import account_balance, account_balance_asof, holding_account, record_tx
+from .service import account_balance, account_balance_asof, cash_ho_account, holding_account, record_tx
 
 treasury_bp = Blueprint("treasury", __name__)
 MANAGE = require_perm("treasury.manage")  # RBAC configurable
@@ -55,6 +55,8 @@ def accounts_create():
     t = d.get("type", "venue")
     if t == "holding" and BankAccount.query.filter_by(type="holding").first():
         return _err("Rekening holding sudah ada", "duplicate", 409)
+    if t == "cash_ho" and BankAccount.query.filter_by(type="cash_ho").first():
+        return _err("Pool Kas Fisik HO sudah ada", "duplicate", 409)
     if t == "venue" and d.get("venue_id") and BankAccount.query.filter_by(type="venue", venue_id=d["venue_id"]).first():
         return _err("Venue ini sudah punya rekening", "duplicate", 409)
     a = BankAccount(
@@ -230,7 +232,7 @@ def reconciliations_delete(rid):
 
 
 # ------------------------------------------------------------------
-# Setoran cash (gabungan shift → holding)
+# Setoran cash (gabungan shift → Kas Fisik HO)
 # ------------------------------------------------------------------
 @treasury_bp.get("/setoran/pending")
 @jwt_required()
@@ -250,11 +252,16 @@ def setoran_pending():
 @jwt_required()
 @MANAGE
 def setoran_create():
+    """Kas dari shift yang ditutup unit-unit dikumpulkan HO, dihitung fisik,
+    lalu dicatat masuk ke pool "Kas Fisik HO" (bukan langsung ke holding) —
+    supaya bisa dipakai opex dulu sebelum disetor final via /setoran-holding.
+    to_account_id masih bisa dioverride manual (mis. venue yang setor
+    langsung ke bank sendiri, tanpa lewat pool HO)."""
     d = request.get_json(silent=True) or {}
-    holding = holding_account()
-    to_acc = d.get("to_account_id") or (holding.id if holding else None)
+    pool = cash_ho_account()
+    to_acc = d.get("to_account_id") or (pool.id if pool else None)
     if not to_acc:
-        return _err("Rekening holding belum dibuat", "no_holding", 409)
+        return _err("Pool Kas Fisik HO belum dibuat", "no_cash_ho", 409)
     shifts = Shift.query.filter(Shift.status == "closed", Shift.deposit_id.is_(None)).all()
     if not shifts:
         return _err("Tidak ada shift yang perlu disetor")
@@ -286,6 +293,53 @@ def setoran_list():
         q = q.filter(CashDeposit.deposit_date <= t)
     deps = q.order_by(CashDeposit.created_at.desc()).limit(100).all()
     return jsonify(deposits=[x.to_dict() for x in deps]), 200
+
+
+# ------------------------------------------------------------------
+# Setoran final (Kas Fisik HO → rekening Holding)
+# ------------------------------------------------------------------
+@treasury_bp.get("/setoran-holding/pending")
+@jwt_required()
+@MANAGE
+def setoran_holding_pending():
+    """Saldo Kas Fisik HO saat ini — bagian yang belum dipakai opex, siap
+    disetor final ke rekening holding."""
+    pool = cash_ho_account()
+    if not pool:
+        return _err("Pool Kas Fisik HO belum dibuat", "no_cash_ho", 409)
+    return jsonify(account_id=pool.id, expected_amount=account_balance(pool.id)), 200
+
+
+@treasury_bp.post("/setoran-holding")
+@jwt_required()
+@MANAGE
+def setoran_holding_create():
+    """Pindahkan sisa saldo Kas Fisik HO ke rekening holding — langkah
+    terakhir setelah sebagian dipakai opex (payroll/procurement/operasional
+    yang sumber dananya "Kas Fisik HO")."""
+    d = request.get_json(silent=True) or {}
+    pool = cash_ho_account()
+    holding = holding_account()
+    if not pool:
+        return _err("Pool Kas Fisik HO belum dibuat", "no_cash_ho", 409)
+    if not holding:
+        return _err("Rekening holding belum dibuat", "no_holding", 409)
+    expected = account_balance(pool.id)
+    if expected <= 0:
+        return _err("Saldo Kas Fisik HO kosong, tidak ada yang perlu disetor")
+    counted = _D(d.get("counted_amount"))
+    code = f"SETOR-HO-{date.today():%Y%m%d}-{(CashDeposit.query.count() + 1):03d}"
+    dep = CashDeposit(
+        code=code, from_account_id=pool.id, to_account_id=holding.id,
+        expected_amount=expected, counted_amount=counted,
+        variance=round(counted - expected, 2), note=d.get("note"), created_by=_uid(),
+    )
+    db.session.add(dep)
+    db.session.flush()
+    record_tx(pool.id, "out", counted, "cash_deposit_out", "setoran_holding", dep.id, f"Setoran {code}", _uid())
+    record_tx(holding.id, "in", counted, "cash_deposit", "setoran_holding", dep.id, f"Setoran {code}", _uid())
+    db.session.commit()
+    return jsonify(deposit=dep.to_dict()), 201
 
 
 # ------------------------------------------------------------------

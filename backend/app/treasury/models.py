@@ -57,6 +57,9 @@ class CashDeposit(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(30), unique=True, nullable=False)
     deposit_date = db.Column(db.Date, default=datetime.utcnow)
+    # kosong = kas fisik dr shift (belum ada di rekening manapun); terisi =
+    # perpindahan antar-rekening, mis. dari pool "Kas Fisik HO" ke holding.
+    from_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"))
     to_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"), nullable=False)
     expected_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
     counted_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
@@ -70,6 +73,7 @@ class CashDeposit(db.Model):
         return {
             "id": self.id, "code": self.code,
             "deposit_date": self.deposit_date.isoformat() if self.deposit_date else None,
+            "from_account_id": self.from_account_id, "to_account_id": self.to_account_id,
             "expected_amount": f(self.expected_amount), "counted_amount": f(self.counted_amount),
             "variance": f(self.variance), "note": self.note,
         }

@@ -55,7 +55,7 @@ VIEW = require_perm("master.view")
 # HR: manager unit juga boleh kelola karyawan (venue-nya sendiri)
 MANAGE_HR = require_perm("hr.manage")
 
-POSITIONS = ["Manager", "Kasir", "Staff Lapangan", "Lifeguard", "Cleaning", "Admin"]
+POSITIONS = ["Manager", "Ass Manajer/SPV", "Kasir", "Staff Lapangan", "Lifeguard", "Cleaning", "Admin"]
 
 
 def _current_user():

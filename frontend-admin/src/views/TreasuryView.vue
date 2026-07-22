@@ -78,7 +78,7 @@ async function doTransfer() {
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
 
-// setoran
+// setoran (unit -> Kas Fisik HO)
 const setoranPending = ref({ expected_amount: 0, count: 0 })
 const counted = ref(null)
 const setoranList = ref([])
@@ -88,11 +88,29 @@ async function loadSetoran() {
     client.get('/treasury/setoran', { params: { from: periodFrom.value, to: periodTo.value } }),
   ])
   setoranPending.value = p.data; counted.value = p.data.expected_amount; setoranList.value = l.data.deposits
+  await loadSetoranHolding()
 }
 async function doSetoran() {
   busy.value = true
-  try { await client.post('/treasury/setoran', { counted_amount: counted.value }); await loadSetoran(); await loadAccounts(); flash('Setoran tercatat') }
+  try { await client.post('/treasury/setoran', { counted_amount: counted.value }); await loadSetoran(); await loadAccounts(); flash('Kas masuk ke pool Kas Fisik HO') }
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+}
+
+// setoran final (Kas Fisik HO -> rekening Holding)
+const hoPending = ref({ expected_amount: 0 })
+const hoCounted = ref(null)
+async function loadSetoranHolding() {
+  try {
+    const { data } = await client.get('/treasury/setoran-holding/pending')
+    hoPending.value = data; hoCounted.value = data.expected_amount
+  } catch (e) { hoPending.value = { expected_amount: 0 } }
+}
+async function doSetoranHolding() {
+  busy.value = true
+  try {
+    await client.post('/treasury/setoran-holding', { counted_amount: hoCounted.value })
+    await loadSetoran(); await loadAccounts(); flash('Disetor ke rekening Holding')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
 
 // qris
@@ -209,9 +227,9 @@ function switchTab(t) {
           <div class="flex justify-between items-start">
             <div>
               <p class="font-semibold text-slate-800">{{ a.name }}</p>
-              <p class="text-xs text-slate-400">{{ a.bank_name }} {{ a.account_number }} · {{ a.type === 'holding' ? 'Holding' : venueName(a.venue_id) }}</p>
+              <p class="text-xs text-slate-400">{{ a.bank_name }} {{ a.account_number }} · {{ a.type === 'holding' ? 'Holding' : a.type === 'cash_ho' ? 'Kas Fisik HO' : venueName(a.venue_id) }}</p>
             </div>
-            <span :class="a.type === 'holding' ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-500'" class="text-[10px] rounded px-1.5 py-0.5">{{ a.type }}</span>
+            <span :class="a.type === 'holding' ? 'bg-brand-100 text-brand-700' : a.type === 'cash_ho' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'" class="text-[10px] rounded px-1.5 py-0.5">{{ a.type }}</span>
           </div>
           <p class="text-2xl font-bold text-slate-800 mt-3">{{ rupiah(a.balance) }}</p>
           <div class="flex gap-3 mt-2">
@@ -226,24 +244,40 @@ function switchTab(t) {
     <!-- Setoran -->
     <div v-else-if="tab === 'setoran'">
       <div class="bg-white rounded-xl shadow-sm border p-5 mb-4">
+        <p class="text-sm font-semibold text-slate-700 mb-2">1. Kas Unit → Kas Fisik HO</p>
         <p class="text-sm text-slate-500 mb-1">Cash belum disetor ({{ setoranPending.count }} shift)</p>
         <p class="text-2xl font-bold text-slate-800 mb-3">{{ rupiah(setoranPending.expected_amount) }}</p>
         <div v-if="setoranPending.count" class="flex items-end gap-2">
           <div><label class="block text-xs text-slate-500 mb-1">Hitungan fisik (HO)</label>
             <input v-model.number="counted" type="number" class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-right outline-none focus:border-brand-500" /></div>
           <span class="text-sm mb-2" :class="(counted - setoranPending.expected_amount) === 0 ? 'text-emerald-600' : 'text-red-600'">Selisih: {{ rupiah((counted || 0) - setoranPending.expected_amount) }}</span>
-          <button @click="doSetoran" :disabled="busy" class="ml-auto bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Setor ke Holding</button>
+          <button @click="doSetoran" :disabled="busy" class="ml-auto bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Terima ke Kas Fisik HO</button>
         </div>
-        <p v-else class="text-sm text-emerald-600">Semua sudah disetor 🎉</p>
+        <p v-else class="text-sm text-emerald-600">Semua sudah diterima 🎉</p>
       </div>
+
+      <div class="bg-white rounded-xl shadow-sm border p-5 mb-4">
+        <p class="text-sm font-semibold text-slate-700 mb-2">2. Kas Fisik HO → Rekening Holding</p>
+        <p class="text-sm text-slate-500 mb-1">Saldo Kas Fisik HO saat ini (sesudah dipakai opex bila ada)</p>
+        <p class="text-2xl font-bold text-slate-800 mb-3">{{ rupiah(hoPending.expected_amount) }}</p>
+        <div v-if="hoPending.expected_amount > 0" class="flex items-end gap-2">
+          <div><label class="block text-xs text-slate-500 mb-1">Jumlah disetor ke bank</label>
+            <input v-model.number="hoCounted" type="number" class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-right outline-none focus:border-brand-500" /></div>
+          <span class="text-sm mb-2" :class="(hoCounted - hoPending.expected_amount) === 0 ? 'text-emerald-600' : 'text-red-600'">Selisih: {{ rupiah((hoCounted || 0) - hoPending.expected_amount) }}</span>
+          <button @click="doSetoranHolding" :disabled="busy" class="ml-auto bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Setor ke Holding</button>
+        </div>
+        <p v-else class="text-sm text-slate-400">Belum ada saldo di Kas Fisik HO.</p>
+      </div>
+
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-slate-500 text-left"><tr><th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Tanggal</th><th class="px-4 py-3 font-medium text-right">Seharusnya</th><th class="px-4 py-3 font-medium text-right">Disetor</th><th class="px-4 py-3 font-medium text-right">Selisih</th></tr></thead>
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr><th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Tanggal</th><th class="px-4 py-3 font-medium">Tujuan</th><th class="px-4 py-3 font-medium text-right">Seharusnya</th><th class="px-4 py-3 font-medium text-right">Disetor</th><th class="px-4 py-3 font-medium text-right">Selisih</th></tr></thead>
           <tbody>
-            <tr v-if="!setoranList.length"><td colspan="5" class="px-4 py-6 text-center text-slate-400">Belum ada setoran.</td></tr>
+            <tr v-if="!setoranList.length"><td colspan="6" class="px-4 py-6 text-center text-slate-400">Belum ada setoran.</td></tr>
             <tr v-for="s in setoranList" :key="s.id" class="border-t">
               <td class="px-4 py-2 font-mono text-xs text-slate-500">{{ s.code }}</td>
               <td class="px-4 py-2 text-slate-600">{{ s.deposit_date }}</td>
+              <td class="px-4 py-2 text-xs text-slate-500">{{ accounts.find(a => a.id === s.to_account_id)?.name || '—' }}</td>
               <td class="px-4 py-2 text-right">{{ rupiah(s.expected_amount) }}</td>
               <td class="px-4 py-2 text-right">{{ rupiah(s.counted_amount) }}</td>
               <td class="px-4 py-2 text-right" :class="s.variance === 0 ? 'text-emerald-600' : 'text-red-600'">{{ rupiah(s.variance) }}</td>
