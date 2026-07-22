@@ -18,18 +18,31 @@ const elapsedSeconds = computed(() => {
   return Math.max(0, Math.floor((now.value - started) / 1000))
 })
 const elapsedMinutes = computed(() => Math.floor(elapsedSeconds.value / 60))
-const elapsedLabel = computed(() => {
-  const s = elapsedSeconds.value
-  const h = String(Math.floor(s / 3600)).padStart(2, '0')
-  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
-  const sec = String(s % 60).padStart(2, '0')
-  return `${h}:${m}:${sec}`
-})
 const timeCharge = computed(() => Math.round((elapsedMinutes.value / 60) * Number(props.station.hourly_rate) * 100) / 100)
 const topupCharge = computed(() => session.value.topups.reduce((s, t) => s + Number(t.total_amount), 0))
 const addonCharge = computed(() =>
   session.value.addons.reduce((s, a) => s + (elapsedMinutes.value / 60) * Number(a.rate_per_hour) * a.quantity, 0)
 )
+
+// waktu yg sudah "dibeli" (jam awal + setiap kali Tambah Waktu) — begitu ada
+// minimal 1x Tambah Waktu, jam berubah jadi hitung MUNDUR sisa waktu yg
+// dibeli. Kalau belum pernah nambah jam sama sekali, tetap tampilkan hitung
+// maju (elapsed) spt biasa krn belum ada "paket waktu" yg bisa dihitung
+// mundur. Harga (timeCharge/addonCharge) TETAP berbasis elapsed sungguhan
+// (sama persis dgn yg dihitung ulang di server saat stop) — hitung mundur
+// ini murni info sisa waktu utk kasir, bukan sumber harga.
+const allocatedMinutes = computed(() => session.value.topups.reduce((s, t) => s + Number(t.duration_minutes || 0), 0))
+const isCountdown = computed(() => allocatedMinutes.value > 0)
+const remainingSeconds = computed(() => allocatedMinutes.value * 60 - elapsedSeconds.value)
+const clockLabel = computed(() => {
+  const s = Math.abs(isCountdown.value ? remainingSeconds.value : elapsedSeconds.value)
+  const h = String(Math.floor(s / 3600)).padStart(2, '0')
+  const m = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+  const sec = String(s % 60).padStart(2, '0')
+  const label = `${h}:${m}:${sec}`
+  return isCountdown.value && remainingSeconds.value < 0 ? `-${label}` : label
+})
+const isOvertime = computed(() => isCountdown.value && remainingSeconds.value < 0)
 
 function rupiah(n) { return 'Rp ' + Math.round(Number(n) || 0).toLocaleString('id-ID') }
 
@@ -37,12 +50,22 @@ function rupiah(n) { return 'Rp ' + Math.round(Number(n) || 0).toLocaleString('i
 const showTopup = ref(false)
 const topupDuration = ref(60)
 const topupDiscount = ref(0)
-const topupTotal = ref(null)
+const topupTotalOverride = ref(null) // null = pakai hitungan otomatis; diisi kalau kasir override manual
 const busy = ref(false)
 const err = ref('')
 
+// nominal langsung muncul otomatis dr durasi × tarif/jam, dikurangi diskon —
+// kasir masih bisa override manual (mis. ada nego harga) via topupTotalOverride
+const topupAutoTotal = computed(() => {
+  const gross = (Number(topupDuration.value) || 0) / 60 * Number(props.station.hourly_rate)
+  return Math.max(0, Math.round((gross - (Number(topupDiscount.value) || 0)) * 100) / 100)
+})
+const topupTotal = computed({
+  get: () => topupTotalOverride.value ?? topupAutoTotal.value,
+  set: (v) => { topupTotalOverride.value = v },
+})
+
 async function submitTopup() {
-  if (!topupTotal.value) { err.value = 'Isi total tambah jam.'; return }
   busy.value = true; err.value = ''
   try {
     await pos.topupStation(props.station.id, {
@@ -51,7 +74,7 @@ async function submitTopup() {
       total_amount: Number(topupTotal.value),
     })
     showTopup.value = false
-    topupDuration.value = 60; topupDiscount.value = 0; topupTotal.value = null
+    topupDuration.value = 60; topupDiscount.value = 0; topupTotalOverride.value = null
     emit('close')
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah jam.' } finally { busy.value = false }
 }
@@ -61,6 +84,14 @@ const showAddon = ref(false)
 const addonId = ref(null)
 const addonQty = ref(1)
 onMounted(async () => { try { await pos.fetchAddons() } catch (_) { /* ignore */ } })
+
+// nominal per jam langsung muncul begitu add-on & qty dipilih (ditagih
+// berjalan mengikuti waktu, sama spt sewa station — bukan sekali bayar)
+const addonPreviewPerHour = computed(() => {
+  const a = pos.addons.find((x) => x.id === addonId.value)
+  if (!a) return 0
+  return Number(a.hourly_rate || 0) * (Number(addonQty.value) || 0)
+})
 
 async function submitAddon() {
   if (!addonId.value) { err.value = 'Pilih add-on dulu.'; return }
@@ -81,6 +112,12 @@ async function removeAddon(a) {
 
 // --- F&B tambahan sekalian di-checkout ---
 const extraCart = ref([])
+const fnbSearch = ref('')
+const filteredFnb = computed(() => {
+  const q = fnbSearch.value.trim().toLowerCase()
+  if (!q) return pos.fnbProducts
+  return pos.fnbProducts.filter((p) => p.name.toLowerCase().includes(q))
+})
 function addExtra(p) {
   const found = extraCart.value.find((i) => i.product_id === p.id)
   if (found) found.quantity += 1
@@ -115,8 +152,11 @@ async function doStop() {
       </div>
 
       <div class="text-center bg-slate-50 rounded-xl py-4 mb-3">
-        <p class="text-3xl font-bold text-emerald-600 font-mono">{{ elapsedLabel }}</p>
-        <p class="text-xs text-slate-400 mt-1">{{ rupiah(station.hourly_rate) }} / jam</p>
+        <p class="text-3xl font-bold font-mono" :class="isOvertime ? 'text-red-600' : 'text-emerald-600'">{{ clockLabel }}</p>
+        <p class="text-xs text-slate-400 mt-1">
+          {{ rupiah(station.hourly_rate) }} / jam
+          <span v-if="isCountdown">· {{ isOvertime ? 'lewat waktu' : 'sisa waktu' }} (paket {{ allocatedMinutes }} menit)</span>
+        </p>
       </div>
 
       <div class="space-y-1 text-sm mb-3">
@@ -145,8 +185,9 @@ async function doStop() {
           <div><label class="block text-xs text-slate-500 mb-1">Diskon</label>
             <input v-model.number="topupDiscount" type="number" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm outline-none" /></div>
         </div>
-        <div><label class="block text-xs text-slate-500 mb-1">Total tagihan</label>
+        <div><label class="block text-xs text-slate-500 mb-1">Total tagihan (otomatis — bisa diubah)</label>
           <input v-model.number="topupTotal" type="number" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm outline-none" /></div>
+        <p class="text-xs text-slate-400">{{ topupDuration }} menit akan langsung ditambahkan ke sisa waktu.</p>
         <button @click="submitTopup" :disabled="busy" class="w-full py-2 rounded-lg bg-amber-600 text-white text-sm font-medium disabled:opacity-50">Simpan</button>
       </div>
 
@@ -156,17 +197,21 @@ async function doStop() {
           <option v-for="a in pos.addons" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.hourly_rate) }}/jam)</option>
         </select>
         <input v-model.number="addonQty" type="number" min="1" placeholder="Qty" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+        <p v-if="addonId" class="text-xs text-slate-500">≈ {{ rupiah(addonPreviewPerHour) }}/jam (ditagih mengikuti waktu berjalan)</p>
         <button @click="submitAddon" :disabled="busy" class="w-full py-2 rounded-lg bg-purple-600 text-white text-sm font-medium disabled:opacity-50">Simpan</button>
       </div>
 
       <div class="mb-3">
         <p class="text-xs font-semibold text-slate-400 mb-1.5">🍔 Tambah F&amp;B (opsional, sekalian checkout)</p>
+        <input v-model="fnbSearch" placeholder="Cari menu…"
+          class="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs outline-none focus:border-brand-500 mb-2" />
         <div class="grid grid-cols-2 gap-2 max-h-40 overflow-auto">
-          <button v-for="p in pos.fnbProducts" :key="p.id" @click="addExtra(p)"
+          <button v-for="p in filteredFnb" :key="p.id" @click="addExtra(p)"
             class="text-left border rounded-lg p-2 hover:border-brand-400">
             <p class="text-xs font-medium text-slate-700 leading-tight">{{ p.name }}</p>
             <p class="text-xs text-brand-700 font-bold">{{ rupiah(p.effective_price ?? p.price) }}</p>
           </button>
+          <p v-if="!filteredFnb.length" class="col-span-2 text-center text-xs text-slate-400 py-3">Menu tidak ditemukan.</p>
         </div>
         <div v-if="extraCart.length" class="mt-2 space-y-1">
           <div v-for="it in extraCart" :key="it.product_id" class="flex items-center justify-between text-xs">
