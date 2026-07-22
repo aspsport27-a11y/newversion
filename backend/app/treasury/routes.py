@@ -303,7 +303,29 @@ def setoran_list():
     if t:
         q = q.filter(CashDeposit.deposit_date <= t)
     deps = q.order_by(CashDeposit.created_at.desc()).limit(100).all()
-    return jsonify(deposits=[x.to_dict() for x in deps]), 200
+
+    # 1 setoran bisa menyapu shift dari beberapa venue sekaligus (kalau
+    # "Semua venue" dipilih) — kumpulkan kode venue yg tersapu per setoran,
+    # atau "—" kalau setoran ini bukan dari shift (mis. Kas Fisik HO → Holding)
+    venue_codes = {v.id: v.code for v in Venue.query.all()}
+    dep_ids = [d.id for d in deps]
+    venues_per_dep = {}
+    if dep_ids:
+        for dep_id, vid in (
+            db.session.query(Shift.deposit_id, Shift.venue_id)
+            .filter(Shift.deposit_id.in_(dep_ids))
+            .distinct()
+            .all()
+        ):
+            venues_per_dep.setdefault(dep_id, set()).add(vid)
+
+    rows = []
+    for x in deps:
+        d = x.to_dict()
+        vids = venues_per_dep.get(x.id)
+        d["venues"] = ", ".join(venue_codes.get(v, f"#{v}") for v in sorted(vids)) if vids else None
+        rows.append(d)
+    return jsonify(deposits=rows), 200
 
 
 # ------------------------------------------------------------------

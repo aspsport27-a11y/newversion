@@ -292,12 +292,13 @@ function switchTab(t) {
 
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-slate-500 text-left"><tr><th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Tanggal</th><th class="px-4 py-3 font-medium">Tujuan</th><th class="px-4 py-3 font-medium text-right">Seharusnya</th><th class="px-4 py-3 font-medium text-right">Disetor</th><th class="px-4 py-3 font-medium text-right">Selisih</th></tr></thead>
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr><th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Tanggal</th><th class="px-4 py-3 font-medium">Venue</th><th class="px-4 py-3 font-medium">Tujuan</th><th class="px-4 py-3 font-medium text-right">Seharusnya</th><th class="px-4 py-3 font-medium text-right">Disetor</th><th class="px-4 py-3 font-medium text-right">Selisih</th></tr></thead>
           <tbody>
-            <tr v-if="!setoranList.length"><td colspan="6" class="px-4 py-6 text-center text-slate-400">Belum ada setoran.</td></tr>
+            <tr v-if="!setoranList.length"><td colspan="7" class="px-4 py-6 text-center text-slate-400">Belum ada setoran.</td></tr>
             <tr v-for="s in setoranList" :key="s.id" class="border-t">
               <td class="px-4 py-2 font-mono text-xs text-slate-500">{{ s.code }}</td>
               <td class="px-4 py-2 text-slate-600">{{ s.deposit_date }}</td>
+              <td class="px-4 py-2 text-xs text-slate-500">{{ s.venues || '—' }}</td>
               <td class="px-4 py-2 text-xs text-slate-500">{{ accounts.find(a => a.id === s.to_account_id)?.name || '—' }}</td>
               <td class="px-4 py-2 text-right">{{ rupiah(s.expected_amount) }}</td>
               <td class="px-4 py-2 text-right">{{ rupiah(s.counted_amount) }}</td>
