@@ -37,7 +37,7 @@ onMounted(load)
       <div class="flex justify-between items-center mb-3 no-print">
         <h3 class="text-lg font-bold text-slate-800">📊 Laporan Hari Ini</h3>
         <div class="flex items-center gap-2">
-          <button v-if="report && report.by_category.length" @click="print"
+          <button v-if="report" @click="print"
             class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg px-2.5 py-1.5">🖨️ Cetak</button>
           <button @click="emit('close')" class="text-slate-400 text-xl">✕</button>
         </div>
@@ -63,6 +63,15 @@ onMounted(load)
               <p class="text-[11px] text-slate-400">{{ c.qty }} item</p>
             </div>
             <span class="font-bold text-brand-700 text-sm">{{ rupiah(c.amount) }}</span>
+          </div>
+        </div>
+
+        <p class="text-xs font-medium text-slate-400 mt-4 mb-1.5">Uang masuk per metode</p>
+        <div class="space-y-1">
+          <div v-for="m in report.by_method" :key="m.method"
+            class="flex items-center justify-between px-3 py-1.5 print:px-0 print:py-0.5">
+            <span class="text-sm text-slate-600">{{ m.label }}</span>
+            <span class="font-semibold text-sm" :class="m.amount > 0 ? 'text-slate-700' : 'text-slate-400'">{{ rupiah(m.amount) }}</span>
           </div>
         </div>
 

@@ -13,6 +13,7 @@ from sqlalchemy import func
 from ..extensions import db
 from ..models import Employee, User, Venue
 from ..security import verify_password
+from ..stations.models import GameStation
 from .models import Attendance, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift
 from .services import (
     PosError,
@@ -324,10 +325,35 @@ def report_category_daily():
     cat_names = {c.id: c.name for c in ProductCategory.query.all()}
     product_cat = dict(db.session.query(Product.id, Product.category_id).all())
 
-    groups = {}
+    # kategori yg RELEVAN utk venue ini (punya master data-nya) — selalu
+    # ditampilkan biar kasir lihat gambaran lengkap, walau blm ada penjualan
+    # hari ini (amount 0), bukan cuma yg kebetulan ada transaksi
+    prod_cat_ids = {
+        cid
+        for (cid,) in Product.query.filter_by(
+            venue_id=terminal.venue_id, is_active=True, is_ticket=False
+        ).with_entities(Product.category_id).distinct()
+    }
+    groups = {cat_names.get(cid, "Tanpa Kategori"): {"category": cat_names.get(cid, "Tanpa Kategori"), "qty": 0.0, "amount": 0.0} for cid in prod_cat_ids}
+    if Facility.query.filter_by(venue_id=terminal.venue_id, is_active=True).first():
+        label = _REPORT_LABELS["booking"]
+        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0}
+    if Product.query.filter_by(venue_id=terminal.venue_id, is_active=True, is_ticket=True).first():
+        label = _REPORT_LABELS["ticket"]
+        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0}
+    if GameStation.query.filter_by(venue_id=terminal.venue_id, is_active=True).first():
+        label = _REPORT_LABELS["rental"]
+        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0}
+
+    # POS cuma kenal 2 metode bayar (cash/qris) — selalu tampilkan keduanya
+    # walau salah satu 0, biar kasir gampang cocokkan fisik uang di laci
+    method_totals = {"cash": 0.0, "qris": 0.0}
+
     total = 0.0
     order_ids_seen = set()
     for p in payments:
+        method_totals[p.method] = method_totals.get(p.method, 0.0) + float(p.amount or 0)
+
         order = p.order
         order_total = float(order.total_amount or 0) if order else 0
         if not order or order_total <= 0 or not order.items:
@@ -349,11 +375,16 @@ def report_category_daily():
         [{**g, "qty": round(g["qty"], 2), "amount": round(g["amount"], 2)} for g in groups.values()],
         key=lambda x: -x["amount"],
     )
+    by_method = [
+        {"method": "cash", "label": "Cash", "amount": round(method_totals.get("cash", 0.0), 2)},
+        {"method": "qris", "label": "QRIS", "amount": round(method_totals.get("qris", 0.0), 2)},
+    ]
     return jsonify(
         date=today.isoformat(),
         order_count=len(order_ids_seen),
         total=round(total, 2),
         by_category=by_category,
+        by_method=by_method,
     ), 200
 
 
