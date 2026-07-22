@@ -50,10 +50,10 @@ onMounted(load)
           <img src="/asp-logo.png" alt="ASP Sports" class="h-8 mx-auto mb-1" />
           <p class="text-xs font-semibold">Laporan Penjualan per Kategori</p>
         </div>
-        <p class="text-xs text-slate-400 mb-3">{{ report.date }} · {{ report.order_count }} transaksi lunas</p>
+        <p class="text-xs text-slate-400 mb-3">{{ report.date }} · {{ report.order_count }} transaksi (termasuk DP)</p>
 
         <div v-if="!report.by_category.length" class="text-center text-slate-400 text-sm py-6">
-          Belum ada penjualan hari ini.
+          Belum ada uang masuk hari ini.
         </div>
         <div v-else class="space-y-1.5">
           <div v-for="c in report.by_category" :key="c.category"

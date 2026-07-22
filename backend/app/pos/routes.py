@@ -13,7 +13,7 @@ from sqlalchemy import func
 from ..extensions import db
 from ..models import Employee, User, Venue
 from ..security import verify_password
-from .models import Attendance, Facility, FacilityBooking, Order, OrderItem, PosTerminal, Product, ProductCategory, Shift
+from .models import Attendance, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift
 from .services import (
     PosError,
     add_cash_movement,
@@ -302,48 +302,56 @@ _REPORT_LABELS = {"ticket": "Tiket Masuk", "booking": "Booking Lapangan", "renta
 @pos_bp.get("/reports/category-daily")
 @jwt_required()
 def report_category_daily():
+    """Uang masuk hari ini per kategori — berdasar TANGGAL PEMBAYARAN
+    (Payment.paid_at), bukan tanggal/status order. Booking yg baru DP hari
+    ini utk tanggal main nanti tetap terhitung (uangnya beneran masuk hari
+    ini, meski order-nya masih 'partial' bukan 'paid'). Kalau 1 order isinya
+    campur & baru dibayar sebagian, jumlah pembayaran dialokasikan
+    proporsional ke tiap item sesuai porsi line_total-nya."""
     terminal = _current_terminal()
     today = date.today()
 
-    order_ids = [
-        oid
-        for (oid,) in Order.query.filter(
+    payments = (
+        Payment.query.join(Order, Payment.order_id == Order.id)
+        .filter(
             Order.venue_id == terminal.venue_id,
-            Order.status == "paid",
-            func.date(Order.created_at) == today,
-        ).with_entities(Order.id).all()
-    ]
+            Payment.status == "paid",
+            func.date(Payment.paid_at) == today,
+        )
+        .all()
+    )
+
+    cat_names = {c.id: c.name for c in ProductCategory.query.all()}
+    product_cat = dict(db.session.query(Product.id, Product.category_id).all())
 
     groups = {}
     total = 0.0
-    if order_ids:
-        cat_names = {c.id: c.name for c in ProductCategory.query.all()}
-        rows = (
-            db.session.query(
-                OrderItem.item_type,
-                Product.category_id,
-                func.coalesce(func.sum(OrderItem.quantity), 0),
-                func.coalesce(func.sum(OrderItem.line_total), 0),
-            )
-            .outerjoin(Product, OrderItem.product_id == Product.id)
-            .filter(OrderItem.order_id.in_(order_ids))
-            .group_by(OrderItem.item_type, Product.category_id)
-            .all()
-        )
-        for item_type, category_id, qty, amount in rows:
-            if item_type == "product":
-                label = cat_names.get(category_id, "Tanpa Kategori")
+    order_ids_seen = set()
+    for p in payments:
+        order = p.order
+        order_total = float(order.total_amount or 0) if order else 0
+        if not order or order_total <= 0 or not order.items:
+            continue
+        order_ids_seen.add(order.id)
+        pay_amount = float(p.amount or 0)
+        for item in order.items:
+            share = float(item.line_total or 0) / order_total
+            if item.item_type == "product":
+                label = cat_names.get(product_cat.get(item.product_id), "Tanpa Kategori")
             else:
-                label = _REPORT_LABELS.get(item_type, item_type)
+                label = _REPORT_LABELS.get(item.item_type, item.item_type)
             g = groups.setdefault(label, {"category": label, "qty": 0.0, "amount": 0.0})
-            g["qty"] += float(qty)
-            g["amount"] += float(amount)
-            total += float(amount)
+            g["qty"] += float(item.quantity or 0) * share
+            g["amount"] += pay_amount * share
+            total += pay_amount * share
 
-    by_category = sorted(groups.values(), key=lambda x: -x["amount"])
+    by_category = sorted(
+        [{**g, "qty": round(g["qty"], 2), "amount": round(g["amount"], 2)} for g in groups.values()],
+        key=lambda x: -x["amount"],
+    )
     return jsonify(
         date=today.isoformat(),
-        order_count=len(order_ids),
+        order_count=len(order_ids_seen),
         total=round(total, 2),
         by_category=by_category,
     ), 200
