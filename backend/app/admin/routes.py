@@ -1398,7 +1398,6 @@ VENUE_GROUP_ORDER = [
     "Mini Soccer / Lapangan Bola / Futsal",
     "Padel",
     "W Arena",
-    "Lainnya",
 ]
 
 
@@ -1413,7 +1412,8 @@ def _sales_growth_mom(vids):
     venues_q = Venue.query
     if vids is not None:
         venues_q = venues_q.filter(Venue.id.in_(vids)) if vids else venues_q.filter(db.false())
-    group_of = {v.id: VENUE_GROUP_MAP.get(v.type, "Lainnya") for v in venues_q.all()}
+    # tipe venue di luar VENUE_GROUP_MAP (Manajemen, Premium Sport) sengaja tidak ditampilkan
+    group_of = {v.id: VENUE_GROUP_MAP[v.type] for v in venues_q.all() if v.type in VENUE_GROUP_MAP}
 
     def _revenue_by_venue(d_from, d_to):
         rows = (
