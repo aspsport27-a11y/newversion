@@ -47,7 +47,7 @@ class GameSession(db.Model):
     started_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(12), nullable=False, default="ongoing")  # ongoing|stopped
     stopped_at = db.Column(db.DateTime)
-    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"))
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id", ondelete="SET NULL"))
     opened_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
