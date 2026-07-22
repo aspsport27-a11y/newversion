@@ -56,4 +56,15 @@ router.beforeEach((to) => {
   return true
 })
 
+// Setelah redeploy, chunk JS lama (nama file hash lama) sudah dihapus dari
+// server (rsync --delete). Tab yang sudah lama terbuka masih coba fetch nama
+// file lama itu saat pindah ke menu yg belum pernah dibuka → gagal diam-diam,
+// klik terasa "tidak respon". Deteksi kegagalan import chunk lalu reload
+// penuh ke halaman tujuan supaya otomatis pulih tanpa user harus tau caranya.
+router.onError((err, to) => {
+  if (/Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i.test(err.message)) {
+    window.location.href = to.fullPath
+  }
+})
+
 export default router
