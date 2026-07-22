@@ -98,6 +98,17 @@ async function cancelOrder(o, ev) {
     await loadOrders()
   } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan.') } finally { busy.value = false }
 }
+
+async function deleteOrder(o, ev) {
+  ev?.stopPropagation()
+  if (!window.confirm(`Hapus PERMANEN transaksi ${o.order_number}? Tindakan ini tidak bisa dibatalkan.`)) return
+  busy.value = true
+  try {
+    await client.delete(`/admin/orders/${o.id}`)
+    if (detail.value?.id === o.id) detail.value = null
+    await loadOrders()
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') } finally { busy.value = false }
+}
 </script>
 
 <template>
@@ -176,6 +187,7 @@ async function cancelOrder(o, ev) {
               <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
                 <span class="text-brand-600">Detail</span>
                 <button v-if="canCancel && o.status !== 'void'" @click="cancelOrder(o, $event)" :disabled="busy" class="text-red-500 hover:underline ml-3 disabled:opacity-50">Batalkan</button>
+                <button v-if="canCancel && o.status === 'void'" @click="deleteOrder(o, $event)" :disabled="busy" class="text-red-700 hover:underline ml-3 disabled:opacity-50">Hapus</button>
               </td>
             </tr>
           </tbody>
@@ -246,6 +258,9 @@ async function cancelOrder(o, ev) {
 
         <div v-if="canCancel && detail.status !== 'void'" class="flex gap-2 pt-2 border-t">
           <button @click="cancelOrder(detail)" :disabled="busy" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium disabled:opacity-50">Batalkan Transaksi</button>
+        </div>
+        <div v-if="canCancel && detail.status === 'void'" class="flex gap-2 pt-2 border-t">
+          <button @click="deleteOrder(detail)" :disabled="busy" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-medium disabled:opacity-50">Hapus Permanen</button>
         </div>
       </div>
     </div>

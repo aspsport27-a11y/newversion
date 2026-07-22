@@ -1783,6 +1783,35 @@ def order_cancel_admin(order_id):
     return jsonify(order=order.to_dict(), message="Transaksi dibatalkan"), 200
 
 
+@admin_bp.delete("/orders/<int:order_id>")
+@jwt_required()
+@ORDER_CANCEL
+def order_delete_admin(order_id):
+    """Hapus permanen transaksi yang SUDAH dibatalkan (status void) — utk
+    membersihkan riwayat dari transaksi yang keliru/duplikat. Kalau masih ada
+    payment berstatus 'paid' (harusnya sudah 'void' saat dibatalkan, tapi ada
+    kasus data lama yang tak konsisten), di-void dulu di sini — supaya tidak
+    salah terhitung di laporan manapun. Total shift yang SUDAH ditutup
+    sengaja tidak diubah (kas historis yang sudah direkonsiliasi dibiarkan)."""
+    order = db.session.get(Order, order_id)
+    if not order:
+        return _err("Order tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and order.venue_id != forced:
+        return _err("Bukan order venue Anda", "forbidden", 403)
+    if order.status != "void":
+        return _err(
+            "Hanya transaksi berstatus Dibatalkan yang bisa dihapus permanen.",
+            "bad_status", 409,
+        )
+    for p in order.payments:
+        if p.status == "paid":
+            p.status = "void"
+    db.session.delete(order)  # order_items & payments ikut terhapus (ondelete=CASCADE)
+    db.session.commit()
+    return jsonify(message="Transaksi dihapus permanen"), 200
+
+
 @admin_bp.get("/reports/outstanding")
 @jwt_required()
 @VIEW
