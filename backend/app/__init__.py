@@ -3,7 +3,7 @@ import click
 from flask import Flask, jsonify
 
 from .config import Config
-from .extensions import cors, db, jwt, migrate
+from .extensions import cors, db, jwt, limiter, migrate
 from .security import VALID_ROLES
 
 # Blocklist token in-memory (untuk logout). Untuk multi-worker/produksi
@@ -20,6 +20,7 @@ def create_app(config_class: type = Config) -> Flask:
     migrate.init_app(app, db)
     jwt.init_app(app)
     cors.init_app(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}})
+    limiter.init_app(app)
 
     # register model agar dikenali SQLAlchemy/Flask-Migrate
     from . import models  # noqa: F401
@@ -41,6 +42,7 @@ def create_app(config_class: type = Config) -> Flask:
     from .payroll.routes import payroll_bp
     from .pos.routes import pos_bp
     from .proc.routes import proc_bp
+    from .public.routes import public_bp
     from .stations.routes import stations_bp
     from .treasury.routes import treasury_bp
 
@@ -55,6 +57,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(financial_bp, url_prefix="/api/financial")
     app.register_blueprint(stations_bp, url_prefix="/api/stations")
     app.register_blueprint(ai_bp, url_prefix="/api/ai")
+    app.register_blueprint(public_bp, url_prefix="/api/public")
 
     _register_jwt_handlers(app)
     _register_error_handlers(app)
