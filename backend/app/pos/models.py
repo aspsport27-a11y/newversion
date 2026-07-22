@@ -384,6 +384,9 @@ class Attendance(db.Model):
     # "lat,lon" dari geolocation browser saat absen — verifikasi absen dilakukan di luar/lokasi venue
     check_in_location = db.Column(db.String(100))
     check_out_location = db.Column(db.String(100))
+    # alamat hasil reverse geocoding (Nominatim/OSM), disimpan sekali saat absen
+    check_in_address = db.Column(db.String(255))
+    check_out_address = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (db.UniqueConstraint("user_id", "date"),)
@@ -403,4 +406,6 @@ class Attendance(db.Model):
             "has_out_photo": bool(self.check_out_photo),
             "check_in_location": self.check_in_location,
             "check_out_location": self.check_out_location,
+            "check_in_address": self.check_in_address,
+            "check_out_address": self.check_out_address,
         }

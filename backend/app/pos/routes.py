@@ -104,6 +104,33 @@ def pos_login():
 # ------------------------------------------------------------------
 # Absensi — tap PIN di terminal, tanpa login penuh (rekap kehadiran)
 # ------------------------------------------------------------------
+def _reverse_geocode(location):
+    """'lat,lon' -> alamat (termasuk kelurahan kalau ada di data OSM) via
+    Nominatim. Gratis, tanpa API key — tapi best-effort: None kalau
+    gagal/timeout, absen tetap tercatat tanpa alamat."""
+    if not location or "," not in location:
+        return None
+    try:
+        import httpx
+
+        lat, lon = location.split(",", 1)
+        resp = httpx.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={
+                "format": "jsonv2", "lat": lat.strip(), "lon": lon.strip(),
+                "addressdetails": 1, "accept-language": "id",
+            },
+            headers={"User-Agent": "ASPSportSystem/1.0 (attendance-geocoding)"},
+            timeout=4.0,
+        )
+        if resp.status_code != 200:
+            return None
+        addr = resp.json().get("display_name")
+        return addr[:255] if addr else None
+    except Exception:  # noqa: BLE001 — reverse geocoding tak boleh gagalkan absen
+        return None
+
+
 def _save_absen_photo(data_url, prefix):
     """Simpan foto base64 (data URL) ke UPLOAD_FOLDER/attendance. Return filename / None."""
     import base64
@@ -178,18 +205,22 @@ def pos_attendance():
     # absen dilakukan di luar/lokasi venue, bukan bukti wajib
     location = (data.get("location") or "").strip()[:100] or None
 
+    address = _reverse_geocode(location) if location else None
+
     if action == "in":
         if row.check_in:
             return jsonify(error="already", message=f"{name} sudah absen masuk hari ini "
                            f"({row.check_in.strftime('%H:%M')})"), 409
         row.check_in = now
         row.check_in_location = location
+        row.check_in_address = address
     else:
         if row.check_out:
             return jsonify(error="already", message=f"{name} sudah absen pulang hari ini "
                            f"({row.check_out.strftime('%H:%M')})"), 409
         row.check_out = now
         row.check_out_location = location
+        row.check_out_address = address
 
     # foto bukti (opsional — device tanpa kamera tetap tercatat, ditandai tanpa foto)
     db.session.flush()  # pastikan row.id ada utk nama file
