@@ -292,6 +292,7 @@ async function resetAccount() {
               <select v-model="acctForm.role" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none">
                 <option value="staff">Kasir (PIN)</option>
                 <option value="staff">Ass. Manager/SPV (PIN)</option>
+                <option value="staff">Staff (PIN)</option>
                 <option value="manager_unit">Manager</option>
                 <option v-if="!isManager" value="admin_unit">Admin Unit (area)</option>
                 <option v-if="!isManager" value="head_office">Head Office</option>
