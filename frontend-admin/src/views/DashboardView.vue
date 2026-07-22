@@ -15,6 +15,10 @@ function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
 }
 
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+}
+
 const revenueDelta = computed(() => {
   if (!summary.value) return null
   const { revenue_today, revenue_yesterday } = summary.value
@@ -104,6 +108,47 @@ onMounted(async () => {
         <RouterLink v-if="summary.low_stock.count" :to="{ name: 'products' }" class="block mt-2 text-xs text-brand-600 hover:text-brand-700">
           Lihat semua produk →
         </RouterLink>
+      </div>
+    </div>
+
+    <!-- Sales Growth MoM per kategori venue -->
+    <div v-if="!loading && !error" class="bg-white rounded-xl shadow-sm border p-5 mt-4">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold text-slate-700">Sales Growth MoM per Kategori</h3>
+        <p class="text-xs text-slate-400">
+          {{ fmtDate(summary.sales_growth_mom.this_month_range.from) }}–{{ fmtDate(summary.sales_growth_mom.this_month_range.to) }}
+          vs
+          {{ fmtDate(summary.sales_growth_mom.last_month_range.from) }}–{{ fmtDate(summary.sales_growth_mom.last_month_range.to) }}
+        </p>
+      </div>
+      <div v-if="!summary.sales_growth_mom.groups.length" class="text-sm text-slate-400 text-center py-4">
+        Belum ada data venue untuk ditampilkan.
+      </div>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-400 border-b">
+              <th class="pb-2 font-medium">Kategori</th>
+              <th class="pb-2 font-medium text-right">Bulan Ini</th>
+              <th class="pb-2 font-medium text-right">Bulan Lalu</th>
+              <th class="pb-2 font-medium text-right">Growth</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="g in summary.sales_growth_mom.groups" :key="g.group" class="border-b last:border-0">
+              <td class="py-2.5 text-slate-700">{{ g.group }}</td>
+              <td class="py-2.5 text-right text-slate-700">{{ rupiah(g.this_month) }}</td>
+              <td class="py-2.5 text-right text-slate-500">{{ rupiah(g.last_month) }}</td>
+              <td class="py-2.5 text-right font-semibold">
+                <span v-if="g.is_new" class="text-emerald-600">Baru</span>
+                <span v-else-if="g.growth_pct === null" class="text-slate-400">–</span>
+                <span v-else :class="g.growth_pct >= 0 ? 'text-emerald-600' : 'text-red-600'">
+                  {{ g.growth_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(g.growth_pct) }}%
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>

@@ -2,6 +2,7 @@
 
 Akses: admin & head_office (kelola); reports juga manager_unit.
 """
+import calendar
 from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request
@@ -1383,6 +1384,82 @@ def attendance_photo(aid, which):
 # ==================================================================
 # DASHBOARD
 # ==================================================================
+# Grouping kategori venue utk Sales Growth MoM (venue.type -> label grup)
+VENUE_GROUP_MAP = {
+    "Waterpark": "Waterpark",
+    "Mini Soccer": "Mini Soccer / Lapangan Bola / Futsal",
+    "Lapangan Bola": "Mini Soccer / Lapangan Bola / Futsal",
+    "Futsal": "Mini Soccer / Lapangan Bola / Futsal",
+    "Padel": "Padel",
+    "esport": "W Arena",
+}
+VENUE_GROUP_ORDER = [
+    "Waterpark",
+    "Mini Soccer / Lapangan Bola / Futsal",
+    "Padel",
+    "W Arena",
+    "Lainnya",
+]
+
+
+def _sales_growth_mom(vids):
+    today = date.today()
+    this_month_start = today.replace(day=1)
+    last_month_end = this_month_start - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    days_in_last_month = calendar.monthrange(last_month_start.year, last_month_start.month)[1]
+    last_month_compare_end = last_month_start.replace(day=min(today.day, days_in_last_month))
+
+    venues_q = Venue.query
+    if vids is not None:
+        venues_q = venues_q.filter(Venue.id.in_(vids)) if vids else venues_q.filter(db.false())
+    group_of = {v.id: VENUE_GROUP_MAP.get(v.type, "Lainnya") for v in venues_q.all()}
+
+    def _revenue_by_venue(d_from, d_to):
+        rows = (
+            db.session.query(Order.venue_id, func.coalesce(func.sum(Payment.amount), 0))
+            .join(Payment, Payment.order_id == Order.id)
+            .filter(Payment.status == "paid", func.date(Payment.paid_at).between(d_from, d_to))
+            .group_by(Order.venue_id)
+            .all()
+        )
+        return {vid: float(amt) for vid, amt in rows}
+
+    this_rev = _revenue_by_venue(this_month_start, today)
+    last_rev = _revenue_by_venue(last_month_start, last_month_compare_end)
+
+    groups = {}
+    for vid, g in group_of.items():
+        entry = groups.setdefault(g, {"this_month": 0.0, "last_month": 0.0})
+        entry["this_month"] += this_rev.get(vid, 0.0)
+        entry["last_month"] += last_rev.get(vid, 0.0)
+
+    result = []
+    for g in VENUE_GROUP_ORDER:
+        if g not in groups:
+            continue
+        d = groups[g]
+        growth_pct = None
+        is_new = False
+        if d["last_month"] > 0:
+            growth_pct = round((d["this_month"] - d["last_month"]) / d["last_month"] * 100, 1)
+        elif d["this_month"] > 0:
+            is_new = True
+        result.append({
+            "group": g,
+            "this_month": round(d["this_month"], 2),
+            "last_month": round(d["last_month"], 2),
+            "growth_pct": growth_pct,
+            "is_new": is_new,
+        })
+
+    return {
+        "this_month_range": {"from": this_month_start.isoformat(), "to": today.isoformat()},
+        "last_month_range": {"from": last_month_start.isoformat(), "to": last_month_compare_end.isoformat()},
+        "groups": result,
+    }
+
+
 @admin_bp.get("/dashboard/summary")
 @jwt_required()
 def dashboard_summary():
@@ -1449,6 +1526,7 @@ def dashboard_summary():
             "total": ops_pending + payroll_pending + proc_pending,
         },
         low_stock={"count": low_stock_count, "items": low_stock_items},
+        sales_growth_mom=_sales_growth_mom(vids),
     ), 200
 
 
