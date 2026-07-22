@@ -1815,6 +1815,26 @@ def bookings_list():
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), bookings=rows), 200
 
 
+@admin_bp.delete("/bookings/<int:bid>")
+@jwt_required()
+@ORDER_CANCEL
+def booking_delete(bid):
+    """Hapus baris booking 'kosong' — sisa test/cancelled tanpa order (order_item_id
+    NULL). Booking yg terhubung ke order sungguhan TIDAK boleh dihapus lewat sini
+    (pakai Batalkan Booking / hapus order-nya kalau memang perlu)."""
+    fb = db.session.get(FacilityBooking, bid)
+    if not fb:
+        return _err("Booking tidak ditemukan", "not_found", 404)
+    if fb.order_item_id is not None:
+        return _err(
+            "Booking ini terhubung ke order — tak bisa dihapus langsung dari sini.",
+            "has_order", 409,
+        )
+    db.session.delete(fb)
+    db.session.commit()
+    return jsonify(message="Booking dihapus"), 200
+
+
 @admin_bp.get("/orders")
 @jwt_required()
 @VIEW

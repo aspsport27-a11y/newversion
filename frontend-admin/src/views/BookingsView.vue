@@ -58,6 +58,15 @@ async function openDetail(b) {
     detail.value = data.order
   } finally { detailLoading.value = false }
 }
+async function deleteEmpty(b) {
+  if (!window.confirm(`Hapus baris booking kosong ${b.start_time}-${b.end_time} (${b.facility_name})?`)) return
+  try {
+    await client.delete(`/admin/bookings/${b.id}`)
+    await run()
+  } catch (e) {
+    alert(e?.response?.data?.message || 'Gagal menghapus.')
+  }
+}
 async function cancelBooking() {
   if (!detail.value?.id) return
   if (!window.confirm('Batalkan booking ini (no-show)?\nDP yang sudah dibayar HANGUS (tidak dikembalikan) dan slot dilepas.')) return
@@ -104,11 +113,12 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-3 font-medium text-right">Total</th>
               <th class="px-4 py-3 font-medium text-right">Sisa</th>
               <th class="px-4 py-3 font-medium text-center">Status</th>
+              <th class="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!shown.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
+            <tr v-if="loading"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!shown.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
             <tr v-for="b in shown" :key="b.id" @click="openDetail(b)" class="border-t hover:bg-slate-50 cursor-pointer">
               <td class="px-4 py-3 text-slate-700">{{ fmtDate(b.booking_date) }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ b.start_time }}–{{ b.end_time }}</td>
@@ -120,6 +130,9 @@ onMounted(async () => { await loadVenues(); await run() })
               </td>
               <td class="px-4 py-3 text-center">
                 <span :class="statusClass(b.payment_status)" class="text-xs rounded-full px-2 py-0.5">{{ statusLabel(b.payment_status) }}</span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                <button v-if="!b.order_id" @click.stop="deleteEmpty(b)" class="text-red-500 text-xs hover:text-red-700">Hapus</button>
               </td>
             </tr>
           </tbody>
