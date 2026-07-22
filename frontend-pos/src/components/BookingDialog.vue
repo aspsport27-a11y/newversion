@@ -100,6 +100,17 @@ function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
 }
 
+// label ringkas tarif utk dropdown/info — kalau ada rate_rules, tarif flat
+// dasar sering tak relevan lagi (bisa 0), jadi tampilkan rentang tarif
+function facilityRateLabel(f) {
+  const rates = (f.rate_rules || []).map((r) => Number(r.hourly_rate))
+  if (f.hourly_rate) rates.push(Number(f.hourly_rate))
+  if (!rates.length) return rupiah(0) + '/jam'
+  const min = Math.min(...rates)
+  const max = Math.max(...rates)
+  return min === max ? `${rupiah(min)}/jam` : `${rupiah(min)}–${rupiah(max)}/jam`
+}
+
 function add() {
   error.value = ''
   if (!facility.value) return (error.value = 'Pilih lapangan.')
@@ -111,7 +122,9 @@ function add() {
   pos.addBooking({
     facility_id: facility.value.id,
     name: `${facility.value.name} ${date.value} ${startStr}-${endStr}`,
-    unit_price: facility.value.hourly_rate,
+    // dikirim tarif rata2/jam (blended) — server tetap hitung ulang total sbnrnya
+    // pakai facility_rate_for_hour, ini cuma supaya preview di keranjang benar
+    unit_price: Math.round(price.value / durationHours.value),
     quantity: durationHours.value,
     booking_date: date.value,
     start_time: startStr,
@@ -147,11 +160,18 @@ function add() {
         </div>
 
         <label class="block text-sm text-slate-600 mb-1">Lapangan</label>
-        <select v-model="facilityId" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 mb-3 outline-none focus:border-brand-500">
+        <select v-model="facilityId" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 mb-1 outline-none focus:border-brand-500">
           <option v-for="f in pos.facilities" :key="f.id" :value="f.id">
-            {{ f.name }} — {{ rupiah(f.hourly_rate) }}/jam
+            {{ f.name }} — {{ facilityRateLabel(f) }}
           </option>
         </select>
+        <div v-if="facility?.rate_rules?.length" class="text-xs text-slate-500 mb-3 space-y-0.5">
+          <div v-for="r in facility.rate_rules" :key="r.id">
+            {{ r.start_time }}–{{ r.end_time }}<span v-if="r.label"> ({{ r.label }})</span>: {{ rupiah(r.hourly_rate) }}/jam
+          </div>
+          <div v-if="facility.hourly_rate">jam lain: {{ rupiah(facility.hourly_rate) }}/jam</div>
+        </div>
+        <div v-else class="mb-3"></div>
 
         <label class="block text-sm text-slate-600 mb-1">Tanggal</label>
         <input v-model="date" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 mb-3 outline-none focus:border-brand-500" />

@@ -198,8 +198,13 @@ watch(venueId, reload)
               <td class="px-4 py-3 font-medium text-slate-700">{{ f.name }}</td>
               <td class="px-4 py-3 text-slate-500">{{ f.type || '—' }}</td>
               <td class="px-4 py-3 text-right">
-                {{ rupiah(f.hourly_rate) }}
-                <span v-if="f.rate_rules?.length" class="block text-xs text-amber-600">+{{ f.rate_rules.length }} tarif jam lain</span>
+                <template v-if="f.rate_rules?.length">
+                  <div v-for="r in f.rate_rules" :key="r.id" class="text-xs text-slate-600 whitespace-nowrap">
+                    {{ r.start_time }}–{{ r.end_time }}<span v-if="r.label"> ({{ r.label }})</span>: {{ rupiah(r.hourly_rate) }}
+                  </div>
+                  <div v-if="f.hourly_rate" class="text-xs text-slate-400">jam lain: {{ rupiah(f.hourly_rate) }}</div>
+                </template>
+                <template v-else>{{ rupiah(f.hourly_rate) }}</template>
               </td>
               <td class="px-4 py-3 text-slate-600">{{ f.open_time }}–{{ f.close_time }}</td>
               <td class="px-4 py-3 text-center"><span :class="f.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5">{{ f.is_active ? 'Aktif' : 'Nonaktif' }}</span></td>
@@ -271,7 +276,11 @@ watch(venueId, reload)
         <div class="space-y-3">
           <input v-model="facForm.name" placeholder="Nama (mis. Lapangan A)" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           <input v-model="facForm.type" placeholder="Tipe (mis. futsal, padel)" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
-          <input v-model.number="facForm.hourly_rate" type="number" placeholder="Tarif per jam" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          <div v-if="editingFac">
+            <input v-model.number="facForm.hourly_rate" type="number" placeholder="Tarif per jam (dasar)" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            <p class="text-xs text-slate-400 mt-1">Tarif dasar ini berlaku di jam yg tak diatur khusus — atur tarif per jam lewat tombol "Tarif".</p>
+          </div>
+          <p v-else class="text-xs text-slate-400">Tarif diatur lewat tombol "Tarif" setelah lapangan dibuat.</p>
           <div class="grid grid-cols-2 gap-2">
             <div><label class="text-xs text-slate-500">Buka</label><input v-model="facForm.open_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
             <div><label class="text-xs text-slate-500">Tutup</label><input v-model="facForm.close_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
