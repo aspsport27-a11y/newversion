@@ -42,7 +42,33 @@ function statusClass(s) {
 const shown = computed(() =>
   onlyUnpaid.value ? bookings.value.filter((b) => b.payment_status === 'partial' || b.payment_status === 'open') : bookings.value,
 )
-const totalDue = computed(() => shown.value.reduce((s, b) => s + (b.order_due || 0), 0))
+
+// ringkasan — booking batal (void) dikeluarkan dari semua total nilai/uang
+const activeBookings = computed(() => shown.value.filter((b) => b.payment_status !== 'void'))
+const totalCount = computed(() => activeBookings.value.length)
+const totalNilai = computed(() => activeBookings.value.reduce((s, b) => s + (b.order_total || 0), 0))
+const totalDp = computed(() =>
+  activeBookings.value
+    .filter((b) => b.payment_status === 'partial')
+    .reduce((s, b) => s + (b.order_paid || 0), 0),
+)
+const totalDue = computed(() => activeBookings.value.reduce((s, b) => s + (b.order_due || 0), 0))
+
+const perVenue = computed(() => {
+  const map = {}
+  for (const b of activeBookings.value) {
+    const vid = b.venue_id
+    if (!map[vid]) map[vid] = { venue_id: vid, count: 0, total: 0, due: 0 }
+    map[vid].count += 1
+    map[vid].total += b.order_total || 0
+    map[vid].due += b.order_due || 0
+  }
+  return Object.values(map).sort((a, b) => b.total - a.total)
+})
+function venueName(id) {
+  const v = venues.value.find((x) => x.id === id)
+  return v ? `${v.code} — ${v.name}` : `#${id}`
+}
 
 async function loadVenues() {
   const { data } = await client.get('/admin/venues')
@@ -106,7 +132,48 @@ onMounted(async () => { await loadVenues(); await run() })
         </select></div>
       <button @click="run" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
       <label class="flex items-center gap-2 text-sm text-slate-600 ml-2"><input v-model="onlyUnpaid" type="checkbox" /> Hanya belum lunas</label>
-      <span class="text-sm ml-auto">Piutang: <span class="font-semibold text-amber-600">{{ rupiah(totalDue) }}</span></span>
+    </div>
+
+    <!-- Ringkasan -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Total Booking</p>
+        <p class="text-xl font-bold text-slate-800">{{ totalCount }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Total Nilai</p>
+        <p class="text-xl font-bold text-slate-800">{{ rupiah(totalNilai) }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Total DP Diterima</p>
+        <p class="text-xl font-bold text-amber-600">{{ rupiah(totalDp) }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Belum Lunas (Piutang)</p>
+        <p class="text-xl font-bold text-red-600">{{ rupiah(totalDue) }}</p>
+      </div>
+    </div>
+
+    <!-- Per venue -->
+    <div v-if="perVenue.length > 1" class="bg-white rounded-xl shadow-sm border overflow-hidden mb-5">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+            <th class="px-4 py-2.5 font-medium">Venue</th>
+            <th class="px-4 py-2.5 font-medium text-right">Jml Booking</th>
+            <th class="px-4 py-2.5 font-medium text-right">Total Nilai</th>
+            <th class="px-4 py-2.5 font-medium text-right">Piutang</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="pv in perVenue" :key="pv.venue_id" class="border-t">
+              <td class="px-4 py-2.5 text-slate-700">{{ venueName(pv.venue_id) }}</td>
+              <td class="px-4 py-2.5 text-right">{{ pv.count }}</td>
+              <td class="px-4 py-2.5 text-right">{{ rupiah(pv.total) }}</td>
+              <td class="px-4 py-2.5 text-right" :class="pv.due > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'">{{ rupiah(pv.due) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
