@@ -7,8 +7,10 @@ const emit = defineEmits(['close', 'added'])
 
 const facilityId = ref(null)
 const date = ref(new Date().toISOString().slice(0, 10))
-const start = ref('')
-const end = ref('')
+// disimpan sbg jam angka (bukan string) supaya tutup tengah malam (00:00 = jam ke-24)
+// tak salah dibandingkan sbg "lebih kecil" dari jam buka — lihat hours/hhmm di bawah
+const startH = ref(null)
+const endH = ref(null)
 const bookings = ref([])
 const loadingBookings = ref(false)
 const error = ref('')
@@ -20,24 +22,41 @@ onMounted(async () => {
 
 const facility = computed(() => pos.facilities.find((f) => f.id === facilityId.value))
 
+// jam tutup "00:00" berarti tengah malam (akhir hari), bukan awal hari — diperlakukan
+// sbg jam ke-24 supaya urutan jam tetap benar (mis. buka 08:00 tutup 00:00 → 08..24)
 const hours = computed(() => {
   const f = facility.value
   if (!f) return []
-  const oh = parseInt(f.open_time?.slice(0, 2) || '8')
-  const ch = parseInt(f.close_time?.slice(0, 2) || '23')
+  const oh = parseInt(f.open_time?.slice(0, 2) ?? '8')
+  let ch = parseInt(f.close_time?.slice(0, 2) ?? '23')
+  if (ch <= oh) ch += 24
   const arr = []
-  for (let h = oh; h <= ch; h++) arr.push(String(h).padStart(2, '0') + ':00')
+  for (let h = oh; h <= ch; h++) arr.push(h)
   return arr
 })
+function hhmm(h) {
+  return String(h % 24).padStart(2, '0') + ':00'
+}
+function toMinutes(hhmmStr) {
+  const [h, m] = hhmmStr.split(':').map(Number)
+  return h * 60 + (m || 0)
+}
 
 const durationHours = computed(() => {
-  if (!start.value || !end.value) return 0
-  return (parseInt(end.value) - parseInt(start.value))
+  if (startH.value == null || endH.value == null) return 0
+  return endH.value - startH.value
 })
 const price = computed(() => Math.max(0, durationHours.value) * (facility.value?.hourly_rate || 0))
 
-function overlaps(s, e) {
-  return bookings.value.some((b) => b.start_time < e && b.end_time > s)
+function overlaps(sH, eH) {
+  const sMin = sH * 60
+  const eMin = eH * 60
+  return bookings.value.some((b) => {
+    const bs = toMinutes(b.start_time)
+    let be = toMinutes(b.end_time)
+    if (be <= bs) be += 24 * 60 // booking lain yg juga berakhir tengah malam
+    return bs < eMin && be > sMin
+  })
 }
 
 async function loadBookings() {
@@ -60,17 +79,19 @@ function rupiah(n) {
 function add() {
   error.value = ''
   if (!facility.value) return (error.value = 'Pilih lapangan.')
-  if (!start.value || !end.value) return (error.value = 'Pilih jam mulai & selesai.')
+  if (startH.value == null || endH.value == null) return (error.value = 'Pilih jam mulai & selesai.')
   if (durationHours.value <= 0) return (error.value = 'Jam selesai harus setelah jam mulai.')
-  if (overlaps(start.value, end.value)) return (error.value = 'Jadwal bentrok dengan booking lain.')
+  if (overlaps(startH.value, endH.value)) return (error.value = 'Jadwal bentrok dengan booking lain.')
+  const startStr = hhmm(startH.value)
+  const endStr = hhmm(endH.value)
   pos.addBooking({
     facility_id: facility.value.id,
-    name: `${facility.value.name} ${date.value} ${start.value}-${end.value}`,
+    name: `${facility.value.name} ${date.value} ${startStr}-${endStr}`,
     unit_price: facility.value.hourly_rate,
     quantity: durationHours.value,
     booking_date: date.value,
-    start_time: start.value,
-    end_time: end.value,
+    start_time: startStr,
+    end_time: endStr,
   })
   emit('added')
   emit('close')
@@ -114,16 +135,16 @@ function add() {
         <div class="grid grid-cols-2 gap-2 mb-3">
           <div>
             <label class="block text-sm text-slate-600 mb-1">Mulai</label>
-            <select v-model="start" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-brand-500">
-              <option value="">--</option>
-              <option v-for="h in hours" :key="h" :value="h">{{ h }}</option>
+            <select v-model.number="startH" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-brand-500">
+              <option :value="null">--</option>
+              <option v-for="h in hours" :key="h" :value="h">{{ hhmm(h) }}</option>
             </select>
           </div>
           <div>
             <label class="block text-sm text-slate-600 mb-1">Selesai</label>
-            <select v-model="end" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-brand-500">
-              <option value="">--</option>
-              <option v-for="h in hours" :key="h" :value="h">{{ h }}</option>
+            <select v-model.number="endH" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-brand-500">
+              <option :value="null">--</option>
+              <option v-for="h in hours" :key="h" :value="h">{{ hhmm(h) }}</option>
             </select>
           </div>
         </div>

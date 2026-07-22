@@ -104,14 +104,22 @@ def public_schedule():
         FacilityBooking.status != "cancelled",
     ).all()
 
+    # jam tutup "00:00" = tengah malam (akhir hari), bukan awal hari — mesti
+    # dianggap hari berikutnya spy tak dibaca "lebih kecil" dari jam buka
+    def _end_dt(t):
+        dt = datetime.combine(d, t)
+        if t == datetime.min.time():
+            dt += timedelta(days=1)
+        return dt
+
+    booked_ranges = [(datetime.combine(d, b.start_time), _end_dt(b.end_time)) for b in booked]
+
     slots = []
     cur = datetime.combine(d, fac.open_time)
-    end_of_day = datetime.combine(d, fac.close_time)
+    end_of_day = _end_dt(fac.close_time)
     while cur < end_of_day:
         slot_end = cur + timedelta(minutes=slot_minutes)
-        is_booked = any(
-            b.start_time < slot_end.time() and b.end_time > cur.time() for b in booked
-        )
+        is_booked = any(bs < slot_end and be > cur for bs, be in booked_ranges)
         slots.append(
             {
                 "start_time": cur.strftime("%H:%M"),
