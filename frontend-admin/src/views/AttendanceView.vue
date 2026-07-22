@@ -80,12 +80,13 @@ onMounted(async () => { await loadVenues(); await load() })
             <th class="px-4 py-2 font-medium">Venue</th>
             <th class="px-4 py-2 font-medium text-center">Masuk</th>
             <th class="px-4 py-2 font-medium text-center">Pulang</th>
+            <th class="px-4 py-2 font-medium">Lokasi</th>
             <th class="px-4 py-2 font-medium text-right">Jam Kerja</th>
             <th v-if="canDelete" class="px-4 py-2"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td :colspan="canDelete ? 7 : 6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!rows.length"><td :colspan="canDelete ? 7 : 6" class="px-4 py-8 text-center text-slate-400">Belum ada data absen pada rentang ini.</td></tr>
+            <tr v-if="loading"><td :colspan="canDelete ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!rows.length"><td :colspan="canDelete ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Belum ada data absen pada rentang ini.</td></tr>
             <tr v-for="a in rows" :key="a.id" class="border-t">
               <td class="px-4 py-2 text-slate-500">{{ a.date }}</td>
               <td class="px-4 py-2 text-slate-700 font-medium">{{ a.name }}</td>
@@ -97,6 +98,11 @@ onMounted(async () => { await loadVenues(); await load() })
               <td class="px-4 py-2 text-center whitespace-nowrap">
                 <span :class="a.check_out ? 'text-slate-700' : 'text-amber-500'">{{ a.check_out || 'belum' }}</span>
                 <button v-if="a.has_out_photo" @click="openPhoto(a, 'out')" title="Lihat foto" class="ml-1">📷</button>
+              </td>
+              <td class="px-4 py-2 whitespace-nowrap text-xs">
+                <a v-if="a.check_in_location" :href="`https://www.google.com/maps?q=${a.check_in_location}`" target="_blank" rel="noopener" class="text-brand-600 hover:underline mr-2">📍 Masuk</a>
+                <a v-if="a.check_out_location" :href="`https://www.google.com/maps?q=${a.check_out_location}`" target="_blank" rel="noopener" class="text-brand-600 hover:underline">📍 Pulang</a>
+                <span v-if="!a.check_in_location && !a.check_out_location" class="text-slate-300">—</span>
               </td>
               <td class="px-4 py-2 text-right text-slate-600">{{ a.work_hours != null ? a.work_hours + ' jam' : '—' }}</td>
               <td v-if="canDelete" class="px-4 py-2 text-right">

@@ -11,6 +11,17 @@ const busy = ref(false)
 const err = ref('')
 const ok = ref('')
 
+// ---- lokasi GPS (verifikasi absen dari luar) ----
+const geo = ref(null) // { lat, lon } atau null kalau ditolak/tak tersedia
+function startGeo() {
+  if (!navigator.geolocation) return
+  navigator.geolocation.getCurrentPosition(
+    (pos) => { geo.value = { lat: pos.coords.latitude, lon: pos.coords.longitude } },
+    () => { geo.value = null },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
+  )
+}
+
 // ---- kamera ----
 const videoEl = ref(null)
 const camOk = ref(false)
@@ -41,9 +52,10 @@ async function absen(action) {
   if (!terminal.value || !pin.value) { err.value = 'Isi Terminal & PIN dulu.'; ok.value = ''; return }
   err.value = ''; ok.value = ''; busy.value = true
   const photo = capture()
+  const location = geo.value ? `${geo.value.lat.toFixed(6)},${geo.value.lon.toFixed(6)}` : null
   try {
     const { data } = await client.post('/attendance', {
-      terminal_code: terminal.value.trim(), pin: pin.value, action, photo,
+      terminal_code: terminal.value.trim(), pin: pin.value, action, photo, location,
     })
     ok.value = data.message
     localStorage.setItem('pos_terminal_code', terminal.value.trim())
@@ -55,7 +67,7 @@ async function absen(action) {
 }
 function close() { stopCam(); emit('close') }
 
-onMounted(startCam)
+onMounted(() => { startCam(); startGeo() })
 onBeforeUnmount(stopCam)
 </script>
 
@@ -72,6 +84,10 @@ onBeforeUnmount(stopCam)
         <video v-show="camOk" ref="videoEl" autoplay playsinline muted class="w-full h-full object-cover"></video>
         <p v-if="!camOk" class="text-slate-400 text-xs text-center px-3">Kamera tidak tersedia — absen tetap tercatat tanpa foto.</p>
       </div>
+
+      <p class="text-[11px] text-center mb-2" :class="geo ? 'text-emerald-600' : 'text-slate-400'">
+        {{ geo ? '📍 Lokasi terdeteksi' : '📍 Lokasi tidak tersedia — absen tetap tercatat' }}
+      </p>
 
       <input v-model="terminal" placeholder="Kode Terminal"
         class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm mb-2 outline-none focus:border-brand-500" />

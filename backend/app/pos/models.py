@@ -381,6 +381,9 @@ class Attendance(db.Model):
     check_out = db.Column(db.DateTime)
     check_in_photo = db.Column(db.String(255))
     check_out_photo = db.Column(db.String(255))
+    # "lat,lon" dari geolocation browser saat absen — verifikasi absen dilakukan di luar/lokasi venue
+    check_in_location = db.Column(db.String(100))
+    check_out_location = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (db.UniqueConstraint("user_id", "date"),)
@@ -398,4 +401,6 @@ class Attendance(db.Model):
             "work_hours": dur,
             "has_in_photo": bool(self.check_in_photo),
             "has_out_photo": bool(self.check_out_photo),
+            "check_in_location": self.check_in_location,
+            "check_out_location": self.check_out_location,
         }

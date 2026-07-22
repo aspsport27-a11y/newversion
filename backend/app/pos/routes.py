@@ -71,6 +71,11 @@ def pos_login():
     user = User.query.filter_by(username=username, active=True).first()
     if user is None or not user.pin_hash or not verify_password(pin, user.pin_hash):
         return jsonify(error="unauthorized", message="Username atau PIN salah"), 401
+    if user.role != "staff":
+        return jsonify(
+            error="forbidden",
+            message="Akun ini tidak diizinkan login ke POS. Gunakan menu Absen untuk absensi.",
+        ), 403
 
     # kalau kasir dibatasi venue, harus cocok dengan venue terminal
     if user.venue_id and user.venue_id != terminal.venue_id:
@@ -169,16 +174,22 @@ def pos_attendance():
         )
         db.session.add(row)
 
+    # lokasi GPS (opsional — "lat,lon" dari geolocation browser), verifikasi
+    # absen dilakukan di luar/lokasi venue, bukan bukti wajib
+    location = (data.get("location") or "").strip()[:100] or None
+
     if action == "in":
         if row.check_in:
             return jsonify(error="already", message=f"{name} sudah absen masuk hari ini "
                            f"({row.check_in.strftime('%H:%M')})"), 409
         row.check_in = now
+        row.check_in_location = location
     else:
         if row.check_out:
             return jsonify(error="already", message=f"{name} sudah absen pulang hari ini "
                            f"({row.check_out.strftime('%H:%M')})"), 409
         row.check_out = now
+        row.check_out_location = location
 
     # foto bukti (opsional — device tanpa kamera tetap tercatat, ditandai tanpa foto)
     db.session.flush()  # pastikan row.id ada utk nama file
