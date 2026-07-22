@@ -450,6 +450,7 @@ class User(db.Model):
         self.last_login = datetime.utcnow()
 
     def to_dict(self):
+        venue = db.session.get(Venue, self.venue_id) if self.venue_id else None
         return {
             "id": self.id,
             "username": self.username,
@@ -458,6 +459,7 @@ class User(db.Model):
             "active": self.active,
             "employee_id": self.employee_id,
             "venue_id": self.venue_id,
+            "venue_type": venue.type if venue else None,
             "area_id": self.area_id,
             "last_login": self.last_login.isoformat() if self.last_login else None,
         }

@@ -64,7 +64,7 @@ const navGroups = [
       { name: 'products', label: 'Produk', icon: '📦', perm: 'product.manage' },
       { name: 'promos', label: 'Promo', icon: '🎉', perm: 'promo.manage' },
       { name: 'facilities', label: 'Lapangan & Tiket', icon: '⚽', perm: 'facility.manage' },
-      { name: 'stations', label: 'Station Gaming', icon: '🎮', perm: 'station.manage' },
+      { name: 'stations', label: 'Station Gaming', icon: '🎮', perm: 'station.manage', venueTypes: ['esport'] },
     ],
   },
   {
@@ -107,7 +107,10 @@ const navGroups = [
 ]
 
 // item bisa digembok pakai daftar role tetap (roles) ATAU izin RBAC configurable (perm)
+// venueTypes tambahan: manager_unit cuma boleh liat kalau venue-nya bertipe itu
+// (mis. Station Gaming cuma utk manager venue esport, bukan manager venue lain)
 function canSee(n) {
+  if (n.venueTypes && auth.user?.role === 'manager_unit' && !n.venueTypes.includes(auth.user?.venue_type)) return false
   if (n.perm) return auth.hasPerm(n.perm)
   return n.roles.includes(auth.user?.role)
 }
