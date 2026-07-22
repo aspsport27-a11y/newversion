@@ -5,6 +5,8 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
+const canDelete = computed(() => auth.hasPerm('hr.manage'))
+const busy = ref(false)
 
 const venues = ref([])
 const venueId = ref('')
@@ -40,6 +42,14 @@ async function openPhoto(row, which) {
   } catch { alert('Foto tidak tersedia.') }
 }
 function closePhoto() { if (photoUrl.value) URL.revokeObjectURL(photoUrl.value); photoUrl.value = ''; }
+
+async function deleteRow(a) {
+  if (!window.confirm(`Hapus data absensi ${a.name} tanggal ${a.date}?`)) return
+  busy.value = true
+  try { await client.delete(`/admin/attendance/${a.id}`); await load() }
+  catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') } finally { busy.value = false }
+}
+
 onMounted(async () => { await loadVenues(); await load() })
 </script>
 
@@ -71,10 +81,11 @@ onMounted(async () => { await loadVenues(); await load() })
             <th class="px-4 py-2 font-medium text-center">Masuk</th>
             <th class="px-4 py-2 font-medium text-center">Pulang</th>
             <th class="px-4 py-2 font-medium text-right">Jam Kerja</th>
+            <th v-if="canDelete" class="px-4 py-2"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!rows.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada data absen pada rentang ini.</td></tr>
+            <tr v-if="loading"><td :colspan="canDelete ? 7 : 6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!rows.length"><td :colspan="canDelete ? 7 : 6" class="px-4 py-8 text-center text-slate-400">Belum ada data absen pada rentang ini.</td></tr>
             <tr v-for="a in rows" :key="a.id" class="border-t">
               <td class="px-4 py-2 text-slate-500">{{ a.date }}</td>
               <td class="px-4 py-2 text-slate-700 font-medium">{{ a.name }}</td>
@@ -88,6 +99,9 @@ onMounted(async () => { await loadVenues(); await load() })
                 <button v-if="a.has_out_photo" @click="openPhoto(a, 'out')" title="Lihat foto" class="ml-1">📷</button>
               </td>
               <td class="px-4 py-2 text-right text-slate-600">{{ a.work_hours != null ? a.work_hours + ' jam' : '—' }}</td>
+              <td v-if="canDelete" class="px-4 py-2 text-right">
+                <button @click="deleteRow(a)" :disabled="busy" class="text-red-500 hover:underline text-xs disabled:opacity-50">Hapus</button>
+              </td>
             </tr>
           </tbody>
         </table>

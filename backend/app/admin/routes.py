@@ -1381,6 +1381,36 @@ def attendance_photo(aid, which):
     return send_file(path, mimetype="image/jpeg")
 
 
+@admin_bp.delete("/attendance/<int:aid>")
+@jwt_required()
+@MANAGE_HR
+def attendance_delete(aid):
+    """Hapus baris absensi keliru (mis. salah venue/kembar) — hanya rekap,
+    tak ada efek kas/payroll yang perlu dibalik."""
+    import os
+
+    from flask import current_app
+
+    a = db.session.get(Attendance, aid)
+    if not a:
+        return _err("Absensi tidak ditemukan", "not_found", 404)
+    u = _current_user()
+    if u and u.role == ROLE_MANAGER and a.venue_id != u.venue_id:
+        return _err("Bukan absensi venue Anda", "forbidden", 403)
+    if u and u.role == "admin_unit":
+        vids = [v.id for v in Venue.query.filter_by(area_id=u.area_id).all()] if u.area_id else []
+        if a.venue_id not in vids:
+            return _err("Bukan absensi area Anda", "forbidden", 403)
+    for fn in (a.check_in_photo, a.check_out_photo):
+        if fn:
+            path = os.path.join(current_app.config["UPLOAD_FOLDER"], "attendance", fn)
+            if os.path.exists(path):
+                os.remove(path)
+    db.session.delete(a)
+    db.session.commit()
+    return jsonify(message="Absensi dihapus"), 200
+
+
 # ==================================================================
 # DASHBOARD
 # ==================================================================
