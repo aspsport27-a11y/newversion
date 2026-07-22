@@ -42,7 +42,7 @@ async function send() {
   <div class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click.self="emit('close')">
     <div class="bg-white w-full max-w-lg rounded-2xl flex flex-col" style="height: 80vh; max-height: 640px">
       <div class="flex justify-between items-center px-5 py-4 border-b">
-        <h3 class="text-lg font-bold text-slate-800">🤖 Ask AI</h3>
+        <h3 class="text-lg font-bold text-slate-800">✨ Ask AI</h3>
         <button @click="emit('close')" class="text-slate-400 text-xl">✕</button>
       </div>
 

@@ -187,7 +187,7 @@ function toggleGroup(label) {
             @click="showAskAi = true"
             class="text-sm text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-100 rounded-lg px-3 py-1.5 transition"
           >
-            🤖 Ask AI
+            ✨ Ask AI
           </button>
           <div class="text-right leading-tight">
             <p class="text-sm font-medium text-slate-700">{{ auth.user?.username }}</p>
