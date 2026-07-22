@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({ shift: Object })
 const emit = defineEmits(['close', 'submit'])
@@ -8,6 +8,19 @@ const countedCash = ref('')
 const deposit = ref('')
 const notes = ref('')
 const submitting = ref(false)
+
+// "Setoran" ikut nilai "Uang tunai dihitung" secara otomatis selama kasir
+// belum ubah manual — sebelumnya dibiarkan kosong (opsional) & kasir sering
+// tak sadar harus diisi, akibatnya kas yg sudah dihitung tak pernah muncul
+// di antrean "belum disetor" krn perhitungan itu berbasis kolom ini, bukan
+// uang tunai yg sungguhan dihitung
+const depositTouched = ref(false)
+watch(countedCash, (v) => {
+  if (!depositTouched.value) deposit.value = v
+})
+function onDepositInput() {
+  depositTouched.value = true
+}
 
 const expected = computed(() => {
   const s = props.shift
@@ -61,9 +74,10 @@ async function submit() {
         <span :class="variance === 0 ? 'text-emerald-600' : 'text-red-600'" class="font-semibold">{{ rupiah(variance) }}</span>
       </div>
 
-      <label class="block text-sm text-slate-600 mb-1">Setoran (opsional)</label>
-      <input v-model="deposit" type="number" inputmode="numeric" placeholder="0"
-        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-brand-500 mb-3" />
+      <label class="block text-sm text-slate-600 mb-1">Setoran ke HO</label>
+      <input v-model="deposit" type="number" inputmode="numeric" placeholder="0" @input="onDepositInput"
+        class="w-full rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-brand-500 mb-1" />
+      <p class="text-xs text-slate-400 mb-3">Otomatis ikut "Uang tunai dihitung" — ubah manual kalau ada yg ditahan (float shift berikutnya).</p>
 
       <textarea v-model="notes" placeholder="Catatan (opsional)" rows="2"
         class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-4"></textarea>

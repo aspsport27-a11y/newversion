@@ -12,6 +12,7 @@ from sqlalchemy import func
 
 from ..extensions import db
 from ..models import Employee, User, Venue
+from ..perms import has_perm
 from ..security import verify_password
 from ..stations.models import GameStation
 from .models import Attendance, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift
@@ -571,13 +572,17 @@ def order_pay(order_id):
 def order_cancel(order_id):
     from .models import Order
 
+    user = db.session.get(User, int(get_jwt_identity()))
+    if not user or not has_perm(user.role, "order.cancel"):
+        raise PosError("Kasir tidak punya izin membatalkan transaksi — hubungi manajer", "forbidden", 403)
+
     terminal = _current_terminal()
     order = db.session.get(Order, order_id)
     if order is None:
         raise PosError("Order tidak ditemukan", "not_found", 404)
     if order.venue_id != terminal.venue_id:
         raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
-    cancel_order(order)
+    cancel_order(order, uid=user.id)
     return jsonify(order=order.to_dict()), 200
 
 
