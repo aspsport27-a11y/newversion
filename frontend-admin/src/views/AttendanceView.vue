@@ -10,6 +10,7 @@ const busy = ref(false)
 
 const venues = ref([])
 const venueId = ref('')
+const nameFilter = ref('')
 const rows = ref([])
 const loading = ref(false)
 // default rentang: 7 hari terakhir
@@ -31,6 +32,14 @@ async function load() {
     rows.value = data.attendance
   } finally { loading.value = false }
 }
+
+// nama yang tersedia diambil dari data yang sudah dimuat — otomatis
+// mengikuti venue yang dipilih (rows sudah di-scope venue_id di load())
+const availableNames = computed(() => [...new Set(rows.value.map((r) => r.name))].sort())
+const filtered = computed(() => {
+  if (!nameFilter.value) return rows.value
+  return rows.value.filter((r) => r.name === nameFilter.value)
+})
 // lihat foto absen (endpoint butuh auth → ambil blob lalu tampilkan)
 const photoUrl = ref('')
 const photoTitle = ref('')
@@ -60,12 +69,32 @@ function shortAddr(full) {
 // ---- Paging ----
 const page = ref(1)
 const pageSize = ref(20)
-const totalPages = computed(() => Math.max(1, Math.ceil(rows.value.length / pageSize.value)))
+const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
 const paged = computed(() => {
   const start = (page.value - 1) * pageSize.value
-  return rows.value.slice(start, start + pageSize.value)
+  return filtered.value.slice(start, start + pageSize.value)
 })
-function applyFilter() { page.value = 1; load() }
+function applyFilter() { page.value = 1; nameFilter.value = ''; load() }
+function applyNameFilter() { page.value = 1 }
+
+// ---- Export Excel (CSV, langsung bisa dibuka Excel) ----
+function exportExcel() {
+  const header = ['Tanggal', 'Nama', 'Venue', 'Masuk', 'Lokasi Masuk', 'Pulang', 'Lokasi Pulang', 'Jam Kerja']
+  const body = filtered.value.map((a) => [
+    a.date, a.name, a.venue_code || '',
+    a.check_in || '', a.check_in_address || a.check_in_location || '',
+    a.check_out || '', a.check_out_address || a.check_out_location || '',
+    a.work_hours != null ? a.work_hours : '',
+  ])
+  const csv = [header, ...body]
+    .map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+    .join('\r\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const el = document.createElement('a')
+  el.href = url; el.download = `absensi-${from.value}_${to.value}.csv`; el.click()
+  URL.revokeObjectURL(url)
+}
 
 onMounted(async () => { await loadVenues(); await load() })
 </script>
@@ -85,7 +114,13 @@ onMounted(async () => { await loadVenues(); await load() })
           <option value="">Semua venue (cakupan saya)</option>
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select></div>
+      <div><label class="block text-xs text-slate-500 mb-1">Nama</label>
+        <select v-model="nameFilter" @change="applyNameFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="">Semua nama{{ !isManager && venueId ? ' (venue ini)' : '' }}</option>
+          <option v-for="n in availableNames" :key="n" :value="n">{{ n }}</option>
+        </select></div>
       <button @click="applyFilter" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
+      <button @click="exportExcel" :disabled="!filtered.length" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg px-5 py-2 font-medium disabled:opacity-40 ml-auto">📊 Excel</button>
     </div>
 
     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
@@ -104,6 +139,7 @@ onMounted(async () => { await loadVenues(); await load() })
           <tbody>
             <tr v-if="loading"><td :colspan="canDelete ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
             <tr v-else-if="!rows.length"><td :colspan="canDelete ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Belum ada data absen pada rentang ini.</td></tr>
+            <tr v-else-if="!filtered.length"><td :colspan="canDelete ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Tidak ada data untuk nama yang dipilih.</td></tr>
             <tr v-for="a in paged" :key="a.id" class="border-t">
               <td class="px-4 py-2 text-slate-500">{{ a.date }}</td>
               <td class="px-4 py-2 text-slate-700 font-medium">{{ a.name }}</td>
@@ -135,9 +171,9 @@ onMounted(async () => { await loadVenues(); await load() })
           </tbody>
         </table>
       </div>
-      <div v-if="rows.length" class="flex items-center justify-between gap-3 px-4 py-3 border-t flex-wrap">
+      <div v-if="filtered.length" class="flex items-center justify-between gap-3 px-4 py-3 border-t flex-wrap">
         <p class="text-xs text-slate-500">
-          Menampilkan {{ (page - 1) * pageSize + 1 }}–{{ Math.min(page * pageSize, rows.length) }} dari {{ rows.length }} data
+          Menampilkan {{ (page - 1) * pageSize + 1 }}–{{ Math.min(page * pageSize, filtered.length) }} dari {{ filtered.length }} data
         </p>
         <div class="flex items-center gap-2">
           <select v-model.number="pageSize" @change="page = 1" class="rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-brand-500">
