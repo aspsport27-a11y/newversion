@@ -2,6 +2,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import client from '../api/client'
 import Chart from 'chart.js/auto'
+import { parseUTC } from '../utils/datetime'
 
 const venues = ref([])
 const venueId = ref('')
@@ -150,7 +151,7 @@ onMounted(async () => { await loadVenues(); await run() })
               <tr v-if="!shifts.length"><td colspan="7" class="px-4 py-6 text-center text-slate-400">Tidak ada shift.</td></tr>
               <tr v-for="s in shifts" :key="s.id" class="border-t">
                 <td class="px-4 py-2 text-slate-700">{{ s.cashier || '—' }}</td>
-                <td class="px-4 py-2 text-slate-500">{{ s.opened_at ? new Date(s.opened_at).toLocaleString('id-ID') : '—' }}</td>
+                <td class="px-4 py-2 text-slate-500">{{ s.opened_at ? parseUTC(s.opened_at).toLocaleString('id-ID') : '—' }}</td>
                 <td class="px-4 py-2 text-right">{{ rupiah(s.total_cash_sales) }}</td>
                 <td class="px-4 py-2 text-right">{{ rupiah(s.total_qris_sales) }}</td>
                 <td class="px-4 py-2 text-right">{{ rupiah(s.expected_cash) }}</td>

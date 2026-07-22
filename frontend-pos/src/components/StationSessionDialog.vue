@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { usePosStore } from '../stores/pos'
+import { parseUTC } from '../utils/datetime'
 
 const props = defineProps({ station: Object })
 const emit = defineEmits(['close', 'stopped'])
@@ -13,7 +14,7 @@ onMounted(() => { timer = setInterval(() => (now.value = Date.now()), 1000) })
 onUnmounted(() => clearInterval(timer))
 
 const elapsedSeconds = computed(() => {
-  const started = new Date(session.value.started_at).getTime()
+  const started = parseUTC(session.value.started_at).getTime()
   return Math.max(0, Math.floor((now.value - started) / 1000))
 })
 const elapsedMinutes = computed(() => Math.floor(elapsedSeconds.value / 60))

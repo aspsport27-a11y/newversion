@@ -1,4 +1,6 @@
 <script setup>
+import { parseUTC } from '../utils/datetime'
+
 const props = defineProps({ order: Object, payment: Object, terminal: Object })
 const emit = defineEmits(['close'])
 
@@ -22,7 +24,7 @@ function print() {
         <div class="border-t border-dashed border-slate-300 my-2"></div>
         <div class="flex justify-between text-xs">
           <span>{{ order.order_number }}</span>
-          <span>{{ new Date(order.created_at).toLocaleString('id-ID') }}</span>
+          <span>{{ parseUTC(order.created_at).toLocaleString('id-ID') }}</span>
         </div>
         <div class="border-t border-dashed border-slate-300 my-2"></div>
         <div v-for="it in order.items" :key="it.id" class="mb-1">

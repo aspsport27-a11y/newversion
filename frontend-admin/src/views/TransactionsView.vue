@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { parseUTC } from '../utils/datetime'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
@@ -23,7 +24,7 @@ const detail = ref(null)
 const statusMap = { paid: ['Lunas', 'bg-emerald-100 text-emerald-700'], open: ['Belum Lunas', 'bg-amber-100 text-amber-700'], void: ['Dibatalkan', 'bg-red-100 text-red-600'] }
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
-function fmtTime(s) { return s ? new Date(s).toLocaleString('id-ID') : '—' }
+function fmtTime(s) { return s ? parseUTC(s).toLocaleString('id-ID') : '—' }
 
 async function loadVenues() {
   const { data } = await client.get('/venues')

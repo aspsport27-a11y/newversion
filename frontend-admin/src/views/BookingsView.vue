@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { parseUTC } from '../utils/datetime'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
@@ -261,7 +262,7 @@ onMounted(async () => { await loadVenues(); await run() })
             <span class="text-slate-600">
               {{ p.method.toUpperCase() }}
               <span :class="p.status === 'paid' ? 'text-emerald-600' : 'text-amber-600'" class="text-xs">({{ p.status === 'paid' ? 'lunas' : p.status }})</span>
-              <span v-if="p.paid_at" class="text-xs text-slate-400"> · {{ new Date(p.paid_at).toLocaleString('id-ID') }}</span>
+              <span v-if="p.paid_at" class="text-xs text-slate-400"> · {{ parseUTC(p.paid_at).toLocaleString('id-ID') }}</span>
             </span>
             <span class="font-medium">{{ rupiah(p.amount) }}</span>
           </div>
