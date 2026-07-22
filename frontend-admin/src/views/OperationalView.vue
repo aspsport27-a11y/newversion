@@ -25,13 +25,12 @@ const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], appr
 const accounts = ref([])
 const sourceAccount = ref('')
 async function loadBase() {
-  const [v, c] = await Promise.all([client.get('/venues'), client.get('/ops/categories')])
+  const [v] = await Promise.all([client.get('/venues')])
   venues.value = v.data.venues
   // admin_unit hanya boleh ajukan utk venue di areanya
   if (isAdminUnit.value) {
     venues.value = venues.value.filter((x) => x.area_id === auth.user?.area_id)
   }
-  categories.value = c.data.categories
   // default: "Semua venue" (venueId tetap '') agar semua pengajuan tampil
   if (isApprover.value) {
     try {
@@ -40,6 +39,16 @@ async function loadBase() {
       sourceAccount.value = data.accounts.find((a) => a.type === 'holding')?.id || data.accounts[0]?.id || ''
     } catch (_) { /* treasury belum disetup */ }
   }
+}
+
+// kategori utk form pengajuan — di-scope venue (global + khusus venue itu)
+async function loadCategoriesForVenue(vid) {
+  const { data } = await client.get('/ops/categories', { params: vid ? { venue_id: vid } : {} })
+  categories.value = data.categories
+}
+async function onModalVenueChange() {
+  await loadCategoriesForVenue(cForm.value.venue_id)
+  for (const it of cForm.value.items) it.category_id = categories.value[0]?.id
 }
 
 // ---------- Pengajuan ----------
@@ -62,9 +71,13 @@ const cFiles = ref([])
 const cErr = ref('')
 const saving = ref(false)
 const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.amount) || 0), 0))
-function openCreate() {
-  cForm.value = { venue_id: venueId.value || venues.value[0]?.id, description: '', items: [{ category_id: categories.value[0]?.id, amount: null, note: '' }] }
-  cFiles.value = []; cErr.value = ''; showCreate.value = true
+async function openCreate() {
+  const vid = isManager.value ? auth.user?.venue_id : (venueId.value || venues.value[0]?.id)
+  cForm.value = { venue_id: vid, description: '', items: [{ category_id: null, amount: null, note: '' }] }
+  cFiles.value = []; cErr.value = ''
+  await loadCategoriesForVenue(vid)
+  cForm.value.items[0].category_id = categories.value[0]?.id
+  showCreate.value = true
 }
 function addRow() { cForm.value.items.push({ category_id: categories.value[0]?.id, amount: null, note: '' }) }
 function rmRow(i) { cForm.value.items.splice(i, 1) }
@@ -152,6 +165,7 @@ async function saveBudget() {
 // --- Kelola Kategori Beban (admin/HO) ---
 const catsAll = ref([])
 const newCatName = ref('')
+const newCatVenueId = ref('')
 const savingCat = ref(false)
 async function loadCats() {
   const { data } = await client.get('/ops/categories', { params: { all: 1 } })
@@ -161,15 +175,20 @@ async function addCat() {
   if (!newCatName.value.trim()) return
   savingCat.value = true
   try {
-    await client.post('/ops/categories', { name: newCatName.value.trim() })
-    newCatName.value = ''
-    await loadCats(); await loadBase(); flash('Kategori ditambah')
+    await client.post('/ops/categories', { name: newCatName.value.trim(), venue_id: newCatVenueId.value || null })
+    newCatName.value = ''; newCatVenueId.value = ''
+    await loadCats(); flash('Kategori ditambah')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { savingCat.value = false }
+}
+async function setCatVenue(c, vidRaw) {
+  const vid = vidRaw ? Number(vidRaw) : null
+  try { await client.put(`/ops/categories/${c.id}`, { venue_id: vid }); await loadCats(); flash('Disimpan') }
+  catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
 }
 async function renameCat(c) {
   const nm = prompt('Nama kategori:', c.name)
   if (!nm || nm.trim() === c.name) return
-  try { await client.put(`/ops/categories/${c.id}`, { name: nm.trim() }); await loadCats(); await loadBase(); flash('Disimpan') }
+  try { await client.put(`/ops/categories/${c.id}`, { name: nm.trim() }); await loadCats(); flash('Disimpan') }
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
 }
 async function toggleCat(c) {
@@ -213,25 +232,37 @@ watch(statusFilter, loadRequests)
 
     <!-- Tab Kategori Beban -->
     <div v-if="tab === 'categories'">
-      <p class="text-slate-500 text-sm mb-3">Kategori rincian yang muncul saat mengajukan dana. Nonaktifkan untuk menyembunyikan dari form (tidak menghapus riwayat).</p>
-      <div class="bg-white rounded-xl shadow-sm border p-4 mb-4 flex gap-2 max-w-lg">
-        <input v-model="newCatName" placeholder="Nama kategori baru (mis. Ops Kebersihan)" @keyup.enter="addCat" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+      <p class="text-slate-500 text-sm mb-3">Kategori rincian yang muncul saat mengajukan dana. "Global" berarti dipakai semua venue; pilih venue tertentu supaya kategori itu cuma muncul di venue tersebut. Nonaktifkan untuk menyembunyikan dari form (tidak menghapus riwayat).</p>
+      <div class="bg-white rounded-xl shadow-sm border p-4 mb-4 flex flex-wrap gap-2 max-w-2xl">
+        <input v-model="newCatName" placeholder="Nama kategori baru (mis. Ops Kebersihan)" @keyup.enter="addCat" class="flex-1 min-w-[200px] rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        <select v-model="newCatVenueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="">Global (semua venue)</option>
+          <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+        </select>
         <button @click="addCat" :disabled="savingCat" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">+ Tambah</button>
       </div>
-      <div class="bg-white rounded-xl shadow-sm border overflow-hidden max-w-lg">
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden max-w-2xl">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-            <th class="px-4 py-2 font-medium">Kategori</th><th class="px-4 py-2 font-medium text-center">Status</th><th class="px-4 py-2"></th>
+            <th class="px-4 py-2 font-medium">Kategori</th>
+            <th class="px-4 py-2 font-medium">Venue</th>
+            <th class="px-4 py-2 font-medium text-center">Status</th><th class="px-4 py-2"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="!catsAll.length"><td colspan="3" class="px-4 py-6 text-center text-slate-400">Belum ada kategori.</td></tr>
+            <tr v-if="!catsAll.length"><td colspan="4" class="px-4 py-6 text-center text-slate-400">Belum ada kategori.</td></tr>
             <tr v-for="c in catsAll" :key="c.id" class="border-t">
               <td class="px-4 py-2 text-slate-700" :class="{ 'text-slate-400 line-through': !c.is_active }">{{ c.name }}</td>
+              <td class="px-4 py-2">
+                <select :value="c.venue_id || ''" @change="setCatVenue(c, $event.target.value)" class="text-xs rounded-lg border border-slate-300 px-2 py-1 outline-none focus:border-brand-500">
+                  <option value="">Global</option>
+                  <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }}</option>
+                </select>
+              </td>
               <td class="px-4 py-2 text-center">
                 <span class="text-xs px-2 py-0.5 rounded-full" :class="c.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ c.is_active ? 'Aktif' : 'Nonaktif' }}</span>
               </td>
               <td class="px-4 py-2 text-right whitespace-nowrap">
-                <button @click="renameCat(c)" class="text-brand-600 text-xs hover:underline mr-3">Ubah</button>
+                <button @click="renameCat(c)" class="text-brand-600 text-xs hover:underline mr-3">Ubah Nama</button>
                 <button @click="toggleCat(c)" class="text-xs hover:underline" :class="c.is_active ? 'text-red-500' : 'text-emerald-600'">{{ c.is_active ? 'Nonaktifkan' : 'Aktifkan' }}</button>
               </td>
             </tr>
@@ -325,7 +356,7 @@ watch(statusFilter, loadRequests)
         <p class="text-xs text-slate-400 mb-3">Periode {{ period }}</p>
         <div v-if="!isManager" class="mb-3">
           <label class="block text-xs text-slate-500 mb-1">Venue</label>
-          <select v-model="cForm.venue_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <select v-model="cForm.venue_id" @change="onModalVenueChange" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
             <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
           </select>
         </div>

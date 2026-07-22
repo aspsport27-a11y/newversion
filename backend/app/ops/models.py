@@ -8,13 +8,18 @@ class ExpenseCategory(db.Model):
     __tablename__ = "expense_categories"
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(60), unique=True, nullable=False)
+    name = db.Column(db.String(60), nullable=False)
+    # NULL = global (dipakai semua venue); terisi = cuma muncul di venue itu
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"))
     is_active = db.Column(db.Boolean, default=True)
     sort_order = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "is_active": self.is_active, "sort_order": self.sort_order}
+        return {
+            "id": self.id, "name": self.name, "venue_id": self.venue_id,
+            "is_active": self.is_active, "sort_order": self.sort_order,
+        }
 
 
 class Budget(db.Model):

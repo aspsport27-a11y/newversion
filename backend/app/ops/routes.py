@@ -84,9 +84,15 @@ def _D(v):
 @jwt_required()
 @VIEW
 def categories_list():
+    """venue_id opsional: kalau diisi, tampilkan kategori global + kategori
+    khusus venue itu saja (dipakai form pengajuan). Tanpa venue_id (mis.
+    ?all=1 di tab Kelola Kategori), tampilkan semua kategori apa adanya."""
     q = ExpenseCategory.query
     if not request.args.get("all"):
         q = q.filter_by(is_active=True)
+    vid = request.args.get("venue_id", type=int)
+    if vid:
+        q = q.filter(db.or_(ExpenseCategory.venue_id.is_(None), ExpenseCategory.venue_id == vid))
     cats = q.order_by(ExpenseCategory.sort_order, ExpenseCategory.name).all()
     return jsonify(categories=[c.to_dict() for c in cats]), 200
 
@@ -99,9 +105,12 @@ def categories_create():
     name = (d.get("name") or "").strip()
     if not name:
         return _err("Nama kategori wajib")
-    if ExpenseCategory.query.filter_by(name=name).first():
+    venue_id = d.get("venue_id") or None
+    if venue_id and not db.session.get(Venue, int(venue_id)):
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    if ExpenseCategory.query.filter_by(name=name, venue_id=venue_id).first():
         return _err("Kategori sudah ada", "duplicate", 409)
-    c = ExpenseCategory(name=name, sort_order=int(d.get("sort_order", 99)))
+    c = ExpenseCategory(name=name, venue_id=venue_id, sort_order=int(d.get("sort_order", 99)))
     db.session.add(c)
     db.session.commit()
     return jsonify(category=c.to_dict()), 201
@@ -115,12 +124,21 @@ def categories_update(cid):
     if not c:
         return _err("Kategori tidak ditemukan", "not_found", 404)
     d = request.get_json(silent=True) or {}
+    new_venue_id = c.venue_id
+    if "venue_id" in d:
+        new_venue_id = d.get("venue_id") or None
+        if new_venue_id and not db.session.get(Venue, int(new_venue_id)):
+            return _err("Venue tidak ditemukan", "not_found", 404)
     if "name" in d and d["name"].strip():
         nm = d["name"].strip()
-        dup = ExpenseCategory.query.filter(ExpenseCategory.name == nm, ExpenseCategory.id != cid).first()
+        dup = ExpenseCategory.query.filter(
+            ExpenseCategory.name == nm, ExpenseCategory.venue_id == new_venue_id,
+            ExpenseCategory.id != cid,
+        ).first()
         if dup:
             return _err("Kategori sudah ada", "duplicate", 409)
         c.name = nm
+    c.venue_id = new_venue_id
     if "is_active" in d:
         c.is_active = bool(d["is_active"])
     if "sort_order" in d:
@@ -165,7 +183,11 @@ def budgets_list():
         for b in Budget.query.filter_by(venue_id=vid, year=year, month=month).all()
     }
     used = _used_by_category(vid, year, month)
-    cats = ExpenseCategory.query.filter_by(is_active=True).order_by(ExpenseCategory.sort_order).all()
+    cats = (
+        ExpenseCategory.query.filter_by(is_active=True)
+        .filter(db.or_(ExpenseCategory.venue_id.is_(None), ExpenseCategory.venue_id == vid))
+        .order_by(ExpenseCategory.sort_order).all()
+    )
     rows = []
     for c in cats:
         p = plafon.get(c.id, 0.0)
@@ -295,6 +317,9 @@ def request_create():
         amt = _D(it.get("amount"))
         if not it.get("category_id") or amt <= 0:
             return _err("Rincian tidak valid (kategori & jumlah > 0)")
+        cat = db.session.get(ExpenseCategory, it["category_id"])
+        if not cat or (cat.venue_id and cat.venue_id != vid):
+            return _err("Kategori tidak berlaku untuk venue ini", "bad_category", 400)
         total += amt
         r.items.append(OpRequestItem(category_id=it["category_id"], amount=amt, note=it.get("note")))
     r.total_amount = total
