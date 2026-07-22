@@ -139,34 +139,28 @@ onMounted(async () => {
       <div v-if="!summary.sales_growth_mom.venues.length" class="text-sm text-slate-400 text-center py-4">
         Belum ada data venue untuk ditampilkan.
       </div>
-      <div v-else class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="text-left text-slate-400 border-b">
-              <th class="pb-2 font-medium">Venue</th>
-              <th v-if="growthView === 'rupiah'" class="pb-2 font-medium text-right">Bulan Ini</th>
-              <th v-if="growthView === 'rupiah'" class="pb-2 font-medium text-right">Bulan Lalu</th>
-              <th class="pb-2 font-medium text-right">Growth</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="v in summary.sales_growth_mom.venues" :key="v.venue_id" class="border-b last:border-0">
-              <td class="py-2.5 text-slate-700">
-                {{ v.venue_name }}
-                <span class="text-[11px] text-slate-400 ml-1">{{ v.venue_type }}</span>
-              </td>
-              <td v-if="growthView === 'rupiah'" class="py-2.5 text-right text-slate-700">{{ rupiah(v.this_month) }}</td>
-              <td v-if="growthView === 'rupiah'" class="py-2.5 text-right text-slate-500">{{ rupiah(v.last_month) }}</td>
-              <td class="py-2.5 text-right font-semibold">
-                <span v-if="v.is_new" class="text-emerald-600">Baru</span>
-                <span v-else-if="v.growth_pct === null" class="text-slate-400">–</span>
-                <span v-else :class="v.growth_pct >= 0 ? 'text-emerald-600' : 'text-red-600'">
-                  {{ v.growth_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(v.growth_pct) }}%
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div v-else class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div
+          v-for="v in summary.sales_growth_mom.venues"
+          :key="v.venue_id"
+          class="border rounded-lg p-3.5"
+        >
+          <p class="font-medium text-slate-700 text-sm truncate">{{ v.venue_name }}</p>
+          <p class="text-[11px] text-slate-400 mb-2">{{ v.venue_type }}</p>
+
+          <template v-if="growthView === 'rupiah'">
+            <p class="text-base font-bold text-slate-800">{{ rupiah(v.this_month) }}</p>
+            <p class="text-[11px] text-slate-400 mb-1.5">Bulan lalu: {{ rupiah(v.last_month) }}</p>
+          </template>
+
+          <div class="text-sm font-semibold">
+            <span v-if="v.is_new" class="text-emerald-600">🆕 Baru</span>
+            <span v-else-if="v.growth_pct === null" class="text-slate-400">–</span>
+            <span v-else :class="v.growth_pct >= 0 ? 'text-emerald-600' : 'text-red-600'">
+              {{ v.growth_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(v.growth_pct) }}%
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
