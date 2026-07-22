@@ -71,7 +71,7 @@ def pos_login():
     user = User.query.filter_by(username=username, active=True).first()
     if user is None or not user.pin_hash or not verify_password(pin, user.pin_hash):
         return jsonify(error="unauthorized", message="Username atau PIN salah"), 401
-    if user.role not in ("staff", "admin_unit"):
+    if user.role not in ("staff", "manager_unit"):
         return jsonify(
             error="forbidden",
             message="Akun ini tidak diizinkan login ke POS. Gunakan menu Absen untuk absensi.",

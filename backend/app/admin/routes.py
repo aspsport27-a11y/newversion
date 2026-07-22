@@ -838,7 +838,7 @@ def employee_account_create(eid):
     role = d.get("role", "staff")
     if not username:
         return _err("username wajib diisi")
-    if role not in ("staff", "manager_unit", "admin_unit", "head_office", "admin"):
+    if role not in ("staff", "staff_other", "manager_unit", "admin_unit", "head_office", "admin"):
         return _err("role tidak valid")
     # admin_unit = scope area → wajib pilih area
     area_id = None
@@ -854,9 +854,9 @@ def employee_account_create(eid):
     u = User(username=username, email=email, role=role, active=True,
              venue_id=e.venue_id, area_id=area_id, employee_id=e.id)
     pin, pw = d.get("pin"), d.get("password")
-    if role == "staff":
+    if role in ("staff", "staff_other"):
         if not pin or len(str(pin)) < 4:
-            return _err("PIN minimal 4 digit untuk kasir")
+            return _err("PIN minimal 4 digit")
         u.pin_hash = hash_password(str(pin))
         u.set_password(str(pin))
     else:
@@ -885,7 +885,7 @@ def employee_account_reset(eid):
     if not u:
         return _err("Karyawan belum punya akun", "no_account", 404)
     d = request.get_json(silent=True) or {}
-    if u.role == "staff":
+    if u.role in ("staff", "staff_other"):
         pin = str(d.get("pin") or "")
         if len(pin) < 4:
             return _err("PIN minimal 4 digit")
@@ -893,11 +893,23 @@ def employee_account_reset(eid):
         u.set_password(pin)
         msg = "PIN diperbarui"
     else:
-        pw = str(d.get("password") or "")
-        if len(pw) < 8:
-            return _err("Password minimal 8 karakter")
-        u.set_password(pw)
-        msg = "Password diperbarui"
+        # password & PIN independen — bisa isi salah satu atau dua-duanya
+        # (mis. Manager yang juga perlu PIN POS, tanpa wajib ganti password)
+        pw, pin = d.get("password"), d.get("pin")
+        if not pw and not pin:
+            return _err("Isi password atau PIN baru")
+        msgs = []
+        if pw:
+            if len(str(pw)) < 8:
+                return _err("Password minimal 8 karakter")
+            u.set_password(str(pw))
+            msgs.append("Password diperbarui")
+        if pin:
+            if len(str(pin)) < 4:
+                return _err("PIN minimal 4 digit")
+            u.pin_hash = hash_password(str(pin))
+            msgs.append("PIN diperbarui")
+        msg = " & ".join(msgs)
     db.session.commit()
     return jsonify(message=msg, account={"username": u.username, "role": u.role}), 200
 

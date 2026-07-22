@@ -10,8 +10,9 @@ ROLE_ADMIN = "admin"
 ROLE_HEAD_OFFICE = "head_office"
 ROLE_MANAGER = "manager_unit"
 ROLE_ADMIN_UNIT = "admin_unit"  # koordinator area, junior — hanya entry pengajuan dana
-ROLE_STAFF = "staff"
-VALID_ROLES = {ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT, ROLE_STAFF}
+ROLE_STAFF = "staff"  # kasir — satu-satunya yang boleh login POS selain manager_unit
+ROLE_STAFF_OTHER = "staff_other"  # Ass. Manager/SPV & Staff (PIN) — absen saja, tak boleh login POS
+VALID_ROLES = {ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT, ROLE_STAFF, ROLE_STAFF_OTHER}
 
 
 def hash_password(password: str) -> str:

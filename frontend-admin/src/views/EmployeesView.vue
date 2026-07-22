@@ -118,9 +118,22 @@ async function disconnectAccount() {
     await reloadDetail(); await load(); flash(data.message || 'Akun diputuskan')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
+function isPinRole(role) { return role === 'staff' || role === 'staff_other' }
+
 const resetCred = ref('')
-async function resetAccount() {
-  const isStaff = detail.value?.account?.role === 'staff'
+const resetPin = ref('')
+async function resetAccount(pinOnly) {
+  const role = detail.value?.account?.role
+  const isStaff = isPinRole(role)
+  if (pinOnly) {
+    if (resetPin.value.length < 4) { alert('PIN minimal 4 digit'); return }
+    busy.value = true
+    try {
+      const { data } = await client.post(`/admin/employees/${detail.value.id}/account/reset`, { pin: resetPin.value })
+      resetPin.value = ''; flash(data.message || 'PIN diperbarui')
+    } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+    return
+  }
   if (isStaff ? resetCred.value.length < 4 : resetCred.value.length < 8) {
     alert(isStaff ? 'PIN minimal 4 digit' : 'Password minimal 8 karakter'); return
   }
@@ -277,12 +290,16 @@ async function resetAccount() {
           <div v-if="detail.account" class="space-y-2">
             <p class="text-sm text-emerald-700">✓ {{ detail.account.username }} ({{ detail.account.role }})</p>
             <div class="flex gap-2">
-              <input v-model="resetCred" :type="detail.account.role === 'staff' ? 'text' : 'text'"
-                :placeholder="detail.account.role === 'staff' ? 'PIN baru (min 4)' : 'Password baru (min 8)'"
+              <input v-model="resetCred" type="text"
+                :placeholder="isPinRole(detail.account.role) ? 'PIN baru (min 4)' : 'Password baru (min 8)'"
                 class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
-              <button @click="resetAccount" :disabled="busy" class="rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm px-3 py-1.5 font-medium disabled:opacity-50">
-                {{ detail.account.role === 'staff' ? 'Reset PIN' : 'Ganti Password' }}
+              <button @click="resetAccount()" :disabled="busy" class="rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm px-3 py-1.5 font-medium disabled:opacity-50">
+                {{ isPinRole(detail.account.role) ? 'Reset PIN' : 'Ganti Password' }}
               </button>
+            </div>
+            <div v-if="detail.account.role === 'manager_unit'" class="flex gap-2">
+              <input v-model="resetPin" placeholder="PIN POS (opsional, min 4 digit)" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+              <button @click="resetAccount(true)" :disabled="busy || !resetPin" class="rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm px-3 py-1.5 font-medium disabled:opacity-50">Set PIN POS</button>
             </div>
             <button @click="disconnectAccount" :disabled="busy" class="text-xs text-red-500 hover:text-red-700">Putuskan akun (agar karyawan bisa dihapus)</button>
           </div>
@@ -291,8 +308,8 @@ async function resetAccount() {
               <input v-model="acctForm.username" placeholder="username" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
               <select v-model="acctForm.role" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none">
                 <option value="staff">Kasir (PIN)</option>
-                <option value="staff">Ass. Manager/SPV (PIN)</option>
-                <option value="staff">Staff (PIN)</option>
+                <option value="staff_other">Ass. Manager/SPV (PIN)</option>
+                <option value="staff_other">Staff (PIN)</option>
                 <option value="manager_unit">Manager</option>
                 <option v-if="!isManager" value="admin_unit">Admin Unit (area)</option>
                 <option v-if="!isManager" value="head_office">Head Office</option>
@@ -302,8 +319,9 @@ async function resetAccount() {
               <option value="">— pilih area —</option>
               <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.code }} — {{ a.name }} ({{ a.venue_count }} venue)</option>
             </select>
-            <input v-if="acctForm.role === 'staff'" v-model="acctForm.pin" placeholder="PIN (min 4 digit)" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+            <input v-if="isPinRole(acctForm.role)" v-model="acctForm.pin" placeholder="PIN (min 4 digit)" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
             <input v-else v-model="acctForm.password" type="text" placeholder="Password (min 8 karakter)" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+            <input v-if="acctForm.role === 'manager_unit'" v-model="acctForm.pin" placeholder="PIN POS (opsional, agar bisa login POS)" class="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
             <button @click="createAccount" :disabled="busy" class="w-full py-2 rounded-lg bg-brand-600 text-white text-sm font-medium disabled:opacity-50">Buatkan Akun</button>
           </div>
         </div>

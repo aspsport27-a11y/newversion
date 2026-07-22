@@ -49,7 +49,8 @@ EDITABLE_ROLES = [
     ("head_office", "Head Office"),
     ("manager_unit", "Manager Unit"),
     ("admin_unit", "Admin Unit (Area)"),
-    ("staff", "Staff / Kasir"),
+    ("staff", "Kasir"),
+    ("staff_other", "Ass. Manager/SPV / Staff"),
 ]
 
 # Default grant (dipakai saat seed ulang bila perlu; SQL migration 014 sudah seed)
@@ -62,6 +63,7 @@ DEFAULT_GRANTS = {
     },
     "admin_unit": {"ops.view", "ops.create", "product.manage", "facility.manage", "promo.manage"},
     "staff": set(),
+    "staff_other": set(),
 }
 
 
