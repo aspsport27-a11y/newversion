@@ -78,13 +78,16 @@ async function doTransfer() {
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
 
-// setoran (unit -> Kas Fisik HO)
+// setoran (unit -> Kas Fisik HO, atau venue tertentu -> rekening pilihan)
 const setoranPending = ref({ expected_amount: 0, count: 0 })
 const counted = ref(null)
 const setoranList = ref([])
+const setoranVenueId = ref('') // '' = semua venue (gabung ke pool)
+const setoranToAccount = ref('') // '' = default pool Kas Fisik HO
 async function loadSetoran() {
+  if (!setoranVenueId.value) setoranToAccount.value = ''
   const [p, l] = await Promise.all([
-    client.get('/treasury/setoran/pending'),
+    client.get('/treasury/setoran/pending', { params: setoranVenueId.value ? { venue_id: setoranVenueId.value } : {} }),
     client.get('/treasury/setoran', { params: { from: periodFrom.value, to: periodTo.value } }),
   ])
   setoranPending.value = p.data; counted.value = p.data.expected_amount; setoranList.value = l.data.deposits
@@ -92,8 +95,14 @@ async function loadSetoran() {
 }
 async function doSetoran() {
   busy.value = true
-  try { await client.post('/treasury/setoran', { counted_amount: counted.value }); await loadSetoran(); await loadAccounts(); flash('Kas masuk ke pool Kas Fisik HO') }
-  catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+  try {
+    const payload = { counted_amount: counted.value }
+    if (setoranVenueId.value) payload.venue_id = setoranVenueId.value
+    if (setoranToAccount.value) payload.to_account_id = setoranToAccount.value
+    await client.post('/treasury/setoran', payload)
+    await loadSetoran(); await loadAccounts()
+    flash(setoranToAccount.value ? 'Setoran tercatat' : 'Kas masuk ke pool Kas Fisik HO')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
 
 // setoran final (Kas Fisik HO -> rekening Holding)
@@ -244,14 +253,26 @@ function switchTab(t) {
     <!-- Setoran -->
     <div v-else-if="tab === 'setoran'">
       <div class="bg-white rounded-xl shadow-sm border p-5 mb-4">
-        <p class="text-sm font-semibold text-slate-700 mb-2">1. Kas Unit → Kas Fisik HO</p>
+        <p class="text-sm font-semibold text-slate-700 mb-2">1. Kas Unit → Kas Fisik HO (atau setor terpisah per venue)</p>
+        <div class="flex flex-wrap items-end gap-2 mb-3">
+          <div><label class="block text-xs text-slate-500 mb-1">Venue</label>
+            <select v-model="setoranVenueId" @change="loadSetoran" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+              <option value="">Semua venue (gabung ke pool)</option>
+              <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+            </select></div>
+          <div v-if="setoranVenueId"><label class="block text-xs text-slate-500 mb-1">Setor ke</label>
+            <select v-model="setoranToAccount" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+              <option value="">Pool Kas Fisik HO (default)</option>
+              <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+            </select></div>
+        </div>
         <p class="text-sm text-slate-500 mb-1">Cash belum disetor ({{ setoranPending.count }} shift)</p>
         <p class="text-2xl font-bold text-slate-800 mb-3">{{ rupiah(setoranPending.expected_amount) }}</p>
         <div v-if="setoranPending.count" class="flex items-end gap-2">
           <div><label class="block text-xs text-slate-500 mb-1">Hitungan fisik (HO)</label>
             <input v-model.number="counted" type="number" class="rounded-lg border border-slate-300 px-3 py-2 text-sm text-right outline-none focus:border-brand-500" /></div>
           <span class="text-sm mb-2" :class="(counted - setoranPending.expected_amount) === 0 ? 'text-emerald-600' : 'text-red-600'">Selisih: {{ rupiah((counted || 0) - setoranPending.expected_amount) }}</span>
-          <button @click="doSetoran" :disabled="busy" class="ml-auto bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Terima ke Kas Fisik HO</button>
+          <button @click="doSetoran" :disabled="busy" class="ml-auto bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">{{ setoranToAccount ? 'Setor' : 'Terima ke Kas Fisik HO' }}</button>
         </div>
         <p v-else class="text-sm text-emerald-600">Semua sudah diterima 🎉</p>
       </div>

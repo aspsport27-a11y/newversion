@@ -238,7 +238,13 @@ def reconciliations_delete(rid):
 @jwt_required()
 @MANAGE
 def setoran_pending():
-    shifts = Shift.query.filter(Shift.status == "closed", Shift.deposit_id.is_(None)).all()
+    """venue_id opsional — biar admin bisa proses venue yang setor langsung
+    ke bank (mis. bypass pool Kas Fisik HO) terpisah dari sweep gabungan."""
+    vid = request.args.get("venue_id", type=int)
+    q = Shift.query.filter(Shift.status == "closed", Shift.deposit_id.is_(None))
+    if vid:
+        q = q.filter(Shift.venue_id == vid)
+    shifts = q.all()
     expected = sum(float(s.deposit_amount or 0) for s in shifts)
     rows = [{
         "id": s.id, "venue_id": s.venue_id,
@@ -255,14 +261,19 @@ def setoran_create():
     """Kas dari shift yang ditutup unit-unit dikumpulkan HO, dihitung fisik,
     lalu dicatat masuk ke pool "Kas Fisik HO" (bukan langsung ke holding) —
     supaya bisa dipakai opex dulu sebelum disetor final via /setoran-holding.
-    to_account_id masih bisa dioverride manual (mis. venue yang setor
-    langsung ke bank sendiri, tanpa lewat pool HO)."""
+    venue_id opsional: kalau diisi, cuma shift venue itu yang disapu (utk
+    venue yang setor langsung ke bank/holding, dipisah dari sweep gabungan).
+    to_account_id juga bisa dioverride manual (mis. langsung ke holding)."""
     d = request.get_json(silent=True) or {}
     pool = cash_ho_account()
     to_acc = d.get("to_account_id") or (pool.id if pool else None)
     if not to_acc:
         return _err("Pool Kas Fisik HO belum dibuat", "no_cash_ho", 409)
-    shifts = Shift.query.filter(Shift.status == "closed", Shift.deposit_id.is_(None)).all()
+    vid = d.get("venue_id")
+    q = Shift.query.filter(Shift.status == "closed", Shift.deposit_id.is_(None))
+    if vid:
+        q = q.filter(Shift.venue_id == vid)
+    shifts = q.all()
     if not shifts:
         return _err("Tidak ada shift yang perlu disetor")
     expected = round(sum(float(s.deposit_amount or 0) for s in shifts), 2)
