@@ -1384,21 +1384,9 @@ def attendance_photo(aid, which):
 # ==================================================================
 # DASHBOARD
 # ==================================================================
-# Grouping kategori venue utk Sales Growth MoM (venue.type -> label grup)
-VENUE_GROUP_MAP = {
-    "Waterpark": "Waterpark",
-    "Mini Soccer": "Mini Soccer / Lapangan Bola / Futsal",
-    "Lapangan Bola": "Mini Soccer / Lapangan Bola / Futsal",
-    "Futsal": "Mini Soccer / Lapangan Bola / Futsal",
-    "Padel": "Padel",
-    "esport": "W Arena",
-}
-VENUE_GROUP_ORDER = [
-    "Waterpark",
-    "Mini Soccer / Lapangan Bola / Futsal",
-    "Padel",
-    "W Arena",
-]
+# Tipe venue yang dianggap venue bisnis (utk Sales Growth MoM); Manajemen &
+# Premium Sport sengaja tidak dimasukkan.
+TRACKED_VENUE_TYPES = {"Waterpark", "Mini Soccer", "Lapangan Bola", "Futsal", "Padel", "esport"}
 
 
 def _sales_growth_mom(vids):
@@ -1409,11 +1397,10 @@ def _sales_growth_mom(vids):
     days_in_last_month = calendar.monthrange(last_month_start.year, last_month_start.month)[1]
     last_month_compare_end = last_month_start.replace(day=min(today.day, days_in_last_month))
 
-    venues_q = Venue.query
+    venues_q = Venue.query.filter(Venue.type.in_(TRACKED_VENUE_TYPES))
     if vids is not None:
         venues_q = venues_q.filter(Venue.id.in_(vids)) if vids else venues_q.filter(db.false())
-    # tipe venue di luar VENUE_GROUP_MAP (Manajemen, Premium Sport) sengaja tidak ditampilkan
-    group_of = {v.id: VENUE_GROUP_MAP[v.type] for v in venues_q.all() if v.type in VENUE_GROUP_MAP}
+    venues = venues_q.order_by(Venue.type, Venue.name).all()
 
     def _revenue_by_venue(d_from, d_to):
         rows = (
@@ -1428,27 +1415,22 @@ def _sales_growth_mom(vids):
     this_rev = _revenue_by_venue(this_month_start, today)
     last_rev = _revenue_by_venue(last_month_start, last_month_compare_end)
 
-    groups = {}
-    for vid, g in group_of.items():
-        entry = groups.setdefault(g, {"this_month": 0.0, "last_month": 0.0})
-        entry["this_month"] += this_rev.get(vid, 0.0)
-        entry["last_month"] += last_rev.get(vid, 0.0)
-
     result = []
-    for g in VENUE_GROUP_ORDER:
-        if g not in groups:
-            continue
-        d = groups[g]
+    for v in venues:
+        this_m = this_rev.get(v.id, 0.0)
+        last_m = last_rev.get(v.id, 0.0)
         growth_pct = None
         is_new = False
-        if d["last_month"] > 0:
-            growth_pct = round((d["this_month"] - d["last_month"]) / d["last_month"] * 100, 1)
-        elif d["this_month"] > 0:
+        if last_m > 0:
+            growth_pct = round((this_m - last_m) / last_m * 100, 1)
+        elif this_m > 0:
             is_new = True
         result.append({
-            "group": g,
-            "this_month": round(d["this_month"], 2),
-            "last_month": round(d["last_month"], 2),
+            "venue_id": v.id,
+            "venue_name": v.name,
+            "venue_type": v.type,
+            "this_month": round(this_m, 2),
+            "last_month": round(last_m, 2),
             "growth_pct": growth_pct,
             "is_new": is_new,
         })
@@ -1456,7 +1438,7 @@ def _sales_growth_mom(vids):
     return {
         "this_month_range": {"from": this_month_start.isoformat(), "to": today.isoformat()},
         "last_month_range": {"from": last_month_start.isoformat(), "to": last_month_compare_end.isoformat()},
-        "groups": result,
+        "venues": result,
     }
 
 
