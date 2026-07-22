@@ -142,6 +142,11 @@ class Facility(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime)
 
+    rate_rules = db.relationship(
+        "FacilityRateRule", backref="facility", lazy="selectin",
+        order_by="FacilityRateRule.start_time", cascade="all, delete-orphan",
+    )
+
     def to_dict(self):
         hm = lambda t: t.strftime("%H:%M") if t else None
         return {
@@ -154,7 +159,61 @@ class Facility(db.Model):
             "close_time": hm(self.close_time),
             "slot_minutes": self.slot_minutes,
             "is_active": self.is_active,
+            "rate_rules": [r.to_dict() for r in self.rate_rules],
         }
+
+
+class FacilityRateRule(db.Model):
+    """Tarif khusus per rentang jam utk 1 facility (mis. malam lebih mahal
+    dari siang). Jam booking yg tak match rule manapun pakai
+    Facility.hourly_rate (tarif dasar) sbg fallback — lihat facility_rate_for_hour."""
+    __tablename__ = "facility_rate_rules"
+
+    id = db.Column(db.Integer, primary_key=True)
+    facility_id = db.Column(db.Integer, db.ForeignKey("facilities.id", ondelete="CASCADE"), nullable=False)
+    label = db.Column(db.String(50))
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    hourly_rate = db.Column(db.Numeric(15, 2), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        hm = lambda t: t.strftime("%H:%M") if t else None
+        return {
+            "id": self.id,
+            "facility_id": self.facility_id,
+            "label": self.label,
+            "start_time": hm(self.start_time),
+            "end_time": hm(self.end_time),
+            "hourly_rate": float(self.hourly_rate or 0),
+        }
+
+
+def _expand_range(start_t, end_t):
+    """(jam_mulai, jam_selesai) sbg integer; jam_selesai >23 kalau lintas
+    tengah malam (mis. 22:00-02:00, atau tutup persis 00:00)."""
+    sh = start_t.hour
+    eh = end_t.hour
+    if end_t == datetime.min.time() or eh <= sh:
+        eh += 24
+    return sh, eh
+
+
+def facility_rate_for_hour(facility, hour):
+    """Tarif/jam yg berlaku utk 1 jam booking (jam ke-`hour`, integer 0-23
+    atau lebih kalau lintas tengah malam). Rule pertama yg cocok menang."""
+    for r in facility.rate_rules:
+        sh, eh = _expand_range(r.start_time, r.end_time)
+        hh = hour if hour >= sh else hour + 24
+        if sh <= hh < eh:
+            return float(r.hourly_rate)
+    return float(facility.hourly_rate or 0)
+
+
+def facility_booking_price(facility, start_hour, end_hour):
+    """Total harga booking dari jam `start_hour` s.d. `end_hour` (exclusive),
+    dgn tarif per jam bisa beda2 sesuai rate_rules."""
+    return sum(facility_rate_for_hour(facility, h) for h in range(start_hour, end_hour))
 
 
 class Shift(db.Model):

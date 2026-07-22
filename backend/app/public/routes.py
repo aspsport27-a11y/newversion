@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db, limiter
 from ..models import Area, Venue
-from ..pos.models import Facility, FacilityBooking
+from ..pos.models import Facility, FacilityBooking, facility_rate_for_hour
 
 public_bp = Blueprint("public", __name__)
 
@@ -65,10 +65,17 @@ def public_facilities():
             "id": f.id,
             "name": f.name,
             "type": f.type,
-            "hourly_rate": float(f.hourly_rate or 0),
+            "hourly_rate": float(f.hourly_rate or 0),  # tarif dasar — bisa beda per jam, lihat rate_rules
             "open_time": hm(f.open_time),
             "close_time": hm(f.close_time),
             "slot_minutes": f.slot_minutes or 60,
+            "rate_rules": [
+                {
+                    "label": r.label, "start_time": hm(r.start_time),
+                    "end_time": hm(r.end_time), "hourly_rate": float(r.hourly_rate or 0),
+                }
+                for r in f.rate_rules
+            ],
         }
         for f in rows
     ]
@@ -125,6 +132,7 @@ def public_schedule():
                 "start_time": cur.strftime("%H:%M"),
                 "end_time": slot_end.strftime("%H:%M"),
                 "status": "booked" if is_booked else "available",
+                "rate": facility_rate_for_hour(fac, cur.hour),
             }
         )
         cur = slot_end

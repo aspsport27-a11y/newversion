@@ -17,6 +17,7 @@ from .models import (
     Product,
     Shift,
     StockMovement,
+    facility_booking_price,
 )
 
 
@@ -42,21 +43,34 @@ def _parse_time(s):
 def _hours_between(start, end) -> float:
     s = start.hour * 60 + start.minute
     e = end.hour * 60 + end.minute
+    if e <= s:
+        e += 24 * 60  # booking berakhir tengah malam (00:00) / lewat tengah malam
     return (e - s) / 60.0
 
 
 def is_slot_available(facility_id, booking_date, start, end, exclude_id=None) -> bool:
-    """True jika slot [start,end) di tanggal itu belum dibooking (tanpa overlap)."""
+    """True jika slot [start,end) di tanggal itu belum dibooking (tanpa overlap).
+    Dihitung di Python (bukan filter SQL langsung) krn jam 00:00 = tengah malam
+    (akhir hari) baik utk slot baru maupun booking lama — perbandingan TIME
+    mentah di SQL salah baca 00:00 sbg 'paling awal', bukan 'paling akhir'."""
+    def _mins(t, as_end=False):
+        m = t.hour * 60 + t.minute
+        return 24 * 60 if (as_end and m == 0) else m
+
+    s_min = _mins(start)
+    e_min = _mins(end, as_end=True)
+
     q = FacilityBooking.query.filter(
         FacilityBooking.facility_id == facility_id,
         FacilityBooking.booking_date == booking_date,
         FacilityBooking.status == "booked",
-        FacilityBooking.start_time < end,
-        FacilityBooking.end_time > start,
     )
     if exclude_id:
         q = q.filter(FacilityBooking.id != exclude_id)
-    return not db.session.query(q.exists()).scalar()
+    for b in q.all():
+        if _mins(b.start_time) < e_min and _mins(b.end_time, as_end=True) > s_min:
+            return False
+    return True
 
 VALID_ITEM_TYPES = {"product", "ticket", "rental", "booking"}
 VALID_METHODS = {"cash", "qris"}
@@ -180,12 +194,16 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
                 if fid2 == facility.id and d2 == bdate and s2 < end and e2 > start:
                     raise PosError("Slot bentrok dengan item lain di keranjang", "slot_taken", 409)
             qty = _D(hours)
-            unit_price = _D(facility.hourly_rate)
+            # tarif bisa beda per rentang jam (facility.rate_rules, mis. malam
+            # lebih mahal) — hitung per jam lalu jumlahkan, bukan flat hourly_rate*qty
+            end_hour = start.hour + int(hours)
+            total_price = _D(facility_booking_price(facility, start.hour, end_hour)).quantize(Decimal("0.01"))
+            unit_price = (total_price / qty).quantize(Decimal("0.01")) if qty else _D(0)
             name = f"{facility.name} {bdate:%d/%m} {row['start_time']}-{row['end_time']}"
             oi = OrderItem(
                 item_type="booking", product_id=None, name_snapshot=name[:120],
                 unit_price=unit_price, quantity=qty,
-                line_total=(unit_price * qty).quantize(Decimal("0.01")),
+                line_total=total_price,
             )
             booking_specs.append((oi, facility.id, bdate, start, end))
 

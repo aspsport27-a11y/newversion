@@ -56,6 +56,46 @@ async function saveFac() {
   } catch (e) { facErr.value = e?.response?.data?.message || 'Gagal.' } finally { savingFac.value = false }
 }
 
+// ---------------- TARIF PER JAM (facility_rate_rules) ----------------
+const showRates = ref(false)
+const rateFac = ref(null)
+const rateRules = ref([])
+const rateForm = ref({ label: '', start_time: '', end_time: '', hourly_rate: 0 })
+const rateErr = ref('')
+const savingRate = ref(false)
+async function openRates(f) {
+  rateFac.value = f
+  rateForm.value = { label: '', start_time: '', end_time: '', hourly_rate: f.hourly_rate }
+  rateErr.value = ''
+  showRates.value = true
+  await loadRateRules()
+}
+async function loadRateRules() {
+  if (!rateFac.value) return
+  const { data } = await client.get(`/admin/facilities/${rateFac.value.id}/rate-rules`)
+  rateRules.value = data.rate_rules
+}
+async function addRateRule() {
+  rateErr.value = ''
+  if (!rateForm.value.start_time || !rateForm.value.end_time) { rateErr.value = 'Jam mulai & selesai wajib diisi.'; return }
+  savingRate.value = true
+  try {
+    await client.post(`/admin/facilities/${rateFac.value.id}/rate-rules`, rateForm.value)
+    rateForm.value = { label: '', start_time: '', end_time: '', hourly_rate: rateFac.value.hourly_rate }
+    await loadRateRules()
+    await loadFacilities()
+    flash('Aturan tarif ditambah')
+  } catch (e) { rateErr.value = e?.response?.data?.message || 'Gagal.' } finally { savingRate.value = false }
+}
+async function delRateRule(r) {
+  if (!confirm(`Hapus tarif "${r.label || r.start_time + '-' + r.end_time}"?`)) return
+  try {
+    await client.delete(`/admin/rate-rules/${r.id}`)
+    await loadRateRules()
+    await loadFacilities()
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
+}
+
 // ---------------- TIKET (produk is_ticket) ----------------
 const tickets = ref([])
 const showTk = ref(false)
@@ -157,10 +197,16 @@ watch(venueId, reload)
             <tr v-for="f in facilities" :key="f.id" class="border-t hover:bg-slate-50">
               <td class="px-4 py-3 font-medium text-slate-700">{{ f.name }}</td>
               <td class="px-4 py-3 text-slate-500">{{ f.type || '—' }}</td>
-              <td class="px-4 py-3 text-right">{{ rupiah(f.hourly_rate) }}</td>
+              <td class="px-4 py-3 text-right">
+                {{ rupiah(f.hourly_rate) }}
+                <span v-if="f.rate_rules?.length" class="block text-xs text-amber-600">+{{ f.rate_rules.length }} tarif jam lain</span>
+              </td>
               <td class="px-4 py-3 text-slate-600">{{ f.open_time }}–{{ f.close_time }}</td>
               <td class="px-4 py-3 text-center"><span :class="f.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5">{{ f.is_active ? 'Aktif' : 'Nonaktif' }}</span></td>
-              <td class="px-4 py-3 text-right"><button @click="openFac(f)" class="text-brand-600 text-sm hover:underline">Edit</button></td>
+              <td class="px-4 py-3 text-right whitespace-nowrap">
+                <button @click="openRates(f)" class="text-amber-600 text-sm hover:underline mr-3">Tarif</button>
+                <button @click="openFac(f)" class="text-brand-600 text-sm hover:underline">Edit</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -234,6 +280,48 @@ watch(venueId, reload)
           <p v-if="facErr" class="text-sm text-red-600">{{ facErr }}</p>
           <button @click="saveFac" :disabled="savingFac" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ savingFac ? 'Menyimpan…' : 'Simpan' }}</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal Tarif per Jam -->
+    <div v-if="showRates" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
+      <div class="bg-white w-full max-w-lg rounded-2xl p-5">
+        <div class="flex justify-between items-center mb-1">
+          <h3 class="text-lg font-bold text-slate-800">Tarif per Jam — {{ rateFac?.name }}</h3>
+          <button @click="showRates = false" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <p class="text-xs text-slate-400 mb-4">Tarif dasar {{ rupiah(rateFac?.hourly_rate) }}/jam berlaku di luar rentang jam di bawah ini.</p>
+
+        <div class="bg-slate-50 rounded-lg border overflow-hidden mb-4">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-100 text-slate-500 text-left"><tr>
+              <th class="px-3 py-2 font-medium">Label</th>
+              <th class="px-3 py-2 font-medium">Jam</th>
+              <th class="px-3 py-2 font-medium text-right">Tarif/jam</th>
+              <th class="px-3 py-2"></th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="!rateRules.length"><td colspan="4" class="px-3 py-5 text-center text-slate-400">Belum ada tarif khusus — semua jam pakai tarif dasar.</td></tr>
+              <tr v-for="r in rateRules" :key="r.id" class="border-t">
+                <td class="px-3 py-2 text-slate-700">{{ r.label || '—' }}</td>
+                <td class="px-3 py-2 text-slate-600">{{ r.start_time }}–{{ r.end_time }}</td>
+                <td class="px-3 py-2 text-right">{{ rupiah(r.hourly_rate) }}</td>
+                <td class="px-3 py-2 text-right"><button @click="delRateRule(r)" class="text-red-500 text-xs hover:text-red-700">Hapus</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="text-sm font-medium text-slate-600 mb-2">Tambah tarif baru</p>
+        <div class="grid grid-cols-2 gap-2 mb-2">
+          <input v-model="rateForm.label" placeholder="Label (mis. Malam)" class="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          <div><label class="text-xs text-slate-500">Mulai</label><input v-model="rateForm.start_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <div><label class="text-xs text-slate-500">Selesai</label><input v-model="rateForm.end_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <input v-model.number="rateForm.hourly_rate" type="number" placeholder="Tarif per jam" class="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        </div>
+        <p class="text-xs text-slate-400 mb-2">Jam selesai boleh <b>00:00</b> kalau berlaku sampai tengah malam.</p>
+        <p v-if="rateErr" class="text-sm text-red-600 mb-2">{{ rateErr }}</p>
+        <button @click="addRateRule" :disabled="savingRate" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ savingRate ? 'Menyimpan…' : '+ Tambah Tarif' }}</button>
       </div>
     </div>
 

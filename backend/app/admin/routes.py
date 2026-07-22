@@ -24,6 +24,7 @@ from ..pos.models import (
     Attendance,
     Facility,
     FacilityBooking,
+    FacilityRateRule,
     Holiday,
     Order,
     OrderItem,
@@ -1132,6 +1133,98 @@ def facilities_update(fid):
         fac.is_active = bool(d["is_active"])
     db.session.commit()
     return jsonify(facility=fac.to_dict()), 200
+
+
+# ------------------------------------------------------------------
+# Tarif per rentang jam (facility_rate_rules) — 1 lapangan bisa punya
+# harga beda2 tergantung jam (mis. malam lebih mahal dari siang).
+# ------------------------------------------------------------------
+def _facility_or_403(fid, u):
+    fac = db.session.get(Facility, fid)
+    if not fac:
+        return None, _err("Lapangan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(u)
+    if vids is not None and fac.venue_id not in vids:
+        return None, _err("Bukan lapangan venue cakupan Anda", "forbidden", 403)
+    return fac, None
+
+
+@admin_bp.get("/facilities/<int:fid>/rate-rules")
+@jwt_required()
+@VIEW
+def facility_rate_rules_list(fid):
+    fac, err = _facility_or_403(fid, _current_user())
+    if err:
+        return err
+    return jsonify(count=len(fac.rate_rules), rate_rules=[r.to_dict() for r in fac.rate_rules]), 200
+
+
+@admin_bp.post("/facilities/<int:fid>/rate-rules")
+@jwt_required()
+@FACILITY_MANAGE
+def facility_rate_rules_create(fid):
+    fac, err = _facility_or_403(fid, _current_user())
+    if err:
+        return err
+    d = request.get_json(silent=True) or {}
+    for f in ("start_time", "end_time", "hourly_rate"):
+        if d.get(f) in (None, ""):
+            return _err(f"{f} wajib diisi")
+    start_t = _parse_time(d["start_time"], None)
+    end_t = _parse_time(d["end_time"], None)
+    if not start_t or not end_t:
+        return _err("Format jam salah (HH:MM)")
+    rule = FacilityRateRule(
+        facility_id=fid, label=(d.get("label") or "")[:50] or None,
+        start_time=start_t, end_time=end_t, hourly_rate=_D(d["hourly_rate"]),
+    )
+    db.session.add(rule)
+    db.session.commit()
+    return jsonify(rate_rule=rule.to_dict()), 201
+
+
+@admin_bp.put("/rate-rules/<int:rid>")
+@jwt_required()
+@FACILITY_MANAGE
+def facility_rate_rule_update(rid):
+    rule = db.session.get(FacilityRateRule, rid)
+    if not rule:
+        return _err("Aturan tarif tidak ditemukan", "not_found", 404)
+    fac, err = _facility_or_403(rule.facility_id, _current_user())
+    if err:
+        return err
+    d = request.get_json(silent=True) or {}
+    if "label" in d:
+        rule.label = (d.get("label") or "")[:50] or None
+    if "start_time" in d:
+        t = _parse_time(d["start_time"], None)
+        if not t:
+            return _err("Format jam mulai salah (HH:MM)")
+        rule.start_time = t
+    if "end_time" in d:
+        t = _parse_time(d["end_time"], None)
+        if not t:
+            return _err("Format jam selesai salah (HH:MM)")
+        rule.end_time = t
+    if "hourly_rate" in d:
+        rule.hourly_rate = _D(d["hourly_rate"])
+    db.session.commit()
+    return jsonify(rate_rule=rule.to_dict()), 200
+
+
+@admin_bp.delete("/rate-rules/<int:rid>")
+@jwt_required()
+@FACILITY_MANAGE
+def facility_rate_rule_delete(rid):
+    rule = db.session.get(FacilityRateRule, rid)
+    if not rule:
+        return _err("Aturan tarif tidak ditemukan", "not_found", 404)
+    fac, err = _facility_or_403(rule.facility_id, _current_user())
+    if err:
+        return err
+    db.session.delete(rule)
+    db.session.commit()
+    return jsonify(message="Aturan tarif dihapus"), 200
 
 
 # ==================================================================

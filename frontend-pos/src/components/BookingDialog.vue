@@ -46,7 +46,31 @@ const durationHours = computed(() => {
   if (startH.value == null || endH.value == null) return 0
   return endH.value - startH.value
 })
-const price = computed(() => Math.max(0, durationHours.value) * (facility.value?.hourly_rate || 0))
+
+// tarif bisa beda per rentang jam (facility.rate_rules) — jam yg tak match
+// rule manapun pakai hourly_rate dasar. Sama persis dgn facility_rate_for_hour
+// di backend (app/pos/models.py) supaya harga preview di POS konsisten.
+function expandRange(startStr, endStr) {
+  const sh = parseInt(startStr.slice(0, 2))
+  let eh = parseInt(endStr.slice(0, 2))
+  if (endStr === '00:00' || eh <= sh) eh += 24
+  return [sh, eh]
+}
+function rateForHour(f, h) {
+  for (const r of f.rate_rules || []) {
+    const [sh, eh] = expandRange(r.start_time, r.end_time)
+    const hh = h >= sh ? h : h + 24
+    if (hh >= sh && hh < eh) return Number(r.hourly_rate)
+  }
+  return Number(f.hourly_rate || 0)
+}
+const price = computed(() => {
+  const f = facility.value
+  if (!f || durationHours.value <= 0) return 0
+  let total = 0
+  for (let h = startH.value; h < endH.value; h++) total += rateForHour(f, h % 24)
+  return total
+})
 
 function overlaps(sH, eH) {
   const sMin = sH * 60
