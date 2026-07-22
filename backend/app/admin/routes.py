@@ -1486,6 +1486,22 @@ def attendance_photo(aid, which):
     return send_file(path, mimetype="image/jpeg")
 
 
+@admin_bp.get("/payments/<int:pid>/proof")
+@jwt_required()
+@VIEW
+def payment_proof(pid):
+    import os
+    from flask import current_app, send_file
+
+    p = db.session.get(Payment, pid)
+    if not p or not p.proof_image:
+        return _err("Tidak ada bukti transfer", "not_found", 404)
+    path = os.path.join(current_app.config["UPLOAD_FOLDER"], "payment_proof", p.proof_image)
+    if not os.path.exists(path):
+        return _err("File tidak ada", "not_found", 404)
+    return send_file(path, mimetype="image/jpeg")
+
+
 @admin_bp.delete("/attendance/<int:aid>")
 @jwt_required()
 @MANAGE_HR

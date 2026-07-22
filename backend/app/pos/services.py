@@ -73,7 +73,7 @@ def is_slot_available(facility_id, booking_date, start, end, exclude_id=None) ->
     return True
 
 VALID_ITEM_TYPES = {"product", "ticket", "rental", "booking"}
-VALID_METHODS = {"cash", "qris"}
+VALID_METHODS = {"cash", "qris", "transfer"}
 
 
 class PosError(Exception):
@@ -258,9 +258,17 @@ def _pay_qris_bri(order, payment, **_):
     payment.status = "pending"
 
 
+def _pay_transfer(order, payment, **_):
+    # Transfer bank manual — kasir sudah cek bukti transfer sebelum konfirmasi
+    # (wajib upload, lihat pay_order), jadi langsung dianggap lunas spt cash.
+    payment.status = "paid"
+    payment.paid_at = datetime.utcnow()
+
+
 PROVIDERS = {
     "cash": _pay_cash,
     "bri_qris_mpm": _pay_qris_bri,
+    "bank_transfer": _pay_transfer,
 }
 
 
@@ -279,8 +287,11 @@ def pay_order(order: Order, shift: Shift, cashier_id: int, data: dict) -> Paymen
 
     method = data.get("method")
     if method not in VALID_METHODS:
-        raise PosError("Metode bayar tidak valid (cash|qris)", "bad_method")
-    provider = data.get("provider") or ("cash" if method == "cash" else "bri_qris_mpm")
+        raise PosError("Metode bayar tidak valid (cash|qris|transfer)", "bad_method")
+    if method == "transfer" and not data.get("proof_filename"):
+        raise PosError("Bukti transfer wajib diupload", "proof_required")
+    _default_provider = {"cash": "cash", "transfer": "bank_transfer"}
+    provider = data.get("provider") or _default_provider.get(method, "bri_qris_mpm")
     if provider not in PROVIDERS:
         raise PosError(f"Provider tidak dikenal: {provider}", "bad_provider")
 
@@ -294,6 +305,7 @@ def pay_order(order: Order, shift: Shift, cashier_id: int, data: dict) -> Paymen
     payment = Payment(
         order_id=order.id, method=method, provider=provider, amount=amount,
         status="pending", reference=(data.get("reference") or None),
+        proof_image=data.get("proof_filename"),
         confirmed_by=cashier_id, shift_id=shift.id,
     )
     db.session.add(payment)
@@ -317,6 +329,8 @@ def _apply_payment(order: Order, payment: Payment, shift: Shift, cashier_id: int
         shift.total_cash_sales = _D(shift.total_cash_sales) + amt
     elif payment.method == "qris":
         shift.total_qris_sales = _D(shift.total_qris_sales) + amt
+    elif payment.method == "transfer":
+        shift.total_transfer_sales = _D(shift.total_transfer_sales) + amt
 
     was_paid = order.status == "paid"
     order.amount_paid = _D(order.amount_paid) + amt
@@ -377,6 +391,8 @@ def cancel_order(order: Order, uid: int = None) -> Order:
                         shift.total_cash_sales = Decimal(str(shift.total_cash_sales or 0)) - amt
                     elif p.method == "qris":
                         shift.total_qris_sales = Decimal(str(shift.total_qris_sales or 0)) - amt
+                    elif p.method == "transfer":
+                        shift.total_transfer_sales = Decimal(str(shift.total_transfer_sales or 0)) - amt
             p.status = "void"
 
     order.status = "void"

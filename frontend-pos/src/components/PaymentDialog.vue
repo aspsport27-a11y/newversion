@@ -14,6 +14,21 @@ const received = ref('') // uang tunai diterima (untuk kembalian)
 const reference = ref('')
 const submitting = ref(false)
 
+// bukti transfer bank — foto/screenshot, wajib sblm konfirmasi
+const fileInput = ref(null)
+const proofPreview = ref('') // base64 data URL
+const proofErr = ref('')
+function pickProof() { fileInput.value?.click() }
+function onProofChange(e) {
+  proofErr.value = ''
+  const file = e.target.files[0]
+  if (!file) return
+  if (file.size > 3_000_000) { proofErr.value = 'Ukuran file maks 3MB.'; e.target.value = ''; return }
+  const reader = new FileReader()
+  reader.onload = () => { proofPreview.value = reader.result }
+  reader.readAsDataURL(file)
+}
+
 const sisa = computed(() => Math.max(0, props.total - (Number(amount.value) || 0)))
 const change = computed(() => Math.max(0, (Number(received.value) || 0) - (Number(amount.value) || 0)))
 const validAmount = computed(() => {
@@ -33,7 +48,8 @@ async function confirm() {
     await emit('pay', {
       method: method.value,
       amount: Number(amount.value),
-      reference: method.value === 'qris' ? reference.value : null,
+      reference: method.value !== 'cash' ? reference.value : null,
+      proof_image: method.value === 'transfer' ? proofPreview.value : null,
     })
   } finally { submitting.value = false }
 }
@@ -66,9 +82,10 @@ async function confirm() {
         <p v-if="sisa > 0" class="text-sm text-amber-600 mt-1 text-right">Sisa (DP): {{ rupiah(sisa) }}</p>
       </div>
 
-      <div class="grid grid-cols-2 gap-2 mb-4">
-        <button @click="method = 'cash'" :class="method === 'cash' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium">💵 Cash</button>
-        <button @click="method = 'qris'" :class="method === 'qris' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium">📱 QRIS</button>
+      <div class="grid grid-cols-3 gap-2 mb-4">
+        <button @click="method = 'cash'" :class="method === 'cash' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium text-sm">💵 Cash</button>
+        <button @click="method = 'qris'" :class="method === 'qris' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium text-sm">📱 QRIS</button>
+        <button @click="method = 'transfer'" :class="method === 'transfer' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium text-sm">🏦 Transfer</button>
       </div>
 
       <!-- CASH -->
@@ -92,7 +109,7 @@ async function confirm() {
       </div>
 
       <!-- QRIS -->
-      <div v-else class="space-y-3">
+      <div v-else-if="method === 'qris'" class="space-y-3">
         <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
           Integrasi BRIAPI (QRIS Dinamis) menyusul. Transaksi tercatat
           <span class="font-medium">pending</span> menunggu konfirmasi.
@@ -102,6 +119,26 @@ async function confirm() {
         <button @click="confirm" :disabled="!validAmount || submitting"
           class="w-full py-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold disabled:opacity-50">
           {{ submitting ? 'Memproses…' : 'Buat Transaksi QRIS' }}
+        </button>
+      </div>
+
+      <!-- TRANSFER BANK -->
+      <div v-else class="space-y-3">
+        <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm text-slate-600">
+          Cek dulu bukti transfer dari customer, lalu upload sebelum konfirmasi.
+        </div>
+        <input ref="fileInput" type="file" accept="image/*" capture="environment" class="hidden" @change="onProofChange" />
+        <button @click="pickProof" type="button"
+          class="w-full py-3 rounded-lg border-2 border-dashed border-slate-300 hover:border-brand-400 text-sm text-slate-500">
+          {{ proofPreview ? '✅ Bukti terpilih — ganti foto?' : '📎 Pilih / Foto Bukti Transfer' }}
+        </button>
+        <img v-if="proofPreview" :src="proofPreview" class="w-full max-h-48 object-contain rounded-lg border border-slate-200" />
+        <input v-model="reference" placeholder="No. referensi / catatan (opsional)"
+          class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+        <p v-if="proofErr" class="text-xs text-red-600">{{ proofErr }}</p>
+        <button @click="confirm" :disabled="!validAmount || !proofPreview || submitting"
+          class="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50">
+          {{ submitting ? 'Memproses…' : (sisa > 0 ? 'Bayar DP & Cetak' : 'Bayar & Cetak Struk') }}
         </button>
       </div>
     </div>

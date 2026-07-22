@@ -203,6 +203,7 @@ export const usePosStore = defineStore('pos', {
         method,
         amount: extra.amount ?? null,
         reference: extra.reference || null,
+        proof_image: extra.proof_image || null,
       })
       return paid // { order, payment }
     },
@@ -210,11 +211,12 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.get('/orders/outstanding')
       return data.orders
     },
-    async settle(orderId, method, amount, reference) {
+    async settle(orderId, method, amount, reference, proofImage) {
       const { data } = await client.post(`/orders/${orderId}/pay`, {
         method,
         amount: amount ?? null,
         reference: reference || null,
+        proof_image: proofImage || null,
       })
       return data // { order, payment }
     },

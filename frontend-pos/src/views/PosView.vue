@@ -75,7 +75,7 @@ function onStationStopped(result) {
 }
 async function onPayStation(payload) {
   try {
-    const res = await pos.settle(pendingStationOrder.value.id, payload.method, payload.amount, payload.reference)
+    const res = await pos.settle(pendingStationOrder.value.id, payload.method, payload.amount, payload.reference, payload.proof_image)
     lastResult.value = res
     showPayment.value = false
     pendingStationOrder.value = null
@@ -112,6 +112,7 @@ async function onPay(payload) {
     const result = await pos.checkout(payload.method, {
       amount: payload.amount,
       reference: payload.reference,
+      proof_image: payload.proof_image,
     })
     lastResult.value = result
     showPayment.value = false

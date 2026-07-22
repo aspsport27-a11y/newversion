@@ -155,6 +155,29 @@ def _save_absen_photo(data_url, prefix):
         return None
 
 
+def _save_payment_proof(data_url):
+    """Simpan bukti transfer (screenshot/foto) base64 ke UPLOAD_FOLDER/payment_proof."""
+    import base64
+    import os
+    import uuid
+
+    from flask import current_app
+    try:
+        if "," in data_url:
+            data_url = data_url.split(",", 1)[1]
+        raw = base64.b64decode(data_url)
+        if not raw or len(raw) > 3_000_000:  # guard 3MB
+            return None
+        d = os.path.join(current_app.config["UPLOAD_FOLDER"], "payment_proof")
+        os.makedirs(d, exist_ok=True)
+        fn = f"proof_{uuid.uuid4().hex[:8]}.jpg"
+        with open(os.path.join(d, fn), "wb") as f:
+            f.write(raw)
+        return fn
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @pos_bp.post("/attendance")
 def pos_attendance():
     from datetime import timedelta, timezone
@@ -345,9 +368,9 @@ def report_category_daily():
         label = _REPORT_LABELS["rental"]
         groups[label] = {"category": label, "qty": 0.0, "amount": 0.0}
 
-    # POS cuma kenal 2 metode bayar (cash/qris) — selalu tampilkan keduanya
-    # walau salah satu 0, biar kasir gampang cocokkan fisik uang di laci
-    method_totals = {"cash": 0.0, "qris": 0.0}
+    # POS kenal 3 metode bayar (cash/qris/transfer) — selalu tampilkan semua
+    # walau ada yg 0, biar kasir gampang cocokkan fisik uang di laci
+    method_totals = {"cash": 0.0, "qris": 0.0, "transfer": 0.0}
 
     total = 0.0
     order_ids_seen = set()
@@ -378,6 +401,7 @@ def report_category_daily():
     by_method = [
         {"method": "cash", "label": "Cash", "amount": round(method_totals.get("cash", 0.0), 2)},
         {"method": "qris", "label": "QRIS", "amount": round(method_totals.get("qris", 0.0), 2)},
+        {"method": "transfer", "label": "Transfer Bank", "amount": round(method_totals.get("transfer", 0.0), 2)},
     ]
     return jsonify(
         date=today.isoformat(),
@@ -533,6 +557,11 @@ def order_pay(order_id):
     if order.venue_id != terminal.venue_id:
         raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
     data = request.get_json(silent=True) or {}
+    if data.get("method") == "transfer" and data.get("proof_image"):
+        fn = _save_payment_proof(data["proof_image"])
+        if not fn:
+            raise PosError("Gagal simpan bukti transfer (format/ukuran tak valid, maks 3MB)", "bad_proof")
+        data["proof_filename"] = fn
     payment = pay_order(order, shift, int(get_jwt_identity()), data)
     return jsonify(order=order.to_dict(), payment=payment.to_dict()), 200
 

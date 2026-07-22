@@ -26,6 +26,16 @@ const statusMap = { paid: ['Lunas', 'bg-emerald-100 text-emerald-700'], open: ['
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function fmtTime(s) { return s ? parseUTC(s).toLocaleString('id-ID') : '—' }
 
+// lihat bukti transfer (endpoint butuh auth → ambil blob lalu tampilkan)
+const proofUrl = ref('')
+async function openProof(p) {
+  try {
+    const { data } = await client.get(`/admin/payments/${p.id}/proof`, { responseType: 'blob' })
+    proofUrl.value = URL.createObjectURL(data)
+  } catch { alert('Bukti transfer tidak tersedia.') }
+}
+function closeProof() { if (proofUrl.value) URL.revokeObjectURL(proofUrl.value); proofUrl.value = '' }
+
 async function loadVenues() {
   const { data } = await client.get('/venues')
   venues.value = data.venues
@@ -252,7 +262,11 @@ async function deleteOrder(o, ev) {
           <p class="text-xs font-medium text-slate-500 mb-1">Pembayaran</p>
           <div v-if="!detail.payments.length" class="text-sm text-slate-400">Belum ada pembayaran.</div>
           <div v-for="p in detail.payments" :key="p.id" class="flex justify-between text-sm py-1 border-t" :class="{ 'opacity-50 line-through': p.status === 'void' }">
-            <span class="capitalize text-slate-600">{{ p.method }} <span class="text-xs text-slate-400">{{ fmtTime(p.paid_at) }}</span> <span v-if="p.status === 'void'" class="text-[10px] bg-red-100 text-red-600 rounded px-1 py-0.5 no-underline">Dibatalkan</span></span>
+            <span class="capitalize text-slate-600">
+              {{ p.method }} <span class="text-xs text-slate-400">{{ fmtTime(p.paid_at) }}</span>
+              <button v-if="p.has_proof" @click="openProof(p)" title="Lihat bukti transfer" class="ml-1 no-underline">📎</button>
+              <span v-if="p.status === 'void'" class="text-[10px] bg-red-100 text-red-600 rounded px-1 py-0.5 no-underline">Dibatalkan</span>
+            </span>
             <span class="font-medium">{{ rupiah(p.amount) }}</span>
           </div>
         </div>
@@ -263,6 +277,17 @@ async function deleteOrder(o, ev) {
         <div v-if="canCancel && detail.status === 'void'" class="flex gap-2 pt-2 border-t">
           <button @click="deleteOrder(detail)" :disabled="busy" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 font-medium disabled:opacity-50">Hapus Permanen</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Bukti transfer -->
+    <div v-if="proofUrl" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" @click.self="closeProof">
+      <div class="bg-white rounded-2xl p-4 max-w-sm w-full">
+        <div class="flex justify-between items-center mb-2">
+          <p class="text-sm font-medium text-slate-700">Bukti Transfer</p>
+          <button @click="closeProof" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <img :src="proofUrl" alt="Bukti transfer" class="w-full rounded-lg" />
       </div>
     </div>
   </div>

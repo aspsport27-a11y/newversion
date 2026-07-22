@@ -229,6 +229,7 @@ class Shift(db.Model):
     opening_cash = db.Column(db.Numeric(15, 2), nullable=False, default=0)
     total_cash_sales = db.Column(db.Numeric(15, 2), default=0)
     total_qris_sales = db.Column(db.Numeric(15, 2), default=0)
+    total_transfer_sales = db.Column(db.Numeric(15, 2), default=0)
     total_sales = db.Column(db.Numeric(15, 2), default=0)
     cash_in = db.Column(db.Numeric(15, 2), default=0)
     cash_out = db.Column(db.Numeric(15, 2), default=0)
@@ -252,6 +253,7 @@ class Shift(db.Model):
             "opening_cash": f(self.opening_cash),
             "total_cash_sales": f(self.total_cash_sales),
             "total_qris_sales": f(self.total_qris_sales),
+            "total_transfer_sales": f(self.total_transfer_sales),
             "total_sales": f(self.total_sales),
             "cash_in": f(self.cash_in),
             "cash_out": f(self.cash_out),
@@ -359,11 +361,12 @@ class Payment(db.Model):
     order_id = db.Column(
         db.Integer, db.ForeignKey("orders.id", ondelete="CASCADE"), nullable=False
     )
-    method = db.Column(db.String(10), nullable=False)  # cash|qris
+    method = db.Column(db.String(10), nullable=False)  # cash|qris|transfer
     provider = db.Column(db.String(30), nullable=False, default="cash")
     amount = db.Column(db.Numeric(15, 2), nullable=False)
     status = db.Column(db.String(10), nullable=False, default="pending")  # pending|paid|failed|void
     reference = db.Column(db.String(100))
+    proof_image = db.Column(db.String(255))  # bukti transfer (screenshot/foto) — wajib utk method=transfer
     confirmed_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     shift_id = db.Column(db.Integer, db.ForeignKey("shifts.id"))
     paid_at = db.Column(db.DateTime)
@@ -377,6 +380,7 @@ class Payment(db.Model):
             "amount": float(self.amount),
             "status": self.status,
             "reference": self.reference,
+            "has_proof": bool(self.proof_image),
             "shift_id": self.shift_id,
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
         }

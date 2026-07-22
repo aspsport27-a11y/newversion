@@ -143,17 +143,19 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-2 font-medium">Buka</th>
               <th class="px-4 py-2 font-medium text-right">Cash</th>
               <th class="px-4 py-2 font-medium text-right">QRIS</th>
+              <th class="px-4 py-2 font-medium text-right">Transfer</th>
               <th class="px-4 py-2 font-medium text-right">Seharusnya</th>
               <th class="px-4 py-2 font-medium text-right">Dihitung</th>
               <th class="px-4 py-2 font-medium text-right">Selisih</th>
             </tr></thead>
             <tbody>
-              <tr v-if="!shifts.length"><td colspan="7" class="px-4 py-6 text-center text-slate-400">Tidak ada shift.</td></tr>
+              <tr v-if="!shifts.length"><td colspan="8" class="px-4 py-6 text-center text-slate-400">Tidak ada shift.</td></tr>
               <tr v-for="s in shifts" :key="s.id" class="border-t">
                 <td class="px-4 py-2 text-slate-700">{{ s.cashier || '—' }}</td>
                 <td class="px-4 py-2 text-slate-500">{{ s.opened_at ? parseUTC(s.opened_at).toLocaleString('id-ID') : '—' }}</td>
                 <td class="px-4 py-2 text-right">{{ rupiah(s.total_cash_sales) }}</td>
                 <td class="px-4 py-2 text-right">{{ rupiah(s.total_qris_sales) }}</td>
+                <td class="px-4 py-2 text-right">{{ rupiah(s.total_transfer_sales) }}</td>
                 <td class="px-4 py-2 text-right">{{ rupiah(s.expected_cash) }}</td>
                 <td class="px-4 py-2 text-right">{{ s.counted_cash != null ? rupiah(s.counted_cash) : '—' }}</td>
                 <td class="px-4 py-2 text-right font-medium" :class="s.cash_variance === 0 ? 'text-emerald-600' : (s.cash_variance == null ? 'text-slate-400' : 'text-red-600')">
