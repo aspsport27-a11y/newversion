@@ -43,6 +43,11 @@ def login():
         return jsonify(error="unauthorized", message="Kredensial salah"), 401
     if not user.active:
         return jsonify(error="forbidden", message="Akun nonaktif"), 403
+    if user.role not in ("admin", "head_office", "manager_unit", "admin_unit"):
+        return jsonify(
+            error="forbidden",
+            message="Akun ini tidak diizinkan login di portal. Gunakan POS untuk login kasir.",
+        ), 403
 
     user.touch_login()
     db.session.commit()
