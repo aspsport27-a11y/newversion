@@ -1825,9 +1825,20 @@ def bookings_list():
             row["order_paid"] = paid
             row["order_due"] = round(total - paid, 2)
             row["payment_status"] = order.status  # open|partial|paid|void
+            # tanggal DP = pembayaran (paid) paling awal; tanggal pelunasan =
+            # pembayaran paling akhir HANYA kalau order sudah lunas penuh
+            paid_pays = sorted(
+                [p for p in order.payments if p.status == "paid" and p.paid_at],
+                key=lambda p: p.paid_at,
+            )
+            row["dp_at"] = paid_pays[0].paid_at.isoformat() if paid_pays else None
+            row["paid_off_at"] = (
+                paid_pays[-1].paid_at.isoformat() if (paid_pays and order.status == "paid") else None
+            )
         else:
             row["order_total"] = row["order_paid"] = row["order_due"] = None
             row["payment_status"] = None
+            row["dp_at"] = row["paid_off_at"] = None
         rows.append(row)
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), bookings=rows), 200
 

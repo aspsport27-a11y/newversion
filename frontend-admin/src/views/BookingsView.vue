@@ -30,7 +30,12 @@ function waLink(phone) {
 }
 function venueCode(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
 function fmtDate(d) {
-  return new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short' })
+  return new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })
+}
+// tanggal+jam pembayaran (datetime UTC dr backend) → waktu lokal singkat
+function fmtPay(iso) {
+  if (!iso) return '—'
+  return parseUTC(iso).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 function statusLabel(s) {
   return { paid: 'Lunas', partial: 'DP', open: 'Belum bayar', void: 'Batal' }[s] || s || '—'
@@ -197,13 +202,15 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-3 font-medium">No. HP</th>
               <th class="px-4 py-3 font-medium text-right">Total</th>
               <th class="px-4 py-3 font-medium text-right">Sisa</th>
+              <th class="px-4 py-3 font-medium">Tgl DP</th>
+              <th class="px-4 py-3 font-medium">Tgl Lunas</th>
               <th class="px-4 py-3 font-medium text-center">Status</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!shown.length"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
+            <tr v-if="loading"><td colspan="11" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!shown.length"><td colspan="11" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
             <tr v-for="b in shown" :key="b.id" @click="openDetail(b)" class="border-t hover:bg-slate-50 cursor-pointer">
               <td class="px-4 py-3 text-slate-700">{{ fmtDate(b.booking_date) }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ b.start_time }}–{{ b.end_time }}</td>
@@ -220,6 +227,8 @@ onMounted(async () => { await loadVenues(); await run() })
               <td class="px-4 py-3 text-right" :class="b.order_due > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'">
                 {{ b.order_due != null ? rupiah(b.order_due) : '—' }}
               </td>
+              <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">{{ fmtPay(b.dp_at) }}</td>
+              <td class="px-4 py-3 whitespace-nowrap text-xs" :class="b.paid_off_at ? 'text-emerald-600' : 'text-slate-400'">{{ fmtPay(b.paid_off_at) }}</td>
               <td class="px-4 py-3 text-center">
                 <span :class="statusClass(b.payment_status)" class="text-xs rounded-full px-2 py-0.5">{{ statusLabel(b.payment_status) }}</span>
               </td>
