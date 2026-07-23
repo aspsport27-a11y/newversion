@@ -379,13 +379,17 @@ def report_category_daily():
         method_totals[p.method] = method_totals.get(p.method, 0.0) + float(p.amount or 0)
 
         order = p.order
-        order_total = float(order.total_amount or 0) if order else 0
-        if not order or order_total <= 0 or not order.items:
+        # pembagi = jumlah line_total semua item (= subtotal, SEBELUM diskon).
+        # JANGAN pakai total_amount (setelah diskon): line_total menjumlah ke
+        # subtotal, jadi kalau ada diskon porsinya >100% & uang laporan jadi
+        # lebih besar dr yg benar-benar dibayar. Diskon otomatis terbagi rata.
+        items_sum = float(sum(float(i.line_total or 0) for i in order.items)) if order else 0
+        if not order or items_sum <= 0 or not order.items:
             continue
         order_ids_seen.add(order.id)
         pay_amount = float(p.amount or 0)
         for item in order.items:
-            share = float(item.line_total or 0) / order_total
+            share = float(item.line_total or 0) / items_sum
             if item.item_type == "product":
                 label = cat_names.get(product_cat.get(item.product_id), "Tanpa Kategori")
             else:

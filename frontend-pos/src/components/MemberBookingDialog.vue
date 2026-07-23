@@ -67,16 +67,25 @@ const perSession = computed(() => {
   for (let h = startH.value; h < endH.value; h++) t += rateForHour(f, h % 24)
   return t
 })
-// perkiraan jumlah tanggal (hitung lokal utk preview)
-const estDates = computed(() => {
-  if (!days.value.length || !dateFrom.value || !dateTo.value) return 0
-  const set = new Set(days.value.map((d) => (d + 1) % 7)) // JS getDay: Min=0..Sab=6 ↔ py: Sen=0
-  let n = 0
+// daftar tanggal yang akan dibooking (preview lokal, sama pola dgn backend:
+// JS getDay Min=0..Sab=6 → py weekday Sen=0..Min=6). Ditampilkan sbg chip biar
+// kasir langsung lihat & sadar kalau ada tanggal kurang sebelum konfirmasi.
+const DAY_LBL = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab']
+const estDatesList = computed(() => {
+  if (!days.value.length || !dateFrom.value || !dateTo.value) return []
+  const wd = new Set(days.value) // py weekday
+  const out = []
   const from = new Date(dateFrom.value + 'T00:00:00')
   const to = new Date(dateTo.value + 'T00:00:00')
-  for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) if (set.has(d.getDay())) n++
-  return n
+  for (let d = new Date(from); d <= to && out.length < 200; d.setDate(d.getDate() + 1)) {
+    if (wd.has((d.getDay() + 6) % 7)) out.push(new Date(d))
+  }
+  return out
 })
+const estDates = computed(() => estDatesList.value.length)
+function fmtChip(d) {
+  return `${DAY_LBL[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 const subtotal = computed(() => perSession.value * estDates.value)
 const discountRp = computed(() => {
   if (discType.value === 'percent') return Math.round(subtotal.value * Math.min(Math.max(discValue.value || 0, 0), 100) / 100)
@@ -183,7 +192,13 @@ async function submit() {
         </div>
 
         <div class="bg-slate-50 rounded-lg p-3 mb-3 text-sm space-y-1">
-          <div class="flex justify-between"><span class="text-slate-500">Perkiraan {{ estDates }} sesi × {{ rupiah(perSession) }}</span><span>{{ rupiah(subtotal) }}</span></div>
+          <div v-if="estDatesList.length" class="mb-1">
+            <p class="text-xs text-slate-500 mb-1">{{ estDatesList.length }} tanggal akan dibooking:</p>
+            <div class="flex flex-wrap gap-1">
+              <span v-for="(d, i) in estDatesList" :key="i" class="text-xs bg-white border border-slate-200 rounded px-1.5 py-0.5 text-slate-600">{{ fmtChip(d) }}</span>
+            </div>
+          </div>
+          <div class="flex justify-between"><span class="text-slate-500">{{ estDates }} sesi × {{ rupiah(perSession) }}</span><span>{{ rupiah(subtotal) }}</span></div>
           <div v-if="discountRp > 0" class="flex justify-between text-amber-600"><span>Diskon</span><span>− {{ rupiah(discountRp) }}</span></div>
           <div class="flex justify-between font-bold text-base border-t pt-1.5"><span>Perkiraan total</span><span class="text-brand-700">{{ rupiah(grandTotal) }}</span></div>
           <p class="text-xs text-slate-400 pt-1">Tanggal yang bentrok booking lain akan dilewati otomatis. Total final dihitung server.</p>
