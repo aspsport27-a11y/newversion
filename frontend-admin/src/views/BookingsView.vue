@@ -80,6 +80,58 @@ function venueName(id) {
   return v ? `${v.code} — ${v.name}` : `#${id}`
 }
 
+// cetak daftar booking sesuai filter aktif (tanggal/venue/status) — buka
+// window baru berisi tabel rapi lalu panggil print (tak ganggu layout portal)
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+}
+function printBookings() {
+  const rangeLabel = `${fmtDate(from.value)} — ${fmtDate(to.value)}`
+  const venueLabel = venueId.value ? venueName(venueId.value) : 'Semua venue'
+  const printedAt = new Date().toLocaleString('id-ID')
+  const body = shown.value.map((b) => `<tr>
+    <td>${esc(fmtDate(b.booking_date))}</td>
+    <td>${esc(b.start_time)}–${esc(b.end_time)}</td>
+    <td>${esc(b.facility_name || '—')}</td>
+    <td>${esc(b.customer_name || '—')}</td>
+    <td>${esc(b.customer_phone || '—')}</td>
+    <td class="r">${b.order_total != null ? esc(rupiah(b.order_total)) : '—'}</td>
+    <td class="r">${b.order_due != null ? esc(rupiah(b.order_due)) : '—'}</td>
+    <td>${esc(fmtPay(b.dp_at))}</td>
+    <td>${esc(fmtPay(b.paid_off_at))}</td>
+    <td>${esc(statusLabel(b.payment_status))}</td>
+  </tr>`).join('')
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Laporan Booking</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;color:#1e293b;margin:24px;font-size:12px}
+    h1{font-size:18px;margin:0 0 4px}
+    .meta{color:#64748b;font-size:12px;margin-bottom:12px}
+    table{width:100%;border-collapse:collapse}
+    th,td{border:1px solid #cbd5e1;padding:5px 7px;text-align:left}
+    th{background:#f1f5f9}
+    .r{text-align:right;white-space:nowrap}
+    tfoot td{font-weight:bold;background:#f8fafc}
+    @media print{body{margin:10mm}}
+  </style></head><body>
+    <h1>Laporan Booking Lapangan</h1>
+    <div class="meta">Periode main: ${esc(rangeLabel)} · Venue: ${esc(venueLabel)} · Dicetak: ${esc(printedAt)}<br>
+      Jumlah: ${totalCount.value} booking · Total nilai: ${esc(rupiah(totalNilai.value))} · DP diterima: ${esc(rupiah(totalDp.value))} · Piutang: ${esc(rupiah(totalDue.value))}</div>
+    <table>
+      <thead><tr>
+        <th>Tanggal Main</th><th>Jam</th><th>Lapangan</th><th>Customer</th><th>No. HP</th>
+        <th class="r">Total</th><th class="r">Sisa</th><th>Tgl DP</th><th>Tgl Lunas</th><th>Status</th>
+      </tr></thead>
+      <tbody>${body || '<tr><td colspan="10" style="text-align:center;color:#94a3b8">Tidak ada data.</td></tr>'}</tbody>
+    </table>
+  </body></html>`
+  const w = window.open('', '_blank')
+  if (!w) { alert('Popup diblokir browser — izinkan popup untuk mencetak.'); return }
+  w.document.write(html)
+  w.document.close()
+  w.focus()
+  setTimeout(() => w.print(), 300)
+}
+
 async function loadVenues() {
   const { data } = await client.get('/admin/venues')
   venues.value = data.venues
@@ -146,6 +198,7 @@ onMounted(async () => { await loadVenues(); await run() })
         </select></div>
       <button @click="run" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
       <label class="flex items-center gap-2 text-sm text-slate-600 ml-2"><input v-model="onlyUnpaid" type="checkbox" /> Hanya belum lunas</label>
+      <button @click="printBookings" class="ml-auto bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">🖨️ Cetak</button>
     </div>
 
     <!-- Ringkasan -->
@@ -195,7 +248,7 @@ onMounted(async () => { await loadVenues(); await run() })
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left">
             <tr>
-              <th class="px-4 py-3 font-medium">Tanggal</th>
+              <th class="px-4 py-3 font-medium">Tanggal Main</th>
               <th class="px-4 py-3 font-medium">Jam</th>
               <th class="px-4 py-3 font-medium">Lapangan</th>
               <th class="px-4 py-3 font-medium">Customer</th>
