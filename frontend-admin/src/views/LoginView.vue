@@ -31,43 +31,43 @@ async function submit() {
     <!-- ===== Doodle olahraga (latar) ===== -->
     <div class="pointer-events-none absolute inset-0 text-white/[0.07]" aria-hidden="true">
       <!-- bola sepak -->
-      <svg class="absolute top-[8%] left-[6%] w-24 h-24 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute top-[8%] left-[6%] w-24 h-24 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <circle cx="12" cy="12" r="9" /><path d="M12 7l3 2-1 3.5h-4L9 9z" /><path d="M12 7V3.5M15 9l3-1.5M14 12.5l2.5 2.5M10 12.5L7.5 15M9 9L6 7.5" />
       </svg>
       <!-- bola basket -->
-      <svg class="absolute top-[14%] right-[8%] w-28 h-28 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute top-[14%] right-[8%] w-28 h-28 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <circle cx="12" cy="12" r="9" /><path d="M12 3v18M3 12h18M5.6 5.6C8 8 8 16 5.6 18.4M18.4 5.6C16 8 16 16 18.4 18.4" />
       </svg>
       <!-- kok bulutangkis -->
-      <svg class="absolute top-[44%] left-[10%] w-20 h-20 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute top-[44%] left-[10%] w-20 h-20 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <circle cx="12" cy="18" r="3" /><path d="M12 15l-4-9M12 15l4-9M12 15l-1.5-9.5M12 15l1.5-9.5M8 6l8 0" />
       </svg>
       <!-- stik / raket -->
-      <svg class="absolute bottom-[12%] right-[12%] w-24 h-24 -rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute bottom-[12%] right-[12%] w-24 h-24 -rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <ellipse cx="9" cy="9" rx="5" ry="6" transform="rotate(-30 9 9)" /><path d="M12.5 12.5L20 20" /><path d="M6.5 6.5l5 5M9 5l3 6M5 9l6 3" />
       </svg>
       <!-- peluit -->
-      <svg class="absolute bottom-[16%] left-[16%] w-16 h-16 rotate-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute bottom-[16%] left-[16%] w-16 h-16 rotate-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <path d="M3 10h11l4 2v3a4 4 0 0 1-8 0H3z" /><circle cx="9" cy="14" r="2" /><path d="M14 8V5" />
       </svg>
       <!-- stopwatch -->
-      <svg class="absolute top-[62%] right-[22%] w-16 h-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute top-[62%] right-[22%] w-16 h-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <circle cx="12" cy="13" r="7" /><path d="M12 13V9M10 3h4M18 6l1.5-1.5" />
       </svg>
       <!-- controller (esport) -->
-      <svg class="absolute top-[30%] right-[38%] w-20 h-20 -rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute top-[30%] right-[38%] w-20 h-20 -rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <path d="M7 8h10a4 4 0 0 1 4 4l-1 4a2.5 2.5 0 0 1-4.3 1L14 15h-4l-1.7 2A2.5 2.5 0 0 1 4 16l-1-4a4 4 0 0 1 4-4z" /><path d="M7.5 11v2M6.5 12h2M15.5 11.5h.01M17 13h.01" />
       </svg>
       <!-- gawang / lapangan garis -->
-      <svg class="absolute top-[76%] left-[40%] w-24 h-24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute top-[76%] left-[40%] w-24 h-24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <path d="M2 20h20M6 20V8h12v12M6 8l3-3h6l3 3M9 20v-9h6v9" />
       </svg>
       <!-- trofi -->
-      <svg class="absolute top-[6%] left-[46%] w-16 h-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute top-[6%] left-[46%] w-16 h-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
         <path d="M8 4h8v4a4 4 0 0 1-8 0zM8 5H5v2a3 3 0 0 0 3 3M16 5h3v2a3 3 0 0 1-3 3M12 12v4M9 20h6M10 16h4v4h-4z" />
       </svg>
       <!-- ombak (waterpark) -->
-      <svg class="absolute bottom-[6%] right-[42%] w-28 h-16" viewBox="0 0 40 12" fill="none" stroke="currentColor" stroke-width="1.2">
+      <svg class="doodle absolute bottom-[6%] right-[42%] w-28 h-16" viewBox="0 0 40 12" fill="none" stroke="currentColor" stroke-width="1.2">
         <path d="M0 6c3-4 6-4 9 0s6 4 9 0 6-4 9 0 6 4 9 0" /><path d="M0 10c3-4 6-4 9 0s6 4 9 0 6-4 9 0 6 4 9 0" />
       </svg>
     </div>
@@ -123,3 +123,31 @@ async function submit() {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* animasi mengambang halus untuk doodle — pakai properti `translate` (bukan
+   `transform`) supaya tidak menimpa rotasi Tailwind pada tiap doodle */
+@keyframes float-doodle {
+  0%, 100% { translate: 0 0; }
+  50%      { translate: 0 -14px; }
+}
+.doodle {
+  animation: float-doodle 7s ease-in-out infinite;
+  will-change: translate;
+}
+/* durasi & delay bervariasi supaya gerakannya tidak seragam */
+.doodle:nth-of-type(1) { animation-duration: 8s;  animation-delay: 0s; }
+.doodle:nth-of-type(2) { animation-duration: 10s; animation-delay: -3s; }
+.doodle:nth-of-type(3) { animation-duration: 7s;  animation-delay: -1.5s; }
+.doodle:nth-of-type(4) { animation-duration: 9s;  animation-delay: -4s; }
+.doodle:nth-of-type(5) { animation-duration: 6.5s; animation-delay: -2s; }
+.doodle:nth-of-type(6) { animation-duration: 11s; animation-delay: -5s; }
+.doodle:nth-of-type(7) { animation-duration: 8.5s; animation-delay: -1s; }
+.doodle:nth-of-type(8) { animation-duration: 7.5s; animation-delay: -3.5s; }
+.doodle:nth-of-type(9) { animation-duration: 9.5s; animation-delay: -2.5s; }
+.doodle:nth-of-type(10){ animation-duration: 6s;  animation-delay: -4.5s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .doodle { animation: none; }
+}
+</style>
