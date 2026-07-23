@@ -80,7 +80,7 @@ const navGroups = [
     label: 'Transaksi',
     icon: '💳',
     items: [
-      { name: 'bookings', label: 'Booking', icon: '📅', roles: ADMINS },
+      { name: 'bookings', label: 'Booking', icon: '📅', roles: ['admin', 'head_office', 'manager_unit'] },
       { name: 'operational', label: 'Operasional', icon: '💰', roles: ['admin', 'head_office', 'manager_unit', 'admin_unit'] },
       { name: 'procurement', label: 'Procurement', icon: '🛒', roles: ['admin', 'head_office', 'manager_unit', 'admin_unit'] },
       { name: 'treasury', label: 'Kas & Bank', icon: '🏦', roles: ADMINS },
