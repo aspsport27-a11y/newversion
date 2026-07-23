@@ -228,7 +228,7 @@ function switchTab(t) {
     <!-- Rekening -->
     <div v-if="tab === 'accounts'">
       <div class="flex justify-end gap-2 mb-3">
-        <button @click="openTransfer" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">Transfer / Sapu</button>
+        <button @click="openTransfer" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">Pick Up</button>
         <button @click="openAccCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Rekening</button>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -388,7 +388,7 @@ function switchTab(t) {
     <!-- Transfer modal -->
     <div v-if="showTransfer" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
       <div class="bg-white w-full max-w-md rounded-2xl p-5">
-        <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">Transfer / Sapu</h3><button @click="showTransfer = false" class="text-slate-400 text-xl">✕</button></div>
+        <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">Pick Up</h3><button @click="showTransfer = false" class="text-slate-400 text-xl">✕</button></div>
         <div class="space-y-2">
           <select v-model="tForm.from_account_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"><option value="">Dari rekening…</option><option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option></select>
           <select v-model="tForm.to_account_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"><option value="">Ke rekening…</option><option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option></select>
