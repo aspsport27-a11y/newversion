@@ -1467,6 +1467,168 @@ def attendance_list():
     return jsonify(range={"from": d_from, "to": d_to}, count=len(out), attendance=out), 200
 
 
+def _att_scope():
+    """(vid, scope_vids) sesuai role: manager→venue-nya, admin_unit→area,
+    lainnya ikut ?venue_id. scope_vids None = tak dibatasi area."""
+    u = _current_user()
+    vid = request.args.get("venue_id", type=int)
+    if u and u.role == ROLE_MANAGER:
+        return u.venue_id, None
+    if u and u.role == "admin_unit":
+        return vid, ([v.id for v in Venue.query.filter_by(area_id=u.area_id).all()] if u.area_id else [])
+    return vid, None
+
+
+@admin_bp.get("/attendance/roster")
+@jwt_required()
+@VIEW
+def attendance_roster():
+    """Roster kehadiran 1 hari: SEMUA karyawan aktif per venue + statusnya
+    (dihitung live, tak perlu bikin baris kosong). Status: hadir / belum absen
+    (hari ini) / alpha (hari lewat, tak hadir tanpa keterangan) / izin/sakit/cuti."""
+    from datetime import timedelta
+
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
+    the_date = request.args.get("date") or today.isoformat()
+    try:
+        d = date.fromisoformat(the_date)
+    except ValueError:
+        return _err("Format tanggal salah", "bad_request")
+    is_today = d >= today
+
+    vid, scope_vids = _att_scope()
+    empq = Employee.query.filter(Employee.status == "active")
+    if vid:
+        empq = empq.filter(Employee.venue_id == vid)
+    elif scope_vids is not None:
+        empq = empq.filter(Employee.venue_id.in_(scope_vids)) if scope_vids else empq.filter(db.false())
+    employees = empq.order_by(Employee.name).all()
+    emp_ids = [e.id for e in employees]
+
+    atts = {
+        a.employee_id: a
+        for a in Attendance.query.filter(Attendance.date == d, Attendance.employee_id.in_(emp_ids)).all()
+    } if emp_ids else {}
+    vmap = {v.id: v.code for v in Venue.query.all()}
+
+    def status_of(a):
+        if a and a.status:
+            return a.status  # izin | sakit | cuti
+        if a and a.check_in:
+            return "hadir"
+        return "belum" if is_today else "alpha"
+
+    rows, summary = [], {"hadir": 0, "belum": 0, "alpha": 0, "izin": 0, "sakit": 0, "cuti": 0}
+    for e in employees:
+        a = atts.get(e.id)
+        st = status_of(a)
+        summary[st] = summary.get(st, 0) + 1
+        base = {
+            "employee_id": e.id, "name": e.name, "position": e.position,
+            "venue_id": e.venue_id, "venue_code": vmap.get(e.venue_id),
+            "att_status": st, "attendance_id": a.id if a else None,
+            "check_in": None, "check_out": None, "check_out_date": None,
+            "out_next_day": False, "work_hours": None, "status": None,
+            "has_in_photo": False, "has_out_photo": False,
+            "check_in_address": None, "check_out_address": None,
+        }
+        if a:
+            base.update(a.to_dict(name=e.name))
+            base["att_status"] = st
+            base["attendance_id"] = a.id
+        rows.append(base)
+    return jsonify(date=the_date, count=len(rows), summary=summary, rows=rows), 200
+
+
+@admin_bp.post("/attendance/leave")
+@jwt_required()
+@MANAGE_HR
+def attendance_set_leave():
+    """Tandai karyawan izin/sakit/cuti pada 1 tanggal (atau 'clear' utk batal).
+    Manajer hanya utk venue-nya. Cuti panjang = tandai per hari (keputusan user)."""
+    d = request.get_json(silent=True) or {}
+    emp = db.session.get(Employee, d.get("employee_id"))
+    if not emp:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and emp.venue_id not in vids:
+        return _err("Karyawan di luar cakupan venue Anda", "forbidden", 403)
+    status = (d.get("status") or "").strip()
+    if status not in ("izin", "sakit", "cuti", "clear"):
+        return _err("status harus izin/sakit/cuti/clear", "bad_request")
+    try:
+        the_date = date.fromisoformat(d.get("date"))
+    except (ValueError, TypeError):
+        return _err("Tanggal tidak valid", "bad_request")
+
+    row = Attendance.query.filter_by(employee_id=emp.id, date=the_date).first()
+    if row is None:
+        if status == "clear":
+            return jsonify(message="Tidak ada yang diubah"), 200
+        acc = User.query.filter_by(employee_id=emp.id).first()
+        row = Attendance(user_id=acc.id if acc else None, employee_id=emp.id,
+                         venue_id=emp.venue_id, date=the_date)
+        db.session.add(row)
+    if status == "clear":
+        # baris murni keterangan (tanpa absen) → hapus; kalau ada absen, cukup lepas status
+        if not row.check_in and not row.check_out:
+            db.session.delete(row)
+        else:
+            row.status = None
+    else:
+        row.status = status
+    db.session.commit()
+    return jsonify(message="Tersimpan"), 200
+
+
+@admin_bp.get("/attendance/leave-report")
+@jwt_required()
+@VIEW
+def attendance_leave_report():
+    """Rekap izin/sakit/cuti per periode, per karyawan (jumlah hari tiap jenis)."""
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
+    d_from = request.args.get("from") or today.replace(day=1).isoformat()
+    d_to = request.args.get("to") or today.isoformat()
+    vid, scope_vids = _att_scope()
+
+    q = Attendance.query.filter(
+        Attendance.date.between(d_from, d_to),
+        Attendance.status.in_(["izin", "sakit", "cuti"]),
+    )
+    if vid:
+        q = q.filter(Attendance.venue_id == vid)
+    elif scope_vids is not None:
+        q = q.filter(Attendance.venue_id.in_(scope_vids)) if scope_vids else q.filter(db.false())
+    recs = q.order_by(Attendance.date.desc()).all()
+
+    emp_ids = {r.employee_id for r in recs if r.employee_id}
+    emps = {e.id: e for e in Employee.query.filter(Employee.id.in_(emp_ids)).all()} if emp_ids else {}
+    vmap = {v.id: v.code for v in Venue.query.all()}
+
+    per_emp, detail = {}, []
+    for r in recs:
+        e = emps.get(r.employee_id)
+        nm = e.name if e else "—"
+        pe = per_emp.setdefault(r.employee_id, {
+            "employee_id": r.employee_id, "name": nm,
+            "venue_code": vmap.get(r.venue_id), "izin": 0, "sakit": 0, "cuti": 0,
+        })
+        pe[r.status] = pe.get(r.status, 0) + 1
+        detail.append({
+            "date": r.date.isoformat(), "name": nm, "venue_code": vmap.get(r.venue_id),
+            "status": r.status,
+        })
+    total = {"izin": 0, "sakit": 0, "cuti": 0}
+    for pe in per_emp.values():
+        for k in total:
+            total[k] += pe[k]
+    return jsonify(
+        range={"from": d_from, "to": d_to},
+        per_employee=sorted(per_emp.values(), key=lambda x: x["name"]),
+        detail=detail, total=total,
+    ), 200
+
+
 @admin_bp.get("/attendance/<int:aid>/photo/<which>")
 @jwt_required()
 @VIEW

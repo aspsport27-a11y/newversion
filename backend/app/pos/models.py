@@ -450,6 +450,9 @@ class Attendance(db.Model):
     # alamat hasil reverse geocoding (Nominatim/OSM), disimpan sekali saat absen
     check_in_address = db.Column(db.String(255))
     check_out_address = db.Column(db.String(255))
+    # keterangan tak-hadir: izin | sakit | cuti (NULL = hari kerja normal,
+    # status hadir/belum/alpha dihitung dr check_in). Ditandai manual di portal.
+    status = db.Column(db.String(10))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (db.UniqueConstraint("user_id", "date"),)
@@ -459,12 +462,19 @@ class Attendance(db.Model):
         dur = None
         if self.check_in and self.check_out:
             dur = round((self.check_out - self.check_in).total_seconds() / 3600, 2)
+        # jam pulang beda tanggal dgn masuk (shift malam lintas tengah malam)
+        out_next_day = bool(
+            self.check_in and self.check_out
+            and self.check_out.date() != self.check_in.date()
+        )
         return {
             "id": self.id, "user_id": self.user_id, "employee_id": self.employee_id,
             "venue_id": self.venue_id, "name": name,
             "date": self.date.isoformat() if self.date else None,
             "check_in": hm(self.check_in), "check_out": hm(self.check_out),
-            "work_hours": dur,
+            "check_out_date": self.check_out.date().isoformat() if self.check_out else None,
+            "out_next_day": out_next_day,
+            "work_hours": dur, "status": self.status,
             "has_in_photo": bool(self.check_in_photo),
             "has_out_photo": bool(self.check_out_photo),
             "check_in_location": self.check_in_location,

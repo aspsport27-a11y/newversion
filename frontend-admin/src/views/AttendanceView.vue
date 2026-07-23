@@ -5,190 +5,279 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
-const canDelete = computed(() => auth.hasPerm('hr.manage'))
+const canManage = computed(() => auth.hasPerm('hr.manage'))
 const busy = ref(false)
 
+const tab = ref('roster') // 'roster' | 'leave'
 const venues = ref([])
 const venueId = ref('')
-const nameFilter = ref('')
-const rows = ref([])
-const loading = ref(false)
-// default rentang: 7 hari terakhir
-const today = new Date().toISOString().slice(0, 10)
-const weekAgo = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10)
-const from = ref(weekAgo)
-const to = ref(today)
+
+// ---------- Roster (kehadiran 1 hari) ----------
+const rosterDate = ref(new Date().toISOString().slice(0, 10))
+const rosterRows = ref([])
+const rosterSummary = ref({})
+const rosterLoading = ref(false)
+const statusFilter = ref('')
+const nameSearch = ref('')
+
+const STATUS = {
+  hadir: ['Hadir', 'bg-emerald-100 text-emerald-700'],
+  belum: ['Belum absen', 'bg-slate-100 text-slate-500'],
+  alpha: ['Alpha', 'bg-red-100 text-red-600'],
+  izin: ['Izin', 'bg-blue-100 text-blue-700'],
+  sakit: ['Sakit', 'bg-amber-100 text-amber-700'],
+  cuti: ['Cuti', 'bg-purple-100 text-purple-700'],
+}
+function stLabel(s) { return STATUS[s]?.[0] || s }
+function stClass(s) { return STATUS[s]?.[1] || 'bg-slate-100 text-slate-500' }
 
 async function loadVenues() {
   const { data } = await client.get('/admin/venues')
   venues.value = data.venues
 }
-async function load() {
-  loading.value = true
-  const params = { from: from.value, to: to.value }
+async function loadRoster() {
+  rosterLoading.value = true
+  const params = { date: rosterDate.value }
   if (!isManager.value && venueId.value) params.venue_id = venueId.value
   try {
-    const { data } = await client.get('/admin/attendance', { params })
-    rows.value = data.attendance
-  } finally { loading.value = false }
+    const { data } = await client.get('/admin/attendance/roster', { params })
+    rosterRows.value = data.rows
+    rosterSummary.value = data.summary
+  } finally { rosterLoading.value = false }
+}
+const rosterShown = computed(() => {
+  let list = rosterRows.value
+  if (statusFilter.value) list = list.filter((r) => r.att_status === statusFilter.value)
+  const q = nameSearch.value.trim().toLowerCase()
+  if (q) list = list.filter((r) => (r.name || '').toLowerCase().includes(q))
+  return list
+})
+
+async function setLeave(row, status) {
+  const emp = row.name
+  const verb = status === 'clear' ? 'batalkan keterangan' : status
+  if (!window.confirm(`Tandai ${emp} "${verb}" tanggal ${rosterDate.value}?`)) return
+  busy.value = true
+  try {
+    await client.post('/admin/attendance/leave', {
+      employee_id: row.employee_id, date: rosterDate.value, status,
+    })
+    await loadRoster()
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
 
-// nama yang tersedia diambil dari data yang sudah dimuat — otomatis
-// mengikuti venue yang dipilih (rows sudah di-scope venue_id di load())
-const availableNames = computed(() => [...new Set(rows.value.map((r) => r.name))].sort())
-const filtered = computed(() => {
-  if (!nameFilter.value) return rows.value
-  return rows.value.filter((r) => r.name === nameFilter.value)
-})
-// lihat foto absen (endpoint butuh auth → ambil blob lalu tampilkan)
+// ---------- Laporan Izin/Sakit/Cuti ----------
+const today = new Date().toISOString().slice(0, 10)
+const firstOfMonth = today.slice(0, 8) + '01'
+const lvFrom = ref(firstOfMonth)
+const lvTo = ref(today)
+const lvPerEmp = ref([])
+const lvDetail = ref([])
+const lvTotal = ref({})
+const lvLoading = ref(false)
+async function loadLeave() {
+  lvLoading.value = true
+  const params = { from: lvFrom.value, to: lvTo.value }
+  if (!isManager.value && venueId.value) params.venue_id = venueId.value
+  try {
+    const { data } = await client.get('/admin/attendance/leave-report', { params })
+    lvPerEmp.value = data.per_employee
+    lvDetail.value = data.detail
+    lvTotal.value = data.total
+  } finally { lvLoading.value = false }
+}
+
+function switchTab(t) {
+  tab.value = t
+  if (t === 'roster') loadRoster()
+  else loadLeave()
+}
+
+// ---------- Foto & lokasi ----------
 const photoUrl = ref('')
 const photoTitle = ref('')
 async function openPhoto(row, which) {
   try {
-    const { data } = await client.get(`/admin/attendance/${row.id}/photo/${which}`, { responseType: 'blob' })
+    const { data } = await client.get(`/admin/attendance/${row.attendance_id}/photo/${which}`, { responseType: 'blob' })
     photoUrl.value = URL.createObjectURL(data)
-    photoTitle.value = `${row.name} — Absen ${which === 'in' ? 'Masuk' : 'Pulang'} ${which === 'in' ? row.check_in : row.check_out}`
+    photoTitle.value = `${row.name} — Absen ${which === 'in' ? 'Masuk' : 'Pulang'}`
   } catch { alert('Foto tidak tersedia.') }
 }
-function closePhoto() { if (photoUrl.value) URL.revokeObjectURL(photoUrl.value); photoUrl.value = ''; }
+function closePhoto() { if (photoUrl.value) URL.revokeObjectURL(photoUrl.value); photoUrl.value = '' }
+function shortAddr(full) { return full ? full.split(',').slice(0, 2).join(',').trim() : '' }
 
-async function deleteRow(a) {
-  if (!window.confirm(`Hapus data absensi ${a.name} tanggal ${a.date}?`)) return
-  busy.value = true
-  try { await client.delete(`/admin/attendance/${a.id}`); await load() }
-  catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') } finally { busy.value = false }
+// ---------- Export ----------
+function csvDownload(name, header, body) {
+  const csv = [header, ...body].map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
+  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
+  const el = document.createElement('a'); el.href = url; el.download = name; el.click(); URL.revokeObjectURL(url)
+}
+function exportRoster() {
+  csvDownload(`kehadiran-${rosterDate.value}.csv`,
+    ['Tanggal', 'Nama', 'Posisi', 'Venue', 'Status', 'Masuk', 'Pulang', 'Jam Kerja'],
+    rosterShown.value.map((r) => [rosterDate.value, r.name, r.position || '', r.venue_code || '',
+      stLabel(r.att_status), r.check_in || '', r.check_out ? r.check_out + (r.out_next_day ? ' (+1hr)' : '') : '',
+      r.work_hours != null ? r.work_hours : '']))
+}
+function exportLeave() {
+  csvDownload(`izin-sakit-cuti-${lvFrom.value}_${lvTo.value}.csv`,
+    ['Tanggal', 'Nama', 'Venue', 'Keterangan'],
+    lvDetail.value.map((r) => [r.date, r.name, r.venue_code || '', r.status]))
 }
 
-// alamat lengkap dari Nominatim bisa panjang — tampilkan cuma 2 bagian
-// paling spesifik (biasanya kelurahan + kecamatan), teks lengkap di title (hover)
-function shortAddr(full) {
-  if (!full) return ''
-  return full.split(',').slice(0, 2).join(',').trim()
-}
-
-// ---- Paging ----
-const page = ref(1)
-const pageSize = ref(20)
-const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
-const paged = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filtered.value.slice(start, start + pageSize.value)
-})
-function applyFilter() { page.value = 1; nameFilter.value = ''; load() }
-function applyNameFilter() { page.value = 1 }
-
-// ---- Export Excel (CSV, langsung bisa dibuka Excel) ----
-function exportExcel() {
-  const header = ['Tanggal', 'Nama', 'Venue', 'Masuk', 'Lokasi Masuk', 'Pulang', 'Lokasi Pulang', 'Jam Kerja']
-  const body = filtered.value.map((a) => [
-    a.date, a.name, a.venue_code || '',
-    a.check_in || '', a.check_in_address || a.check_in_location || '',
-    a.check_out || '', a.check_out_address || a.check_out_location || '',
-    a.work_hours != null ? a.work_hours : '',
-  ])
-  const csv = [header, ...body]
-    .map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
-    .join('\r\n')
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const el = document.createElement('a')
-  el.href = url; el.download = `absensi-${from.value}_${to.value}.csv`; el.click()
-  URL.revokeObjectURL(url)
-}
-
-onMounted(async () => { await loadVenues(); await load() })
+onMounted(async () => { await loadVenues(); await loadRoster() })
 </script>
 
 <template>
   <div>
     <h1 class="text-2xl font-bold text-slate-800 mb-1">Absensi</h1>
-    <p class="text-slate-500 mb-5">Rekap kehadiran staff — dari absen PIN di terminal POS (waktu WITA).</p>
+    <p class="text-slate-500 mb-5">Kehadiran staff (absen PIN di terminal POS, waktu WITA). Shift malam yang pulang lewat tengah malam dihitung ke hari mulai kerja.</p>
 
-    <div class="bg-white rounded-xl shadow-sm border p-4 mb-5 flex flex-wrap items-end gap-3">
-      <div><label class="block text-xs text-slate-500 mb-1">Dari</label>
-        <input v-model="from" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
-      <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
-        <input v-model="to" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
-      <div v-if="!isManager"><label class="block text-xs text-slate-500 mb-1">Venue</label>
-        <select v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-          <option value="">Semua venue (cakupan saya)</option>
-          <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
-        </select></div>
-      <div><label class="block text-xs text-slate-500 mb-1">Nama</label>
-        <select v-model="nameFilter" @change="applyNameFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-          <option value="">Semua nama{{ !isManager && venueId ? ' (venue ini)' : '' }}</option>
-          <option v-for="n in availableNames" :key="n" :value="n">{{ n }}</option>
-        </select></div>
-      <button @click="applyFilter" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
-      <button @click="exportExcel" :disabled="!filtered.length" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg px-5 py-2 font-medium disabled:opacity-40 ml-auto">📊 Excel</button>
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-5 border-b">
+      <button @click="switchTab('roster')" :class="tab === 'roster' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Kehadiran</button>
+      <button @click="switchTab('leave')" :class="tab === 'leave' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Izin / Sakit / Cuti</button>
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
-      <div class="overflow-x-auto">
+    <!-- ============ TAB KEHADIRAN (roster) ============ -->
+    <template v-if="tab === 'roster'">
+      <div class="bg-white rounded-xl shadow-sm border p-4 mb-4 flex flex-wrap items-end gap-3">
+        <div><label class="block text-xs text-slate-500 mb-1">Tanggal</label>
+          <input v-model="rosterDate" @change="loadRoster" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+        <div v-if="!isManager"><label class="block text-xs text-slate-500 mb-1">Venue</label>
+          <select v-model="venueId" @change="loadRoster" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+            <option value="">Semua venue (cakupan saya)</option>
+            <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+          </select></div>
+        <div><label class="block text-xs text-slate-500 mb-1">Status</label>
+          <select v-model="statusFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+            <option value="">Semua status</option>
+            <option value="belum">Belum absen</option><option value="hadir">Hadir</option>
+            <option value="alpha">Alpha</option><option value="izin">Izin</option>
+            <option value="sakit">Sakit</option><option value="cuti">Cuti</option>
+          </select></div>
+        <div><label class="block text-xs text-slate-500 mb-1">Cari nama</label>
+          <input v-model="nameSearch" placeholder="Nama…" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+        <button @click="exportRoster" :disabled="!rosterShown.length" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-40 ml-auto">📊 Excel</button>
+      </div>
+
+      <!-- Ringkasan status -->
+      <div class="flex flex-wrap gap-2 mb-4">
+        <span v-for="k in ['hadir','belum','alpha','izin','sakit','cuti']" :key="k"
+          :class="stClass(k)" class="text-xs rounded-full px-3 py-1 font-medium">{{ stLabel(k) }}: {{ rosterSummary[k] || 0 }}</span>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-2 font-medium">Nama</th>
+              <th class="px-4 py-2 font-medium">Posisi</th>
+              <th class="px-4 py-2 font-medium text-center">Status</th>
+              <th class="px-4 py-2 font-medium text-center">Masuk</th>
+              <th class="px-4 py-2 font-medium text-center">Pulang</th>
+              <th class="px-4 py-2 font-medium">Lokasi</th>
+              <th class="px-4 py-2 font-medium text-right">Jam</th>
+              <th v-if="canManage" class="px-4 py-2 font-medium text-center">Keterangan</th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="rosterLoading"><td :colspan="canManage ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!rosterShown.length"><td :colspan="canManage ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Tidak ada karyawan.</td></tr>
+              <tr v-for="r in rosterShown" :key="r.employee_id" class="border-t">
+                <td class="px-4 py-2 text-slate-700 font-medium">{{ r.name }}</td>
+                <td class="px-4 py-2 text-slate-500 text-xs">{{ r.position || '—' }}</td>
+                <td class="px-4 py-2 text-center"><span :class="stClass(r.att_status)" class="text-xs rounded-full px-2 py-0.5">{{ stLabel(r.att_status) }}</span></td>
+                <td class="px-4 py-2 text-center whitespace-nowrap">
+                  <span :class="r.check_in ? 'text-emerald-700' : 'text-slate-300'">{{ r.check_in || '—' }}</span>
+                  <button v-if="r.has_in_photo" @click="openPhoto(r, 'in')" title="Lihat foto" class="ml-1">📷</button>
+                </td>
+                <td class="px-4 py-2 text-center whitespace-nowrap">
+                  <span v-if="r.check_out" class="text-slate-700">{{ r.check_out }}<span v-if="r.out_next_day" class="text-[10px] text-amber-600"> (+1hr)</span></span>
+                  <span v-else class="text-slate-300">—</span>
+                  <button v-if="r.has_out_photo" @click="openPhoto(r, 'out')" title="Lihat foto" class="ml-1">📷</button>
+                </td>
+                <td class="px-4 py-2 text-xs max-w-[180px]">
+                  <a v-if="r.check_in_location" :href="`https://www.google.com/maps?q=${r.check_in_location}`" target="_blank" rel="noopener" :title="r.check_in_address || ''" class="block text-brand-600 hover:underline truncate">📍 {{ shortAddr(r.check_in_address) || 'Masuk' }}</a>
+                  <span v-else class="text-slate-300">—</span>
+                </td>
+                <td class="px-4 py-2 text-right text-slate-600">{{ r.work_hours != null ? r.work_hours : '—' }}</td>
+                <td v-if="canManage" class="px-4 py-2 text-center whitespace-nowrap">
+                  <template v-if="['izin','sakit','cuti'].includes(r.att_status)">
+                    <button @click="setLeave(r, 'clear')" :disabled="busy" class="text-xs text-red-500 hover:underline disabled:opacity-50">Batal</button>
+                  </template>
+                  <template v-else-if="!r.check_in">
+                    <button @click="setLeave(r, 'izin')" :disabled="busy" class="text-xs bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 mr-1">Izin</button>
+                    <button @click="setLeave(r, 'sakit')" :disabled="busy" class="text-xs bg-amber-50 text-amber-700 rounded px-1.5 py-0.5 mr-1">Sakit</button>
+                    <button @click="setLeave(r, 'cuti')" :disabled="busy" class="text-xs bg-purple-50 text-purple-700 rounded px-1.5 py-0.5">Cuti</button>
+                  </template>
+                  <span v-else class="text-slate-300 text-xs">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============ TAB IZIN/SAKIT/CUTI (laporan) ============ -->
+    <template v-else>
+      <div class="bg-white rounded-xl shadow-sm border p-4 mb-4 flex flex-wrap items-end gap-3">
+        <div><label class="block text-xs text-slate-500 mb-1">Dari</label>
+          <input v-model="lvFrom" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+        <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
+          <input v-model="lvTo" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+        <div v-if="!isManager"><label class="block text-xs text-slate-500 mb-1">Venue</label>
+          <select v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+            <option value="">Semua venue (cakupan saya)</option>
+            <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+          </select></div>
+        <button @click="loadLeave" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
+        <button @click="exportLeave" :disabled="!lvDetail.length" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-40 ml-auto">📊 Excel</button>
+      </div>
+
+      <div class="flex flex-wrap gap-2 mb-4">
+        <span class="text-xs rounded-full px-3 py-1 font-medium bg-blue-100 text-blue-700">Izin: {{ lvTotal.izin || 0 }} hari</span>
+        <span class="text-xs rounded-full px-3 py-1 font-medium bg-amber-100 text-amber-700">Sakit: {{ lvTotal.sakit || 0 }} hari</span>
+        <span class="text-xs rounded-full px-3 py-1 font-medium bg-purple-100 text-purple-700">Cuti: {{ lvTotal.cuti || 0 }} hari</span>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-5">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-            <th class="px-4 py-2 font-medium">Tanggal</th>
-            <th class="px-4 py-2 font-medium">Nama</th>
-            <th class="px-4 py-2 font-medium">Venue</th>
-            <th class="px-4 py-2 font-medium text-center">Masuk</th>
-            <th class="px-4 py-2 font-medium text-center">Pulang</th>
-            <th class="px-4 py-2 font-medium">Lokasi</th>
-            <th class="px-4 py-2 font-medium text-right">Jam Kerja</th>
-            <th v-if="canDelete" class="px-4 py-2"></th>
+            <th class="px-4 py-2 font-medium">Nama</th><th class="px-4 py-2 font-medium">Venue</th>
+            <th class="px-4 py-2 font-medium text-right">Izin</th><th class="px-4 py-2 font-medium text-right">Sakit</th><th class="px-4 py-2 font-medium text-right">Cuti</th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td :colspan="canDelete ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!rows.length"><td :colspan="canDelete ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Belum ada data absen pada rentang ini.</td></tr>
-            <tr v-else-if="!filtered.length"><td :colspan="canDelete ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Tidak ada data untuk nama yang dipilih.</td></tr>
-            <tr v-for="a in paged" :key="a.id" class="border-t">
-              <td class="px-4 py-2 text-slate-500">{{ a.date }}</td>
-              <td class="px-4 py-2 text-slate-700 font-medium">{{ a.name }}</td>
-              <td class="px-4 py-2 text-slate-500">{{ a.venue_code || '—' }}</td>
-              <td class="px-4 py-2 text-center whitespace-nowrap">
-                <span :class="a.check_in ? 'text-emerald-700' : 'text-slate-300'">{{ a.check_in || '—' }}</span>
-                <button v-if="a.has_in_photo" @click="openPhoto(a, 'in')" title="Lihat foto" class="ml-1">📷</button>
-              </td>
-              <td class="px-4 py-2 text-center whitespace-nowrap">
-                <span :class="a.check_out ? 'text-slate-700' : 'text-amber-500'">{{ a.check_out || 'belum' }}</span>
-                <button v-if="a.has_out_photo" @click="openPhoto(a, 'out')" title="Lihat foto" class="ml-1">📷</button>
-              </td>
-              <td class="px-4 py-2 text-xs max-w-[220px]">
-                <a v-if="a.check_in_location" :href="`https://www.google.com/maps?q=${a.check_in_location}`" target="_blank" rel="noopener"
-                  :title="a.check_in_address || ''" class="block text-brand-600 hover:underline truncate">
-                  📍 {{ shortAddr(a.check_in_address) || 'Masuk' }}
-                </a>
-                <a v-if="a.check_out_location" :href="`https://www.google.com/maps?q=${a.check_out_location}`" target="_blank" rel="noopener"
-                  :title="a.check_out_address || ''" class="block text-brand-600 hover:underline truncate">
-                  📍 {{ shortAddr(a.check_out_address) || 'Pulang' }}
-                </a>
-                <span v-if="!a.check_in_location && !a.check_out_location" class="text-slate-300">—</span>
-              </td>
-              <td class="px-4 py-2 text-right text-slate-600">{{ a.work_hours != null ? a.work_hours + ' jam' : '—' }}</td>
-              <td v-if="canDelete" class="px-4 py-2 text-right">
-                <button @click="deleteRow(a)" :disabled="busy" class="text-red-500 hover:underline text-xs disabled:opacity-50">Hapus</button>
-              </td>
+            <tr v-if="lvLoading"><td colspan="5" class="px-4 py-6 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!lvPerEmp.length"><td colspan="5" class="px-4 py-6 text-center text-slate-400">Tidak ada izin/sakit/cuti pada periode ini.</td></tr>
+            <tr v-for="e in lvPerEmp" :key="e.employee_id" class="border-t">
+              <td class="px-4 py-2 text-slate-700 font-medium">{{ e.name }}</td>
+              <td class="px-4 py-2 text-slate-500">{{ e.venue_code || '—' }}</td>
+              <td class="px-4 py-2 text-right">{{ e.izin }}</td>
+              <td class="px-4 py-2 text-right">{{ e.sakit }}</td>
+              <td class="px-4 py-2 text-right">{{ e.cuti }}</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <div v-if="filtered.length" class="flex items-center justify-between gap-3 px-4 py-3 border-t flex-wrap">
-        <p class="text-xs text-slate-500">
-          Menampilkan {{ (page - 1) * pageSize + 1 }}–{{ Math.min(page * pageSize, filtered.length) }} dari {{ filtered.length }} data
-        </p>
-        <div class="flex items-center gap-2">
-          <select v-model.number="pageSize" @change="page = 1" class="rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-brand-500">
-            <option :value="20">20 / halaman</option>
-            <option :value="50">50 / halaman</option>
-            <option :value="100">100 / halaman</option>
-          </select>
-          <button @click="page = 1" :disabled="page === 1" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">«</button>
-          <button @click="page--" :disabled="page === 1" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">‹ Sebelumnya</button>
-          <span class="text-xs text-slate-500">Halaman {{ page }} / {{ totalPages }}</span>
-          <button @click="page++" :disabled="page === totalPages" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">Berikutnya ›</button>
-          <button @click="page = totalPages" :disabled="page === totalPages" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">»</button>
-        </div>
+
+      <div v-if="lvDetail.length" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <p class="text-xs font-medium text-slate-400 px-4 pt-3">Rincian per tanggal</p>
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+            <th class="px-4 py-2 font-medium">Tanggal</th><th class="px-4 py-2 font-medium">Nama</th><th class="px-4 py-2 font-medium">Venue</th><th class="px-4 py-2 font-medium text-center">Keterangan</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="(r, i) in lvDetail" :key="i" class="border-t">
+              <td class="px-4 py-2 text-slate-500">{{ r.date }}</td>
+              <td class="px-4 py-2 text-slate-700">{{ r.name }}</td>
+              <td class="px-4 py-2 text-slate-500">{{ r.venue_code || '—' }}</td>
+              <td class="px-4 py-2 text-center"><span :class="stClass(r.status)" class="text-xs rounded-full px-2 py-0.5">{{ stLabel(r.status) }}</span></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
-    </div>
+    </template>
 
     <!-- Foto absen -->
     <div v-if="photoUrl" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" @click.self="closePhoto">

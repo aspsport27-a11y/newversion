@@ -218,31 +218,45 @@ def pos_attendance():
             name = emp.name
 
     today = now.date()
-    row = Attendance.query.filter_by(user_id=user.id, date=today).first()
-    if row is None:
-        row = Attendance(
-            user_id=user.id, employee_id=user.employee_id,
-            venue_id=terminal.venue_id, terminal_id=terminal.id, date=today,
-        )
-        db.session.add(row)
 
     # lokasi GPS (opsional — "lat,lon" dari geolocation browser), verifikasi
     # absen dilakukan di luar/lokasi venue, bukan bukti wajib
     location = (data.get("location") or "").strip()[:100] or None
-
     address = _reverse_geocode(location) if location else None
 
     if action == "in":
+        row = Attendance.query.filter_by(user_id=user.id, date=today).first()
+        if row is None:
+            row = Attendance(
+                user_id=user.id, employee_id=user.employee_id,
+                venue_id=terminal.venue_id, terminal_id=terminal.id, date=today,
+            )
+            db.session.add(row)
         if row.check_in:
             return jsonify(error="already", message=f"{name} sudah absen masuk hari ini "
                            f"({row.check_in.strftime('%H:%M')})"), 409
+        row.status = None  # ternyata datang → batalkan tanda izin/sakit/cuti kalau ada
         row.check_in = now
         row.check_in_location = location
         row.check_in_address = address
     else:
-        if row.check_out:
-            return jsonify(error="already", message=f"{name} sudah absen pulang hari ini "
-                           f"({row.check_out.strftime('%H:%M')})"), 409
+        # absen pulang → tutup shift TERBUKA (sudah masuk, belum pulang), termasuk
+        # shift malam yg masuk kemarin & pulang lewat tengah malam. Cari dlm 18 jam
+        # terakhir supaya sisa lupa-checkout hari-hari lama tak ikut ke-tutup.
+        row = (
+            Attendance.query
+            .filter(
+                Attendance.user_id == user.id,
+                Attendance.check_in.isnot(None),
+                Attendance.check_out.is_(None),
+                Attendance.check_in >= now - timedelta(hours=18),
+            )
+            .order_by(Attendance.check_in.desc())
+            .first()
+        )
+        if row is None:
+            return jsonify(error="no_checkin", message=f"{name} belum absen masuk "
+                           "(atau shift-nya sudah lewat > 18 jam)"), 409
         row.check_out = now
         row.check_out_location = location
         row.check_out_address = address
