@@ -519,6 +519,89 @@ def order_create():
     return jsonify(order=order.to_dict()), 201
 
 
+@pos_bp.post("/bookings/member")
+@jwt_required()
+def booking_member():
+    """Booking member: 1 lapangan + jam SAMA, berulang di banyak tanggal (pola
+    hari-dalam-minggu × rentang tanggal, mis. tiap Sen&Rab selama sebulan),
+    jadi 1 order dgn diskon member (% atau Rp). Tanggal yg bentrok booking lain
+    DILEWATI otomatis & dilaporkan. weekdays: list int 0=Senin..6=Minggu."""
+    from datetime import timedelta
+    from .services import _hours_between, _parse_time, is_slot_available
+    from .models import Facility, facility_booking_price
+
+    terminal = _current_terminal()
+    shift = _current_open_shift(terminal.id)
+    data = request.get_json(silent=True) or {}
+
+    facility = db.session.get(Facility, data.get("facility_id"))
+    if not facility or not facility.is_active or facility.venue_id != terminal.venue_id:
+        raise PosError("Lapangan tidak ditemukan", "not_found", 404)
+
+    weekdays = data.get("weekdays") or []
+    if not isinstance(weekdays, list) or not weekdays:
+        raise PosError("Pilih minimal 1 hari", "bad_request")
+    try:
+        d_from = date.fromisoformat(data["date_from"])
+        d_to = date.fromisoformat(data["date_to"])
+        start = _parse_time(data["start_time"])
+        end = _parse_time(data["end_time"])
+    except (KeyError, ValueError, TypeError):
+        raise PosError("Tanggal/jam tidak valid", "bad_request")
+    if d_to < d_from:
+        raise PosError("Rentang tanggal terbalik", "bad_request")
+    if (d_to - d_from).days > 120:
+        raise PosError("Rentang maksimal 120 hari", "bad_request")
+    hours = _hours_between(start, end)
+    if hours <= 0:
+        raise PosError("Jam selesai harus setelah jam mulai", "bad_booking_range")
+
+    wd = {int(x) for x in weekdays}
+    candidates, cur = [], d_from
+    while cur <= d_to:
+        if cur.weekday() in wd:
+            candidates.append(cur)
+        cur += timedelta(days=1)
+    if not candidates:
+        raise PosError("Tidak ada tanggal yang cocok dgn pola & rentang", "no_dates")
+
+    booked, skipped = [], []
+    for cd in candidates:
+        (booked if is_slot_available(facility.id, cd, start, end) else skipped).append(cd)
+    if not booked:
+        raise PosError("Semua tanggal bentrok booking lain — tak ada yg bisa dibooking", "all_conflict", 409)
+
+    items = [{
+        "item_type": "booking", "facility_id": facility.id,
+        "booking_date": cd.isoformat(), "start_time": data["start_time"], "end_time": data["end_time"],
+    } for cd in booked]
+
+    end_hour = start.hour + int(hours)
+    per_session = round(facility_booking_price(facility, start.hour, end_hour), 2)
+    subtotal = round(per_session * len(booked), 2)
+    dtype = data.get("discount_type")
+    dval = float(data.get("discount_value") or 0)
+    if dtype == "percent":
+        discount = round(subtotal * max(0.0, min(dval, 100.0)) / 100.0, 2)
+    elif dtype == "amount":
+        discount = max(0.0, dval)
+    else:
+        discount = 0.0
+    discount = min(discount, subtotal)
+
+    order = create_order(shift, int(get_jwt_identity()), {
+        "items": items, "discount_amount": discount,
+        "customer_name": data.get("customer_name"), "customer_phone": data.get("customer_phone"),
+    })
+    db.session.commit()
+    return jsonify(
+        order=order.to_dict(),
+        per_session=per_session,
+        booked_dates=[c.isoformat() for c in booked],
+        skipped_dates=[c.isoformat() for c in skipped],
+    ), 201
+
+
 @pos_bp.get("/orders/outstanding")
 @jwt_required()
 def orders_outstanding():

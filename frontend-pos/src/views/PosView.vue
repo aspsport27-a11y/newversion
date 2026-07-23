@@ -7,6 +7,7 @@ import PaymentDialog from '../components/PaymentDialog.vue'
 import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
 import BookingDialog from '../components/BookingDialog.vue'
+import MemberBookingDialog from '../components/MemberBookingDialog.vue'
 import SettlementDialog from '../components/SettlementDialog.vue'
 import AbsenDialog from '../components/AbsenDialog.vue'
 import StationStartDialog from '../components/StationStartDialog.vue'
@@ -25,6 +26,7 @@ const showPayment = ref(false)
 const showReceipt = ref(false)
 const showClose = ref(false)
 const showBooking = ref(false)
+const showMember = ref(false)
 const showSettle = ref(false)
 const lastResult = ref(null)
 const toast = ref('')
@@ -100,6 +102,18 @@ function onStationStopped(result) {
   sessionStation.value = null
   pendingStationOrder.value = result.order
   showPayment.value = true
+}
+// booking member: order sudah dibuat di server → langsung ke pembayaran
+// (reuse jalur pendingStationOrder = "order yg sudah ada, tinggal bayar")
+function onMemberCreated({ order, booked, skipped }) {
+  showMember.value = false
+  pendingStationOrder.value = order
+  showPayment.value = true
+  if (skipped && skipped.length) {
+    flash(`${booked.length} tanggal dibooking, ${skipped.length} dilewati (bentrok).`)
+  } else {
+    flash(`${booked.length} tanggal member dibooking.`)
+  }
 }
 async function onPayStation(payload) {
   try {
@@ -227,13 +241,17 @@ function logout() {
              ditampilkan meski venue tak punya lapangan, mis. venue Station
              Gaming murni, supaya order yg sempat dibuat tapi dialog
              pembayarannya ditutup tanpa bayar tak "hilang" dr jangkauan kasir) -->
-        <div v-if="pos.bookingEnabled || pos.hasStations" class="grid grid-cols-2 gap-2 mb-3">
+        <div v-if="pos.bookingEnabled || pos.hasStations" class="flex flex-wrap gap-2 mb-3">
           <button v-if="pos.bookingEnabled" @click="showBooking = true"
-            class="py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
+            class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
             🏟️ Booking
           </button>
-          <button @click="showSettle = true" :class="pos.bookingEnabled ? '' : 'col-span-2'"
-            class="py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium border border-amber-100 flex items-center justify-center gap-2">
+          <button v-if="pos.bookingEnabled" @click="showMember = true"
+            class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-medium border border-purple-100 flex items-center justify-center gap-2">
+            🗓️ Member
+          </button>
+          <button @click="showSettle = true"
+            class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium border border-amber-100 flex items-center justify-center gap-2">
             💰 Pelunasan
           </button>
         </div>
@@ -377,6 +395,7 @@ function logout() {
       :terminal="pos.terminal" @close="showReceipt = false" />
     <CloseShiftDialog v-if="showClose" :shift="pos.openShift" @close="showClose = false" @submit="onCloseShift" />
     <BookingDialog v-if="showBooking" @close="showBooking = false" @added="flash('Booking ditambahkan ke keranjang')" />
+    <MemberBookingDialog v-if="showMember" @close="showMember = false" @created="onMemberCreated" />
     <SettlementDialog v-if="showSettle" @close="showSettle = false" @paid="onSettlePaid" />
     <StationStartDialog v-if="startStation" :station="startStation" @close="startStation = null"
       @started="startStation = null; pos.fetchStations()" />
