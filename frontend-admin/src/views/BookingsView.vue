@@ -72,26 +72,74 @@ function canDelete(b) {
 
 // ringkasan — booking batal (void) dikeluarkan dari semua total nilai/uang
 const activeBookings = computed(() => shown.value.filter((b) => b.payment_status !== 'void'))
-const totalCount = computed(() => activeBookings.value.length)
-const totalNilai = computed(() => activeBookings.value.reduce((s, b) => s + (b.order_total || 0), 0))
+// 1 order (member) bisa punya banyak tanggal → uang JANGAN dihitung berkali-kali.
+// Ambil 1 wakil per order utk hitungan uang; booking tanpa order dianggap unik.
+const activeOrders = computed(() => {
+  const seen = new Set(); const out = []
+  for (const b of activeBookings.value) {
+    const key = b.order_id ? 'o' + b.order_id : 'b' + b.id
+    if (seen.has(key)) continue
+    seen.add(key); out.push(b)
+  }
+  return out
+})
+const totalCount = computed(() => activeBookings.value.length) // jumlah sesi/jadwal
+const totalNilai = computed(() => activeOrders.value.reduce((s, b) => s + (b.order_total || 0), 0))
 const totalDp = computed(() =>
-  activeBookings.value
+  activeOrders.value
     .filter((b) => b.payment_status === 'partial')
     .reduce((s, b) => s + (b.order_paid || 0), 0),
 )
-const totalDue = computed(() => activeBookings.value.reduce((s, b) => s + (b.order_due || 0), 0))
+const totalDue = computed(() => activeOrders.value.reduce((s, b) => s + (b.order_due || 0), 0))
 
 const perVenue = computed(() => {
   const map = {}
+  const seenOrder = new Set()
   for (const b of activeBookings.value) {
     const vid = b.venue_id
     if (!map[vid]) map[vid] = { venue_id: vid, count: 0, total: 0, due: 0 }
-    map[vid].count += 1
-    map[vid].total += b.order_total || 0
-    map[vid].due += b.order_due || 0
+    map[vid].count += 1 // sesi
+    const okey = b.order_id ? 'o' + b.order_id : 'b' + b.id
+    if (!seenOrder.has(okey)) {
+      seenOrder.add(okey)
+      map[vid].total += b.order_total || 0
+      map[vid].due += b.order_due || 0
+    }
   }
   return Object.values(map).sort((a, b) => b.total - a.total)
 })
+
+// kelompokkan baris per order: order dgn >1 tanggal (member) → accordion
+// (1 baris ringkas + rincian tanggal saat dibuka); order 1 tanggal → baris biasa
+const openOrders = ref(new Set())
+function toggleOrder(id) {
+  const s = new Set(openOrders.value)
+  s.has(id) ? s.delete(id) : s.add(id)
+  openOrders.value = s
+}
+const grouped = computed(() => {
+  const orderMap = new Map(); const items = []
+  for (const b of shown.value) {
+    if (!b.order_id) { items.push({ key: 'b' + b.id, type: 'single', b }); continue }
+    if (!orderMap.has(b.order_id)) {
+      const grp = { key: 'o' + b.order_id, type: 'group', order_id: b.order_id, parent: b, children: [] }
+      orderMap.set(b.order_id, grp); items.push(grp)
+    }
+    orderMap.get(b.order_id).children.push(b)
+  }
+  return items.map((it) =>
+    it.type === 'group' && it.children.length === 1 ? { key: it.key, type: 'single', b: it.children[0] } : it,
+  )
+})
+function grpDateRange(children) {
+  const ds = children.map((c) => c.booking_date).sort()
+  const f = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
+  return ds.length > 1 ? `${f(ds[0])} – ${f(ds[ds.length - 1])}` : f(ds[0])
+}
+function grpJam(children) {
+  const set = new Set(children.map((c) => `${c.start_time}–${c.end_time}`))
+  return set.size === 1 ? [...set][0] : 'beragam'
+}
 function venueName(id) {
   const v = venues.value.find((x) => x.id === id)
   return v ? `${v.code} — ${v.name}` : `#${id}`
@@ -371,31 +419,60 @@ onMounted(async () => { await loadVenues(); await run() })
           <tbody>
             <tr v-if="loading"><td colspan="11" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
             <tr v-else-if="!shown.length"><td colspan="11" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
-            <tr v-for="b in shown" :key="b.id" @click="openDetail(b)" class="border-t hover:bg-slate-50 cursor-pointer">
-              <td class="px-4 py-3 text-slate-700">{{ fmtDate(b.booking_date) }}</td>
-              <td class="px-4 py-3 font-medium text-slate-700">{{ b.start_time }}–{{ b.end_time }}</td>
-              <td class="px-4 py-3 text-slate-700">{{ b.facility_name }}</td>
-              <td class="px-4 py-3 text-slate-600">{{ b.customer_name || '—' }}</td>
-              <td class="px-4 py-3">
-                <a v-if="waLink(b.customer_phone)" :href="waLink(b.customer_phone)" target="_blank" rel="noopener"
-                  @click.stop class="text-emerald-600 hover:underline whitespace-nowrap">
-                  💬 {{ b.customer_phone }}
-                </a>
-                <span v-else class="text-slate-400">—</span>
-              </td>
-              <td class="px-4 py-3 text-right">{{ b.order_total != null ? rupiah(b.order_total) : '—' }}</td>
-              <td class="px-4 py-3 text-right" :class="b.order_due > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'">
-                {{ b.order_due != null ? rupiah(b.order_due) : '—' }}
-              </td>
-              <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">{{ fmtPay(b.dp_at) }}</td>
-              <td class="px-4 py-3 whitespace-nowrap text-xs" :class="b.paid_off_at ? 'text-emerald-600' : 'text-slate-400'">{{ fmtPay(b.paid_off_at) }}</td>
-              <td class="px-4 py-3 text-center">
-                <span :class="statusClass(b.payment_status)" class="text-xs rounded-full px-2 py-0.5">{{ statusLabel(b.payment_status) }}</span>
-              </td>
-              <td class="px-4 py-3 text-right">
-                <button v-if="canDelete(b)" @click.stop="deleteBooking(b)" class="text-red-500 text-xs hover:text-red-700">Hapus</button>
-              </td>
-            </tr>
+            <template v-for="it in grouped" :key="it.key">
+              <!-- baris tunggal (order 1 tanggal / booking tanpa order) -->
+              <tr v-if="it.type === 'single'" @click="openDetail(it.b)" class="border-t hover:bg-slate-50 cursor-pointer">
+                <td class="px-4 py-3 text-slate-700">{{ fmtDate(it.b.booking_date) }}</td>
+                <td class="px-4 py-3 font-medium text-slate-700">{{ it.b.start_time }}–{{ it.b.end_time }}</td>
+                <td class="px-4 py-3 text-slate-700">{{ it.b.facility_name }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ it.b.customer_name || '—' }}</td>
+                <td class="px-4 py-3">
+                  <a v-if="waLink(it.b.customer_phone)" :href="waLink(it.b.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap">💬 {{ it.b.customer_phone }}</a>
+                  <span v-else class="text-slate-400">—</span>
+                </td>
+                <td class="px-4 py-3 text-right">{{ it.b.order_total != null ? rupiah(it.b.order_total) : '—' }}</td>
+                <td class="px-4 py-3 text-right" :class="it.b.order_due > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'">{{ it.b.order_due != null ? rupiah(it.b.order_due) : '—' }}</td>
+                <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">{{ fmtPay(it.b.dp_at) }}</td>
+                <td class="px-4 py-3 whitespace-nowrap text-xs" :class="it.b.paid_off_at ? 'text-emerald-600' : 'text-slate-400'">{{ fmtPay(it.b.paid_off_at) }}</td>
+                <td class="px-4 py-3 text-center"><span :class="statusClass(it.b.payment_status)" class="text-xs rounded-full px-2 py-0.5">{{ statusLabel(it.b.payment_status) }}</span></td>
+                <td class="px-4 py-3 text-right"><button v-if="canDelete(it.b)" @click.stop="deleteBooking(it.b)" class="text-red-500 text-xs hover:text-red-700">Hapus</button></td>
+              </tr>
+
+              <!-- baris induk member (banyak tanggal) — accordion, uang tampil SEKALI -->
+              <tr v-else @click="toggleOrder(it.order_id)" class="border-t bg-slate-50/50 hover:bg-slate-100 cursor-pointer">
+                <td class="px-4 py-3 text-slate-700 whitespace-nowrap">
+                  <span class="inline-block transition-transform mr-1 text-slate-400" :class="openOrders.has(it.order_id) ? 'rotate-90' : ''">▸</span>
+                  <span class="font-medium">{{ it.children.length }} sesi</span>
+                  <span class="text-xs text-slate-400 ml-1">{{ grpDateRange(it.children) }}</span>
+                  <span class="ml-1 text-[10px] bg-purple-100 text-purple-700 rounded px-1.5 py-0.5">Member</span>
+                </td>
+                <td class="px-4 py-3 text-slate-500 text-sm">{{ grpJam(it.children) }}</td>
+                <td class="px-4 py-3 text-slate-700">{{ it.parent.facility_name }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ it.parent.customer_name || '—' }}</td>
+                <td class="px-4 py-3">
+                  <a v-if="waLink(it.parent.customer_phone)" :href="waLink(it.parent.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap">💬 {{ it.parent.customer_phone }}</a>
+                  <span v-else class="text-slate-400">—</span>
+                </td>
+                <td class="px-4 py-3 text-right font-medium">{{ rupiah(it.parent.order_total) }}</td>
+                <td class="px-4 py-3 text-right" :class="it.parent.order_due > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'">{{ rupiah(it.parent.order_due) }}</td>
+                <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">{{ fmtPay(it.parent.dp_at) }}</td>
+                <td class="px-4 py-3 whitespace-nowrap text-xs" :class="it.parent.paid_off_at ? 'text-emerald-600' : 'text-slate-400'">{{ fmtPay(it.parent.paid_off_at) }}</td>
+                <td class="px-4 py-3 text-center"><span :class="statusClass(it.parent.payment_status)" class="text-xs rounded-full px-2 py-0.5">{{ statusLabel(it.parent.payment_status) }}</span></td>
+                <td class="px-4 py-3 text-right whitespace-nowrap">
+                  <button @click.stop="openDetail(it.parent)" class="text-brand-600 text-xs hover:underline mr-2">Detail</button>
+                  <button v-if="canDelete(it.parent)" @click.stop="deleteBooking(it.parent)" class="text-red-500 text-xs hover:text-red-700">Hapus</button>
+                </td>
+              </tr>
+              <!-- rincian tanggal (saat dibuka) — TANPA ulang uang -->
+              <template v-if="it.type === 'group' && openOrders.has(it.order_id)">
+                <tr v-for="c in it.children" :key="c.id" class="border-t bg-slate-50/30 text-sm">
+                  <td class="px-4 py-2 pl-10 text-slate-600">{{ fmtDate(c.booking_date) }}</td>
+                  <td class="px-4 py-2 text-slate-600">{{ c.start_time }}–{{ c.end_time }}</td>
+                  <td class="px-4 py-2 text-slate-500">{{ c.facility_name }}</td>
+                  <td colspan="8" class="px-4 py-2"></td>
+                </tr>
+              </template>
+            </template>
           </tbody>
         </table>
       </div>
