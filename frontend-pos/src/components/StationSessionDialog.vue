@@ -94,10 +94,18 @@ async function removeAddon(a) {
 // --- F&B tambahan sekalian di-checkout ---
 const extraCart = ref([])
 const fnbSearch = ref('')
+const fnbCategory = ref('')
+const fnbCategories = computed(() => {
+  const set = new Set()
+  for (const p of pos.fnbProducts) if (p.category_name) set.add(p.category_name)
+  return [...set].sort()
+})
 const filteredFnb = computed(() => {
+  let list = pos.fnbProducts
+  if (fnbCategory.value) list = list.filter((p) => p.category_name === fnbCategory.value)
   const q = fnbSearch.value.trim().toLowerCase()
-  if (!q) return pos.fnbProducts
-  return pos.fnbProducts.filter((p) => p.name.toLowerCase().includes(q))
+  if (q) list = list.filter((p) => p.name.toLowerCase().includes(q))
+  return list
 })
 function addExtra(p) {
   const found = extraCart.value.find((i) => i.product_id === p.id)
@@ -184,8 +192,15 @@ async function doStop() {
 
       <div class="mb-3">
         <p class="text-xs font-semibold text-slate-400 mb-1.5">🍔 Tambah F&amp;B (opsional, sekalian checkout)</p>
-        <input v-model="fnbSearch" placeholder="Cari menu…"
-          class="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs outline-none focus:border-brand-500 mb-2" />
+        <div class="flex gap-2 mb-2">
+          <input v-model="fnbSearch" placeholder="Cari menu…"
+            class="flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs outline-none focus:border-brand-500" />
+          <select v-if="fnbCategories.length" v-model="fnbCategory"
+            class="rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none focus:border-brand-500">
+            <option value="">Semua kategori</option>
+            <option v-for="c in fnbCategories" :key="c" :value="c">{{ c }}</option>
+          </select>
+        </div>
         <div class="grid grid-cols-2 gap-2 max-h-40 overflow-auto">
           <button v-for="p in filteredFnb" :key="p.id" @click="addExtra(p)"
             class="text-left border rounded-lg p-2 hover:border-brand-400">
