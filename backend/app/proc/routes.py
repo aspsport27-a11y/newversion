@@ -228,10 +228,18 @@ def _sup_map():
     return {s.id: s.name for s in Supplier.query.all()}
 
 
-def _gen_po_code(venue):
-    prefix = f"PO-{venue.code}-"
-    n = db.session.query(func.count(PurchaseOrder.id)).filter(PurchaseOrder.code.like(prefix + "%")).scalar() or 0
-    return f"{prefix}{n + 1:04d}"
+def _gen_po_code(venue, kind="sale"):
+    # ops pakai prefix POO- biar beda dari procurement biasa (PO-). Nomor urut
+    # dari MAX yg ada +1 (bukan count) → kebal gap kalau ada PO dihapus.
+    prefix = f"{'POO' if kind == 'ops' else 'PO'}-{venue.code}-"
+    codes = db.session.query(PurchaseOrder.code).filter(PurchaseOrder.code.like(prefix + "%")).all()
+    mx = 0
+    for (c,) in codes:
+        try:
+            mx = max(mx, int(c.rsplit("-", 1)[-1]))
+        except ValueError:
+            continue
+    return f"{prefix}{mx + 1:04d}"
 
 
 @proc_bp.get("/products")
@@ -256,7 +264,10 @@ def products_for_po():
 @jwt_required()
 @VIEW
 def pos_list():
-    q = PurchaseOrder.query
+    # kind: 'sale' (procurement biasa, default) atau 'ops' (rumah tangga venue).
+    # tanpa param → 'sale' supaya menu Procurement lama tak kebawa PO ops.
+    kind = request.args.get("kind") or "sale"
+    q = PurchaseOrder.query.filter(PurchaseOrder.kind == kind)
     vids = _scope_vids(_user())
     if vids is not None:
         q = q.filter(PurchaseOrder.venue_id.in_(vids)) if vids else q.filter(db.false())
@@ -298,11 +309,14 @@ def po_create():
     venue = db.session.get(Venue, vid)
     if not venue:
         return _err("Venue tidak ditemukan", "not_found", 404)
+    kind = d.get("kind") or "sale"
+    if kind not in ("sale", "ops"):
+        kind = "sale"
     items = d.get("items") or []
     if not items:
         return _err("Minimal 1 item")
     po = PurchaseOrder(
-        code=_gen_po_code(venue), venue_id=vid, supplier_id=d.get("supplier_id"),
+        code=_gen_po_code(venue, kind), kind=kind, venue_id=vid, supplier_id=d.get("supplier_id"),
         created_by=_user().id, notes=d.get("notes"), status="submitted",
     )
     total = 0.0
@@ -314,7 +328,8 @@ def po_create():
         line = qty * price
         total += line
         name = it.get("item_name")
-        pid = it.get("product_id")
+        # ops = rumah tangga → SELALU non-stok (tak pernah nambah stok jual)
+        pid = None if kind == "ops" else it.get("product_id")
         if pid:  # ambil nama produk kalau item stok
             prod = db.session.get(Product, pid)
             if prod:

@@ -9,6 +9,9 @@ class PurchaseOrder(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(30), unique=True, nullable=False)
+    # 'sale' = procurement barang jual (item stok nambah stok); 'ops' = keperluan
+    # rumah tangga venue (non-stok, cuma record). Lihat migration 038.
+    kind = db.Column(db.String(10), nullable=False, default="sale")
     venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
     supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id"))
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
@@ -34,6 +37,7 @@ class PurchaseOrder(db.Model):
         return {
             "id": self.id,
             "code": self.code,
+            "kind": self.kind,
             "venue_id": self.venue_id,
             "supplier_id": self.supplier_id,
             "supplier_name": supplier_name,
