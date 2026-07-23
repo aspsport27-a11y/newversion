@@ -182,6 +182,20 @@ Menu admin otomatis tersaring per role.
 6. **Struk thermal fisik** — sesuaikan model printer.
 7. **Nomor telepon venue** — kolom `Venue.phone` masih placeholder (`0812`, `0813`, dst) di banyak
    venue → tombol WA di halaman jadwal publik belum bisa dites end-to-end sampai diisi nomor asli.
+8. **⭐ "Radar Operasional" (fitur AI) — DIREKOMENDASIKAN, baru tahap diskusi (2026-07-23).**
+   Arah AI yg disepakati bareng owner: AI TIDAK menaikkan omzet, dampak nyatanya di **visibilitas &
+   kontrol** utk owner yg pegang belasan venue jarak jauh (pain: takut kebocoran tak terpantau +
+   capek cek laporan manual). Konsep: sapu data harian → tandai kejanggalan → urut per risiko
+   (rupiah) → AI ringkas jd bahasa manusia. **Prinsip:** sinyal deterministik (SQL) = 70% nilai;
+   AI cuma lapisan tipis keterbacaan + Q&A; **AI menunjuk, manusia memutuskan**; framing "perlu
+   dicek" bukan "curang". **Sinyal (semua dr data existing):** selisih kas berulang per kasir, shift
+   belum disetor, hapus-permanen order/payment, void/diskon tak wajar, omzet venue turun tajam vs
+   rata2 7hr, venue nol transaksi di jam buka, sesi gaming charge 0/instan, stok susut tanpa jual,
+   kasir transaksi tanpa absen, lokasi absen jauh dr venue. **3 fase:** (1) Radar deterministik
+   (panel Dashboard, tanpa AI) → (2) lapisan AI ringkas+Q&A (bangun di atas "Ask AI" existing:
+   `app/ai/routes.py`+`AskAiDialog.vue`) → (3) push ke channel (email/Telegram/WA). Kerjakan Fase 1
+   dulu walau "belum AI" — AI tak berguna tanpa sinyal. STATUS: nunggu keputusan owner soal sinyal
+   prioritas + channel.
 
 ---
 
