@@ -60,6 +60,35 @@ async function onModalVenueChange() {
 const requests = ref([])
 const statusFilter = ref('')
 const loadingReq = ref(false)
+
+// ringkasan pengajuan (ikut filter venue/periode/status yg aktif)
+const reqSummary = computed(() => {
+  const acc = {
+    submitted: { count: 0, total: 0 }, approved: { count: 0, total: 0 },
+    disbursed: { count: 0, total: 0 }, rejected: { count: 0, total: 0 },
+  }
+  for (const r of requests.value) {
+    const s = acc[r.status]
+    if (!s) continue
+    s.count += 1
+    s.total += Number(r.total_amount) || 0
+  }
+  return acc
+})
+const reqPerVenue = computed(() => {
+  const map = {}
+  for (const r of requests.value) {
+    if (!map[r.venue_id]) map[r.venue_id] = { venue_id: r.venue_id, count: 0, total: 0, disbursed: 0 }
+    map[r.venue_id].count += 1
+    map[r.venue_id].total += Number(r.total_amount) || 0
+    if (r.status === 'disbursed') map[r.venue_id].disbursed += Number(r.total_amount) || 0
+  }
+  return Object.values(map).sort((a, b) => b.total - a.total)
+})
+function venueLabel(id) {
+  const v = venues.value.find((x) => x.id === id)
+  return v ? `${v.code} — ${v.name}` : `#${id}`
+}
 async function loadRequests() {
   loadingReq.value = true
   const params = {}
@@ -292,6 +321,48 @@ watch(statusFilter, loadRequests)
           <option value="disbursed">Dicairkan</option><option value="rejected">Ditolak</option>
         </select>
         <button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Ajukan Dana</button>
+      </div>
+
+      <!-- Ringkasan per status -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Menunggu ({{ reqSummary.submitted.count }})</p>
+          <p class="text-lg font-bold text-amber-600">{{ rupiah(reqSummary.submitted.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Disetujui ({{ reqSummary.approved.count }})</p>
+          <p class="text-lg font-bold text-blue-600">{{ rupiah(reqSummary.approved.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Dicairkan ({{ reqSummary.disbursed.count }})</p>
+          <p class="text-lg font-bold text-emerald-600">{{ rupiah(reqSummary.disbursed.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Ditolak ({{ reqSummary.rejected.count }})</p>
+          <p class="text-lg font-bold text-red-500">{{ rupiah(reqSummary.rejected.total) }}</p>
+        </div>
+      </div>
+
+      <!-- Ringkasan per venue (admin/HO, saat >1 venue) -->
+      <div v-if="!isManager && reqPerVenue.length > 1" class="bg-white rounded-xl shadow-sm border overflow-hidden mb-4">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-2.5 font-medium">Venue</th>
+              <th class="px-4 py-2.5 font-medium text-right">Jml Pengajuan</th>
+              <th class="px-4 py-2.5 font-medium text-right">Total Diajukan</th>
+              <th class="px-4 py-2.5 font-medium text-right">Dicairkan</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="pv in reqPerVenue" :key="pv.venue_id" class="border-t">
+                <td class="px-4 py-2.5 text-slate-700">{{ venueLabel(pv.venue_id) }}</td>
+                <td class="px-4 py-2.5 text-right">{{ pv.count }}</td>
+                <td class="px-4 py-2.5 text-right">{{ rupiah(pv.total) }}</td>
+                <td class="px-4 py-2.5 text-right text-emerald-600 font-medium">{{ rupiah(pv.disbursed) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
