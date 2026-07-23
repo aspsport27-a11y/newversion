@@ -628,10 +628,17 @@ def station_start(sid):
     if GameSession.query.filter_by(station_id=sid, status="ongoing").first():
         raise PosError("Station sedang dipakai", "in_use", 409)
     data = request.get_json(silent=True) or {}
+    try:
+        booked_minutes = int(data.get("booked_minutes") or 0)
+    except (TypeError, ValueError):
+        booked_minutes = 0
+    if booked_minutes <= 0:
+        raise PosError("Durasi main (menit) wajib diisi", "bad_duration")
     session = GameSession(
         station_id=sid, venue_id=terminal.venue_id,
         customer_name=(data.get("customer_name") or None),
-        rate_per_hour=station.hourly_rate, opened_by=int(get_jwt_identity()),
+        rate_per_hour=station.hourly_rate, booked_minutes=booked_minutes,
+        opened_by=int(get_jwt_identity()),
     )
     db.session.add(session)
     db.session.commit()
@@ -737,8 +744,13 @@ def station_stop(sid):
     session.stopped_at = datetime.utcnow()
 
     data = request.get_json(silent=True) or {}
+    # sewa station = paket tetap (jam dipesan x tarif); durasi utk penamaan &
+    # basis add-on ikut waktu yg dibayar (paket+tambah waktu), fallback elapsed
+    # utk sesi lama. Lihat GameSession.time_charge/_billable_minutes.
+    base_minutes = session.elapsed_minutes() if session._is_legacy() else int(session.booked_minutes)
+    billable_minutes = session._billable_minutes()
     items = [{
-        "item_type": "rental", "name": f"Sewa {station.name} ({session.elapsed_minutes()} menit)",
+        "item_type": "rental", "name": f"Sewa {station.name} ({base_minutes} menit)",
         "unit_price": session.time_charge(), "quantity": 1,
     }]
     for t in session.topups:
@@ -747,11 +759,10 @@ def station_stop(sid):
             "unit_price": float(t.total_amount), "quantity": 1,
         })
     for a in session.addons:
-        # add-on ditagih per jam mengikuti durasi sesi utama (sama basis dgn elapsed_minutes di atas)
-        charge = round(session.elapsed_minutes() / 60 * float(a.rate_per_hour) * a.quantity, 2)
+        charge = round(billable_minutes / 60 * float(a.rate_per_hour) * a.quantity, 2)
         items.append({
             "item_type": "rental",
-            "name": f"{a.name_snapshot} x{a.quantity} ({session.elapsed_minutes()} menit)",
+            "name": f"{a.name_snapshot} x{a.quantity} ({billable_minutes} menit)",
             "unit_price": charge, "quantity": 1,
         })
     items.extend(data.get("extra_items") or [])

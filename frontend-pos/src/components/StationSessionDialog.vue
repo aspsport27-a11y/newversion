@@ -16,11 +16,11 @@ onUnmounted(() => clearInterval(timer))
 // hitungan jam & harga sesi — sama persis dgn yg dipakai di grid station
 // (PosView), lihat utils/stationClock.js utk penjelasan lengkap logikanya
 const clock = computed(() => stationClock(session.value, now.value, props.station.hourly_rate))
-const elapsedMinutes = computed(() => clock.value.elapsedMinutes)
 const timeCharge = computed(() => clock.value.timeCharge)
 const topupCharge = computed(() => clock.value.topupCharge)
 const addonCharge = computed(() => clock.value.addonCharge)
 const allocatedMinutes = computed(() => clock.value.allocatedMinutes)
+const billableMinutes = computed(() => clock.value.billableMinutes)
 const isCountdown = computed(() => clock.value.isCountdown)
 const clockLabel = computed(() => clock.value.clockLabel)
 const isOvertime = computed(() => clock.value.isOvertime)
@@ -146,7 +146,7 @@ async function doStop() {
         <div v-for="a in session.addons" :key="a.id" class="flex justify-between items-center">
           <span class="text-slate-500">{{ a.name }} x{{ a.quantity }}</span>
           <span class="flex items-center gap-2">
-            {{ rupiah((elapsedMinutes / 60) * a.rate_per_hour * a.quantity) }}
+            {{ rupiah((billableMinutes / 60) * a.rate_per_hour * a.quantity) }}
             <button @click="removeAddon(a)" class="text-red-400 text-xs">✕</button>
           </span>
         </div>

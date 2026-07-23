@@ -44,6 +44,10 @@ class GameSession(db.Model):
     venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
     customer_name = db.Column(db.String(100))
     rate_per_hour = db.Column(db.Numeric(15, 2), nullable=False)
+    # paket waktu awal (menit) yg dipesan customer saat mulai — sewa station
+    # ditagih FIX dari sini (jam dipesan x tarif), bukan per menit terpakai.
+    # 0 = sesi lama sebelum fitur ini (fallback ke perhitungan elapsed).
+    booked_minutes = db.Column(db.Integer, nullable=False, default=0)
     started_at = db.Column(db.DateTime, default=datetime.utcnow)
     status = db.Column(db.String(12), nullable=False, default="ongoing")  # ongoing|stopped
     stopped_at = db.Column(db.DateTime)
@@ -64,15 +68,33 @@ class GameSession(db.Model):
         end = self.stopped_at or datetime.utcnow()
         return max(0, int((end - self.started_at).total_seconds() // 60))
 
+    def _is_legacy(self):
+        """Sesi lama sebelum fitur paket tetap (booked_minutes 0/None) →
+        tetap pakai perhitungan per-menit elapsed spt dulu."""
+        return not self.booked_minutes or int(self.booked_minutes) <= 0
+
+    def allocated_minutes(self):
+        """Total waktu yg SUDAH dibayar = paket awal + semua tambah waktu.
+        Sumber angka hitung mundur di layar."""
+        return int(self.booked_minutes or 0) + sum(int(t.duration_minutes) for t in self.topups)
+
     def time_charge(self):
-        return round(self.elapsed_minutes() / 60 * float(self.rate_per_hour), 2)
+        # Sewa station = harga FIX paket awal (jam dipesan x tarif), BUKAN per
+        # menit terpakai. Sesi lama fallback ke elapsed (perilaku lama).
+        minutes = self.elapsed_minutes() if self._is_legacy() else int(self.booked_minutes)
+        return round(minutes / 60 * float(self.rate_per_hour), 2)
 
     def topup_charge(self):
         return round(sum(float(t.total_amount) for t in self.topups), 2)
 
+    def _billable_minutes(self):
+        """Durasi dasar utk hitung add-on: ikut waktu yg dibayar (paket +
+        tambah waktu) supaya harga tetap/fix; sesi lama ikut elapsed."""
+        return self.elapsed_minutes() if self._is_legacy() else self.allocated_minutes()
+
     def addon_charge(self):
-        # add-on ditagih per jam MENGIKUTI durasi sesi utama (bukan waktu sendiri)
-        minutes = self.elapsed_minutes()
+        # add-on ditagih per jam MENGIKUTI durasi sesi (paket yg dibayar)
+        minutes = self._billable_minutes()
         return round(sum(minutes / 60 * float(a.rate_per_hour) * a.quantity for a in self.addons), 2)
 
     def total_charge(self):
@@ -82,6 +104,8 @@ class GameSession(db.Model):
         return {
             "id": self.id, "station_id": self.station_id, "customer_name": self.customer_name,
             "rate_per_hour": float(self.rate_per_hour),
+            "booked_minutes": int(self.booked_minutes or 0),
+            "allocated_minutes": self.allocated_minutes(),
             "started_at": (self.started_at.isoformat() + "Z") if self.started_at else None,
             "status": self.status,
             "stopped_at": (self.stopped_at.isoformat() + "Z") if self.stopped_at else None,

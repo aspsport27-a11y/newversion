@@ -87,8 +87,11 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.get('/addons')
       this.addons = data.addons
     },
-    async startStation(id, customerName) {
-      const { data } = await client.post(`/stations/${id}/start`, { customer_name: customerName || null })
+    async startStation(id, customerName, bookedMinutes) {
+      const { data } = await client.post(`/stations/${id}/start`, {
+        customer_name: customerName || null,
+        booked_minutes: bookedMinutes,
+      })
       await this.fetchStations()
       return data.session
     },
