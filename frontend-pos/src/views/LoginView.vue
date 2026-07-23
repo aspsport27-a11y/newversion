@@ -118,12 +118,12 @@ async function submit() {
             v-for="d in ['1','2','3','4','5','6','7','8','9']"
             :key="d"
             @click="tap(d)"
-            class="py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-xl font-semibold text-white active:scale-95 transition"
+            class="py-3 rounded-xl bg-white/25 hover:bg-white/40 border border-white/30 text-xl font-semibold text-white active:scale-95 transition"
           >
             {{ d }}
           </button>
-          <button @click="backspace" class="py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-white/70 active:scale-95 transition">⌫</button>
-          <button @click="tap('0')" class="py-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-xl font-semibold text-white active:scale-95 transition">0</button>
+          <button @click="backspace" class="py-3 rounded-xl bg-white/25 hover:bg-white/40 border border-white/30 text-white active:scale-95 transition">⌫</button>
+          <button @click="tap('0')" class="py-3 rounded-xl bg-white/25 hover:bg-white/40 border border-white/30 text-xl font-semibold text-white active:scale-95 transition">0</button>
           <button
             @click="submit"
             :disabled="loading"
