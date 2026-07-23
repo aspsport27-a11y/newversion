@@ -14,10 +14,18 @@ const in30 = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
 const from = ref(today)
 const to = ref(in30)
 const onlyUnpaid = ref(false)
+const showVoid = ref(false) // sembunyikan booking Batal secara default
 const bookings = ref([])
 const loading = ref(false)
 const detail = ref(null)
 const detailLoading = ref(false)
+
+const tab = ref('list') // 'list' | 'forfeited'
+// DP Hangus (order batal yg DP-nya sudah masuk & tak direfund)
+const fdRows = ref([])
+const fdPerVenue = ref([])
+const fdTotal = ref(0)
+const fdLoading = ref(false)
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function waLink(phone) {
@@ -49,9 +57,18 @@ function statusClass(s) {
   }[s] || 'bg-slate-100 text-slate-500'
 }
 
-const shown = computed(() =>
-  onlyUnpaid.value ? bookings.value.filter((b) => b.payment_status === 'partial' || b.payment_status === 'open') : bookings.value,
-)
+const shown = computed(() => {
+  let list = bookings.value
+  if (!showVoid.value) list = list.filter((b) => b.payment_status !== 'void')
+  if (onlyUnpaid.value) list = list.filter((b) => b.payment_status === 'partial' || b.payment_status === 'open')
+  return list
+})
+// booking yg boleh dihapus permanen: kosong (tanpa order) ATAU batal TANPA
+// uang (order_paid 0). Batal yg ada DP hangus TIDAK boleh (tersimpan utk laporan).
+function canDelete(b) {
+  if (!b.order_id) return true
+  return b.payment_status === 'void' && !(b.order_paid > 0)
+}
 
 // ringkasan — booking batal (void) dikeluarkan dari semua total nilai/uang
 const activeBookings = computed(() => shown.value.filter((b) => b.payment_status !== 'void'))
@@ -140,14 +157,37 @@ async function loadVenues() {
     venueId.value = auth.user?.venue_id || ''
   }
 }
+function params() {
+  const p = { from: from.value, to: to.value }
+  if (venueId.value) p.venue_id = venueId.value
+  return p
+}
 async function run() {
   loading.value = true
-  const params = { from: from.value, to: to.value }
-  if (venueId.value) params.venue_id = venueId.value
   try {
-    const { data } = await client.get('/admin/bookings', { params })
+    const { data } = await client.get('/admin/bookings', { params: params() })
     bookings.value = data.bookings
   } finally { loading.value = false }
+  if (tab.value === 'forfeited') loadForfeited()
+}
+async function loadForfeited() {
+  fdLoading.value = true
+  try {
+    const { data } = await client.get('/admin/bookings/forfeited-dp', { params: params() })
+    fdRows.value = data.rows
+    fdPerVenue.value = data.per_venue
+    fdTotal.value = data.total
+  } finally { fdLoading.value = false }
+}
+function switchTab(t) {
+  tab.value = t
+  if (t === 'forfeited' && !fdRows.value.length) loadForfeited()
+}
+function fmtDatesShort(arr) {
+  return (arr || []).map((d) => {
+    const dt = new Date(d + 'T00:00:00')
+    return String(dt.getDate()).padStart(2, '0') + '/' + String(dt.getMonth() + 1).padStart(2, '0')
+  }).join(', ')
 }
 async function openDetail(b) {
   if (!b.order_id) return
@@ -158,10 +198,17 @@ async function openDetail(b) {
     detail.value = data.order
   } finally { detailLoading.value = false }
 }
-async function deleteEmpty(b) {
-  if (!window.confirm(`Hapus baris booking kosong ${b.start_time}-${b.end_time} (${b.facility_name})?`)) return
+async function deleteBooking(b) {
   try {
-    await client.delete(`/admin/bookings/${b.id}`)
+    if (!b.order_id) {
+      // booking kosong tanpa order → hapus baris booking-nya saja
+      if (!window.confirm(`Hapus baris booking kosong ${b.start_time}-${b.end_time} (${b.facility_name})?`)) return
+      await client.delete(`/admin/bookings/${b.id}`)
+    } else {
+      // order batal tanpa DP → hapus seluruh order (semua tanggalnya sekaligus)
+      if (!window.confirm(`Hapus permanen transaksi batal ${b.order_number} (${b.customer_name || 'tanpa nama'})?`)) return
+      await client.delete(`/admin/orders/${b.order_id}`)
+    }
     await run()
   } catch (e) {
     alert(e?.response?.data?.message || 'Gagal menghapus.')
@@ -197,10 +244,70 @@ onMounted(async () => { await loadVenues(); await run() })
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select></div>
       <button @click="run" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
-      <label class="flex items-center gap-2 text-sm text-slate-600 ml-2"><input v-model="onlyUnpaid" type="checkbox" /> Hanya belum lunas</label>
-      <button @click="printBookings" class="ml-auto bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">🖨️ Cetak</button>
+      <label v-if="tab === 'list'" class="flex items-center gap-2 text-sm text-slate-600 ml-2"><input v-model="onlyUnpaid" type="checkbox" /> Hanya belum lunas</label>
+      <label v-if="tab === 'list'" class="flex items-center gap-2 text-sm text-slate-600"><input v-model="showVoid" type="checkbox" /> Tampilkan yang batal</label>
+      <button v-if="tab === 'list'" @click="printBookings" class="ml-auto bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">🖨️ Cetak</button>
     </div>
 
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-5 border-b">
+      <button @click="switchTab('list')" :class="tab === 'list' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Booking</button>
+      <button @click="switchTab('forfeited')" :class="tab === 'forfeited' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">DP Hangus</button>
+    </div>
+
+    <!-- ================= TAB DP HANGUS ================= -->
+    <div v-if="tab === 'forfeited'">
+      <div class="bg-white rounded-xl shadow-sm border p-4 mb-5">
+        <p class="text-xs text-slate-400 mb-1">Total DP hangus (periode ini)</p>
+        <p class="text-2xl font-bold text-red-600">{{ rupiah(fdTotal) }}</p>
+        <p class="text-xs text-slate-400 mt-1">Uang dari booking yang dibatalkan &amp; DP-nya tidak dikembalikan. Sudah tercatat di kas — daftar ini cuma untuk visibilitas per venue.</p>
+      </div>
+
+      <div v-if="fdPerVenue.length > 1" class="bg-white rounded-xl shadow-sm border overflow-hidden mb-5">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+            <th class="px-4 py-2.5 font-medium">Venue</th>
+            <th class="px-4 py-2.5 font-medium text-right">Jml</th>
+            <th class="px-4 py-2.5 font-medium text-right">DP Hangus</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="pv in fdPerVenue" :key="pv.venue_id" class="border-t">
+              <td class="px-4 py-2.5 text-slate-700">{{ pv.venue_code }}</td>
+              <td class="px-4 py-2.5 text-right">{{ pv.count }}</td>
+              <td class="px-4 py-2.5 text-right text-red-600 font-medium">{{ rupiah(pv.total) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-3 font-medium">Tgl DP</th>
+              <th class="px-4 py-3 font-medium">Venue</th>
+              <th class="px-4 py-3 font-medium">Customer</th>
+              <th class="px-4 py-3 font-medium">Tanggal main (batal)</th>
+              <th class="px-4 py-3 font-medium text-right">DP Hangus</th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="fdLoading"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!fdRows.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Tidak ada DP hangus pada periode ini 🎉</td></tr>
+              <tr v-for="r in fdRows" :key="r.order_id" class="border-t hover:bg-slate-50">
+                <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">{{ fmtPay(r.dp_at) }}</td>
+                <td class="px-4 py-3 text-slate-700">{{ r.venue_code }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ r.customer_name || '—' }}</td>
+                <td class="px-4 py-3 text-slate-500 text-xs">{{ fmtDatesShort(r.booking_dates) }}</td>
+                <td class="px-4 py-3 text-right text-red-600 font-medium">{{ rupiah(r.forfeited) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= TAB BOOKING (list) ================= -->
+    <template v-if="tab === 'list'">
     <!-- Ringkasan -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
       <div class="bg-white rounded-xl shadow-sm border p-4">
@@ -286,13 +393,14 @@ onMounted(async () => { await loadVenues(); await run() })
                 <span :class="statusClass(b.payment_status)" class="text-xs rounded-full px-2 py-0.5">{{ statusLabel(b.payment_status) }}</span>
               </td>
               <td class="px-4 py-3 text-right">
-                <button v-if="!b.order_id" @click.stop="deleteEmpty(b)" class="text-red-500 text-xs hover:text-red-700">Hapus</button>
+                <button v-if="canDelete(b)" @click.stop="deleteBooking(b)" class="text-red-500 text-xs hover:text-red-700">Hapus</button>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+    </template>
 
     <!-- Detail / riwayat pembayaran -->
     <div v-if="detail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="detail = null">

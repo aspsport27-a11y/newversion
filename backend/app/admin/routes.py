@@ -1843,6 +1843,64 @@ def bookings_list():
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), bookings=rows), 200
 
 
+@admin_bp.get("/bookings/forfeited-dp")
+@jwt_required()
+@VIEW
+def bookings_forfeited_dp():
+    """DP Hangus: order booking yg BATAL (void) tapi DP-nya sudah dibayar &
+    TIDAK direfund (payment tetap 'paid'). READ-ONLY — uangnya sudah tercatat
+    di kas (ikut cash shift → setoran), ini cuma pelabelan per venue utk
+    visibilitas, TIDAK menambah/mengurangi uang. Difilter per tanggal DP masuk
+    (paid_at). Dikelompokkan per order (bukan per booking) supaya tak dobel."""
+    today = date.today()
+    d_from = request.args.get("from") or today.replace(day=1).isoformat()
+    d_to = request.args.get("to") or today.isoformat()
+    forced = _forced_venue()
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
+
+    q = Order.query.filter(Order.status == "void")
+    if vid:
+        q = q.filter(Order.venue_id == vid)
+
+    venue_codes = {v.id: v.code for v in Venue.query.all()}
+    rows, per_venue = [], {}
+    for o in q.all():
+        paid_pays = [
+            p for p in o.payments
+            if p.status == "paid" and p.paid_at and d_from <= p.paid_at.date().isoformat() <= d_to
+        ]
+        forfeited = round(sum(float(p.amount) for p in paid_pays), 2)
+        if forfeited <= 0:
+            continue
+        dp_at = min(p.paid_at for p in paid_pays)
+        item_ids = [i.id for i in o.items]
+        bdates = sorted(
+            fb.booking_date.isoformat()
+            for fb in FacilityBooking.query.filter(FacilityBooking.order_item_id.in_(item_ids)).all()
+        ) if item_ids else []
+        rows.append({
+            "order_id": o.id, "order_number": o.order_number, "venue_id": o.venue_id,
+            "venue_code": venue_codes.get(o.venue_id, f"#{o.venue_id}"),
+            "customer_name": o.customer_name, "customer_phone": o.customer_phone,
+            "forfeited": forfeited, "dp_at": dp_at.isoformat(),
+            "order_total": float(o.total_amount or 0), "booking_dates": bdates,
+        })
+        pv = per_venue.setdefault(o.venue_id, {
+            "venue_id": o.venue_id, "venue_code": venue_codes.get(o.venue_id, f"#{o.venue_id}"),
+            "count": 0, "total": 0.0,
+        })
+        pv["count"] += 1
+        pv["total"] = round(pv["total"] + forfeited, 2)
+
+    rows.sort(key=lambda r: r["dp_at"], reverse=True)
+    return jsonify(
+        rows=rows,
+        per_venue=sorted(per_venue.values(), key=lambda x: -x["total"]),
+        total=round(sum(r["forfeited"] for r in rows), 2),
+        range={"from": d_from, "to": d_to},
+    ), 200
+
+
 @admin_bp.delete("/bookings/<int:bid>")
 @jwt_required()
 @ORDER_CANCEL
@@ -1990,9 +2048,17 @@ def order_delete_admin(order_id):
             "Hanya transaksi berstatus Dibatalkan yang bisa dihapus permanen.",
             "bad_status", 409,
         )
-    for p in order.payments:
-        if p.status == "paid":
-            p.status = "void"
+    # order void yg DP-nya SUDAH masuk & tidak direfund (payment tetap 'paid' =
+    # DP hangus, pendapatan sah yg sudah masuk kas/setoran) TAK BOLEH dihapus —
+    # nanti jejak pendapatan hilang & bikin selisih rekonsiliasi. Lihat tab
+    # "DP Hangus". Yg boleh dihapus cuma yg tak ada uang tersangkut.
+    kept = round(sum(float(p.amount) for p in order.payments if p.status == "paid"), 2)
+    if kept > 0:
+        return _err(
+            "Order ini punya DP hangus yang sudah masuk kas — tak bisa dihapus permanen. "
+            "Sembunyikan saja; datanya tetap ada di tab DP Hangus.",
+            "has_forfeited_dp", 409,
+        )
     db.session.delete(order)  # order_items & payments ikut terhapus (ondelete=CASCADE)
     db.session.commit()
     return jsonify(message="Transaksi dihapus permanen"), 200
