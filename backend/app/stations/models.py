@@ -63,6 +63,10 @@ class GameSession(db.Model):
         "GameSessionAddon", backref="session", lazy="selectin", cascade="all, delete-orphan",
         order_by="GameSessionAddon.id",
     )
+    fnb_items = db.relationship(
+        "GameSessionFnb", backref="session", lazy="selectin", cascade="all, delete-orphan",
+        order_by="GameSessionFnb.id",
+    )
 
     def elapsed_minutes(self):
         end = self.stopped_at or datetime.utcnow()
@@ -97,8 +101,13 @@ class GameSession(db.Model):
         minutes = self._billable_minutes()
         return round(sum(minutes / 60 * float(a.rate_per_hour) * a.quantity for a in self.addons), 2)
 
+    def fnb_charge(self):
+        return round(sum(float(f.unit_price) * f.quantity for f in self.fnb_items), 2)
+
     def total_charge(self):
-        return round(self.time_charge() + self.topup_charge() + self.addon_charge(), 2)
+        return round(
+            self.time_charge() + self.topup_charge() + self.addon_charge() + self.fnb_charge(), 2
+        )
 
     def to_dict(self):
         return {
@@ -113,10 +122,12 @@ class GameSession(db.Model):
             "time_charge": self.time_charge(),
             "topup_charge": self.topup_charge(),
             "addon_charge": self.addon_charge(),
+            "fnb_charge": self.fnb_charge(),
             "total_charge": self.total_charge(),
             "order_id": self.order_id,
             "topups": [t.to_dict() for t in self.topups],
             "addons": [a.to_dict() for a in self.addons],
+            "fnb_items": [f.to_dict() for f in self.fnb_items],
         }
 
 
@@ -177,4 +188,28 @@ class GameSessionAddon(db.Model):
         return {
             "id": self.id, "addon_id": self.addon_id, "name": self.name_snapshot,
             "rate_per_hour": float(self.rate_per_hour), "quantity": self.quantity,
+        }
+
+
+class GameSessionFnb(db.Model):
+    """F&B yg dipesan customer di tengah sesi (dientry kasir biar tak lupa,
+    dibayar sekalian saat stop). unit_price DISALIN saat dientry (snapshot);
+    total final tetap dihitung ulang di create_order saat stop (item_type
+    'product', jadi promo & potong stok ditangani kanonik di sana)."""
+    __tablename__ = "game_session_fnb"
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey("game_sessions.id", ondelete="CASCADE"), nullable=False)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id", ondelete="SET NULL"))
+    name_snapshot = db.Column(db.String(120), nullable=False)
+    unit_price = db.Column(db.Numeric(15, 2), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False, default=1)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "product_id": self.product_id, "name": self.name_snapshot,
+            "unit_price": float(self.unit_price), "quantity": self.quantity,
+            "line_total": round(float(self.unit_price) * self.quantity, 2),
         }

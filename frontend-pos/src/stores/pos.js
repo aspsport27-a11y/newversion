@@ -110,6 +110,11 @@ export const usePosStore = defineStore('pos', {
       await this.fetchStations()
       return data.session
     },
+    async fnbStation(id, productId, delta = 1) {
+      const { data } = await client.post(`/stations/${id}/fnb`, { product_id: productId, delta })
+      await this.fetchStations()
+      return data.session
+    },
     async stopStation(id, extraItems) {
       const { data } = await client.post(`/stations/${id}/stop`, { extra_items: extraItems || [] })
       await this.fetchStations()

@@ -7,7 +7,11 @@ const props = defineProps({ station: Object })
 const emit = defineEmits(['close', 'stopped'])
 const pos = usePosStore()
 
-const session = computed(() => props.station.session)
+// sesi disimpan lokal & di-update dr response tiap aksi (topup/addon/fnb) —
+// props.station statis (fetchStations bikin objek baru, prop tak ikut berubah),
+// jadi kalau baca langsung dr prop, perubahan tak tampil live tanpa tutup-buka
+const sessionState = ref(props.station.session)
+const session = computed(() => sessionState.value)
 const now = ref(Date.now())
 let timer = null
 onMounted(() => { timer = setInterval(() => (now.value = Date.now()), 1000) })
@@ -49,14 +53,13 @@ const topupTotal = computed({
 async function submitTopup() {
   busy.value = true; err.value = ''
   try {
-    await pos.topupStation(props.station.id, {
+    sessionState.value = await pos.topupStation(props.station.id, {
       duration_minutes: topupDuration.value,
       discount_amount: Number(topupDiscount.value) || 0,
       total_amount: Number(topupTotal.value),
     })
     showTopup.value = false
     topupDuration.value = 60; topupDiscount.value = 0; topupTotalOverride.value = null
-    emit('close')
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah jam.' } finally { busy.value = false }
 }
 
@@ -78,21 +81,20 @@ async function submitAddon() {
   if (!addonId.value) { err.value = 'Pilih add-on dulu.'; return }
   busy.value = true; err.value = ''
   try {
-    await pos.attachAddon(props.station.id, { addon_id: addonId.value, quantity: addonQty.value })
+    sessionState.value = await pos.attachAddon(props.station.id, { addon_id: addonId.value, quantity: addonQty.value })
     showAddon.value = false
     addonId.value = null; addonQty.value = 1
-    emit('close')
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah add-on.' } finally { busy.value = false }
 }
 
 async function removeAddon(a) {
-  busy.value = true
-  try { await pos.detachAddon(props.station.id, a.id); emit('close') }
+  busy.value = true; err.value = ''
+  try { sessionState.value = await pos.detachAddon(props.station.id, a.id) }
   catch (e) { err.value = e?.response?.data?.message || 'Gagal.' } finally { busy.value = false }
 }
 
-// --- F&B tambahan sekalian di-checkout ---
-const extraCart = ref([])
+// --- F&B tambahan (pesanan di tengah main) — DISIMPAN DI SERVER menempel ke
+// sesi (lihat session.fnb_items), tak hilang walau dialog ditutup ---
 const fnbSearch = ref('')
 const fnbCategory = ref('')
 const fnbCategories = computed(() => {
@@ -107,23 +109,27 @@ const filteredFnb = computed(() => {
   if (q) list = list.filter((p) => p.name.toLowerCase().includes(q))
   return list
 })
-function addExtra(p) {
-  const found = extraCart.value.find((i) => i.product_id === p.id)
-  if (found) found.quantity += 1
-  else extraCart.value.push({ product_id: p.id, name: p.name, unit_price: p.effective_price ?? p.price, quantity: 1 })
+const fnbItems = computed(() => session.value.fnb_items || [])
+async function addExtra(p) {
+  err.value = ''
+  try { sessionState.value = await pos.fnbStation(props.station.id, p.id, 1) }
+  catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah F&B.' }
 }
-function decExtra(it) {
-  it.quantity -= 1
-  if (it.quantity <= 0) extraCart.value = extraCart.value.filter((i) => i !== it)
+async function decExtra(it) {
+  err.value = ''
+  try { sessionState.value = await pos.fnbStation(props.station.id, it.product_id, -1) }
+  catch (e) { err.value = e?.response?.data?.message || 'Gagal.' }
 }
-const extraSubtotal = computed(() => extraCart.value.reduce((s, i) => s + i.unit_price * i.quantity, 0))
-const grandTotal = computed(() => timeCharge.value + topupCharge.value + addonCharge.value + extraSubtotal.value)
+const grandTotal = computed(() =>
+  timeCharge.value + topupCharge.value + addonCharge.value +
+  fnbItems.value.reduce((s, i) => s + i.line_total, 0),
+)
 
 async function doStop() {
   busy.value = true; err.value = ''
   try {
-    const extraItems = extraCart.value.map((i) => ({ item_type: 'product', product_id: i.product_id, quantity: i.quantity }))
-    const result = await pos.stopStation(props.station.id, extraItems)
+    // F&B sudah tersimpan di sesi (server) — stop tak perlu kirim apa2 lagi
+    const result = await pos.stopStation(props.station.id)
     emit('stopped', result)
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menghentikan sesi.' } finally { busy.value = false }
 }
@@ -158,7 +164,13 @@ async function doStop() {
             <button @click="removeAddon(a)" class="text-red-400 text-xs">✕</button>
           </span>
         </div>
-        <div v-if="extraCart.length" class="flex justify-between"><span class="text-slate-500">F&amp;B tambahan</span><span>{{ rupiah(extraSubtotal) }}</span></div>
+        <div v-for="f in fnbItems" :key="f.id" class="flex justify-between items-center">
+          <span class="text-slate-500">🍔 {{ f.name }} x{{ f.quantity }}</span>
+          <span class="flex items-center gap-2">
+            {{ rupiah(f.line_total) }}
+            <button @click="decExtra(f)" class="text-red-400 text-xs">−</button>
+          </span>
+        </div>
         <div class="flex justify-between font-bold text-base border-t pt-1.5 mt-1.5"><span>Total sementara</span><span class="text-brand-700">{{ rupiah(grandTotal) }}</span></div>
       </div>
 
@@ -209,12 +221,7 @@ async function doStop() {
           </button>
           <p v-if="!filteredFnb.length" class="col-span-2 text-center text-xs text-slate-400 py-3">Menu tidak ditemukan.</p>
         </div>
-        <div v-if="extraCart.length" class="mt-2 space-y-1">
-          <div v-for="it in extraCart" :key="it.product_id" class="flex items-center justify-between text-xs">
-            <span class="text-slate-600">{{ it.name }} x{{ it.quantity }}</span>
-            <button @click="decExtra(it)" class="text-red-400">− kurangi</button>
-          </div>
-        </div>
+        <p class="text-[11px] text-slate-400 mt-1.5">Pesanan tersimpan otomatis — aman walau dialog ditutup, dibayar sekalian saat STOP.</p>
       </div>
 
       <p v-if="err" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">{{ err }}</p>

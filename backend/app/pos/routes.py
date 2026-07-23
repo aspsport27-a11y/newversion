@@ -729,6 +729,47 @@ def station_addon_detach(sid, said):
     return jsonify(session=session.to_dict()), 200
 
 
+@pos_bp.post("/stations/<int:sid>/fnb")
+@jwt_required()
+def station_fnb_adjust(sid):
+    """Tambah/kurangi pesanan F&B yg menempel ke sesi (disimpan di server,
+    tak hilang walau dialog ditutup). body: product_id + delta (default +1;
+    kirim -1 utk kurangi). Qty jadi <=0 → baris dihapus. Harga & stok final
+    dihitung ulang saat stop (create_order), snapshot di sini utk tampilan."""
+    from ..stations.models import GameSessionFnb
+    from .promos import active_promo, effective_unit_price
+
+    terminal = _current_terminal()
+    session = _current_ongoing_session(sid, terminal.venue_id)
+    data = request.get_json(silent=True) or {}
+    product = db.session.get(Product, data.get("product_id"))
+    if product is None or not product.is_active or product.venue_id != terminal.venue_id:
+        raise PosError("Produk tidak ditemukan", "not_found", 404)
+    try:
+        delta = int(data.get("delta", 1))
+    except (TypeError, ValueError):
+        delta = 1
+    if delta == 0:
+        return jsonify(session=session.to_dict()), 200
+
+    row = next((f for f in session.fnb_items if f.product_id == product.id), None)
+    if row is None:
+        if delta < 0:
+            return jsonify(session=session.to_dict()), 200
+        row = GameSessionFnb(
+            session_id=session.id, product_id=product.id, name_snapshot=product.name[:120],
+            unit_price=effective_unit_price(product, active_promo(product.id)),
+            quantity=delta, created_by=int(get_jwt_identity()),
+        )
+        db.session.add(row)
+    else:
+        row.quantity += delta
+        if row.quantity <= 0:
+            db.session.delete(row)
+    db.session.commit()
+    return jsonify(session=session.to_dict()), 200
+
+
 @pos_bp.post("/stations/<int:sid>/stop")
 @jwt_required()
 def station_stop(sid):
@@ -765,6 +806,11 @@ def station_stop(sid):
             "name": f"{a.name_snapshot} x{a.quantity} ({billable_minutes} menit)",
             "unit_price": charge, "quantity": 1,
         })
+    # F&B yg dipesan di tengah sesi (tersimpan di server) — dikirim sbg item
+    # 'product' spy harga final & potong stok ditangani kanonik create_order
+    for f in session.fnb_items:
+        if f.product_id:
+            items.append({"item_type": "product", "product_id": f.product_id, "quantity": f.quantity})
     items.extend(data.get("extra_items") or [])
 
     order = create_order(shift, int(get_jwt_identity()), {
