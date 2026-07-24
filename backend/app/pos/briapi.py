@@ -33,11 +33,13 @@ log = logging.getLogger(__name__)
 WIB = timezone(timedelta(hours=7))
 
 # Endpoint relatif — dipakai apa adanya saat menyusun string tanda tangan.
-# Jalur QR mengikuti dokumen resmi BRI "QRIS MPM Dynamic" (bukan jalur SNAP
-# generik /v1.0/qr/...). Kalau BRI mengubahnya, cukup ganti di sini.
+# Jalur QR = **v1.1** (dikonfirmasi dgn tes langsung ke sandbox 2026-07-24:
+# path v1.0 & varian dokumen menembus gateway sbg "Invalid token Health Check",
+# hanya v1.1/qr-dynamic-mpm yg sampai ke layanan QRIS). Kalau BRI mengubahnya,
+# cukup ganti di sini.
 PATH_TOKEN = "/snap/v1.0/access-token/b2b"
-PATH_QR_GENERATE = "/v1.0/qr-dynamic-mpm/qr-mpm-generate-qr"
-PATH_QR_QUERY = "/v1.0/qr-dynamic-mpm/qr-mpm-query"
+PATH_QR_GENERATE = "/v1.1/qr-dynamic-mpm/qr-mpm-generate-qr"
+PATH_QR_QUERY = "/v1.1/qr-dynamic-mpm/qr-mpm-query"
 
 
 class BriError(Exception):
