@@ -172,6 +172,9 @@ class FacilityRateRule(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     facility_id = db.Column(db.Integer, db.ForeignKey("facilities.id", ondelete="CASCADE"), nullable=False)
     label = db.Column(db.String(50))
+    # hari berlakunya tarif: weekday | saturday | sunday | holiday. Tanpa ini,
+    # tarif beda hari saling bertabrakan (lihat facility_rate_for_hour).
+    day_type = db.Column(db.String(10), nullable=False, default="weekday")
     start_time = db.Column(db.Time, nullable=False)
     end_time = db.Column(db.Time, nullable=False)
     hourly_rate = db.Column(db.Numeric(15, 2), nullable=False)
@@ -183,10 +186,29 @@ class FacilityRateRule(db.Model):
             "id": self.id,
             "facility_id": self.facility_id,
             "label": self.label,
+            "day_type": self.day_type or "weekday",
             "start_time": hm(self.start_time),
             "end_time": hm(self.end_time),
             "hourly_rate": float(self.hourly_rate or 0),
         }
+
+
+DAY_TYPES = ("weekday", "saturday", "sunday", "holiday")
+
+
+def day_type_for_date(d):
+    """Kategori hari utk tarif: 'holiday' bila tanggal ada di tabel Holiday,
+    lalu 'saturday'/'sunday' utk akhir pekan, selain itu 'weekday'."""
+    if d is None:
+        return "weekday"
+    if Holiday.query.filter_by(date=d).first() is not None:
+        return "holiday"
+    wd = d.weekday()  # 5=Sabtu, 6=Minggu
+    if wd == 5:
+        return "saturday"
+    if wd == 6:
+        return "sunday"
+    return "weekday"
 
 
 def _expand_range(start_t, end_t):
@@ -199,21 +221,36 @@ def _expand_range(start_t, end_t):
     return sh, eh
 
 
-def facility_rate_for_hour(facility, hour):
-    """Tarif/jam yg berlaku utk 1 jam booking (jam ke-`hour`, integer 0-23
-    atau lebih kalau lintas tengah malam). Rule pertama yg cocok menang."""
+def facility_rate_for_hour(facility, hour, day_type="weekday"):
+    """Tarif/jam yg berlaku utk 1 jam booking (jam ke-`hour`, integer 0-23 atau
+    lebih kalau lintas tengah malam), utk kategori hari `day_type`.
+
+    Hanya rule dgn `day_type` yg sama dipertimbangkan — supaya tarif Sabtu/Minggu
+    tak bocor ke hari kerja. Jam yg jatuh di CELAH antar-band (mis. 15:00-16:00
+    saat band siang 07-15 dan band sore mulai 16:00) memakai tarif band
+    sebelumnya (carry-forward), sesuai intuisi 'harga berubah saat band
+    berikutnya mulai'. Kalau tak ada band sama sekali → tarif dasar facility."""
+    carry = None  # (start_jam, tarif) band terdekat sebelum `hour` pd hari ini
     for r in facility.rate_rules:
+        if (r.day_type or "weekday") != day_type:
+            continue
         sh, eh = _expand_range(r.start_time, r.end_time)
         hh = hour if hour >= sh else hour + 24
         if sh <= hh < eh:
             return float(r.hourly_rate)
+        # carry-forward: band yg sudah MULAI pada/sebelum jam ini (pakai jam
+        # mentah, bukan hh — supaya band yg mulai NANTI tak dikira 'sebelum').
+        if sh <= hour and (carry is None or sh > carry[0]):
+            carry = (sh, float(r.hourly_rate))
+    if carry is not None:
+        return carry[1]
     return float(facility.hourly_rate or 0)
 
 
-def facility_booking_price(facility, start_hour, end_hour):
+def facility_booking_price(facility, start_hour, end_hour, day_type="weekday"):
     """Total harga booking dari jam `start_hour` s.d. `end_hour` (exclusive),
-    dgn tarif per jam bisa beda2 sesuai rate_rules."""
-    return sum(facility_rate_for_hour(facility, h) for h in range(start_hour, end_hour))
+    dgn tarif per jam bisa beda2 sesuai rate_rules & kategori hari `day_type`."""
+    return sum(facility_rate_for_hour(facility, h, day_type) for h in range(start_hour, end_hour))
 
 
 class Shift(db.Model):

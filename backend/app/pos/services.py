@@ -20,6 +20,7 @@ from .models import (
     Product,
     Shift,
     StockMovement,
+    day_type_for_date,
     facility_booking_price,
 )
 
@@ -208,7 +209,8 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
             # tarif bisa beda per rentang jam (facility.rate_rules, mis. malam
             # lebih mahal) — hitung per jam lalu jumlahkan, bukan flat hourly_rate*qty
             end_hour = start.hour + int(hours)
-            total_price = _D(facility_booking_price(facility, start.hour, end_hour)).quantize(Decimal("0.01"))
+            dtype = day_type_for_date(bdate)  # weekday/saturday/sunday/holiday
+            total_price = _D(facility_booking_price(facility, start.hour, end_hour, dtype)).quantize(Decimal("0.01"))
             unit_price = (total_price / qty).quantize(Decimal("0.01")) if qty else _D(0)
             name = f"{facility.name} {bdate:%d/%m} {row['start_time']}-{row['end_time']}"
             oi = OrderItem(

@@ -21,6 +21,7 @@ from ..security import (
     roles_required,
 )
 from ..pos.models import (
+    DAY_TYPES,
     Attendance,
     Facility,
     FacilityBooking,
@@ -1174,8 +1175,11 @@ def facility_rate_rules_create(fid):
     end_t = _parse_time(d["end_time"], None)
     if not start_t or not end_t:
         return _err("Format jam salah (HH:MM)")
+    day_type = (d.get("day_type") or "weekday").strip()
+    if day_type not in DAY_TYPES:
+        return _err(f"Hari tidak valid. Pilihan: {', '.join(DAY_TYPES)}")
     rule = FacilityRateRule(
-        facility_id=fid, label=(d.get("label") or "")[:50] or None,
+        facility_id=fid, label=(d.get("label") or "")[:50] or None, day_type=day_type,
         start_time=start_t, end_time=end_t, hourly_rate=_D(d["hourly_rate"]),
     )
     db.session.add(rule)
@@ -1196,6 +1200,11 @@ def facility_rate_rule_update(rid):
     d = request.get_json(silent=True) or {}
     if "label" in d:
         rule.label = (d.get("label") or "")[:50] or None
+    if "day_type" in d:
+        dt = (d.get("day_type") or "weekday").strip()
+        if dt not in DAY_TYPES:
+            return _err(f"Hari tidak valid. Pilihan: {', '.join(DAY_TYPES)}")
+        rule.day_type = dt
     if "start_time" in d:
         t = _parse_time(d["start_time"], None)
         if not t:

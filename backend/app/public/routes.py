@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db, limiter
 from ..models import Area, Venue
-from ..pos.models import Facility, FacilityBooking, facility_rate_for_hour
+from ..pos.models import Facility, FacilityBooking, day_type_for_date, facility_rate_for_hour
 
 public_bp = Blueprint("public", __name__)
 
@@ -122,6 +122,7 @@ def public_schedule():
     booked_ranges = [(datetime.combine(d, b.start_time), _end_dt(b.end_time)) for b in booked]
 
     slots = []
+    dtype = day_type_for_date(d)  # tarif ikut kategori hari tanggal ini
     cur = datetime.combine(d, fac.open_time)
     end_of_day = _end_dt(fac.close_time)
     while cur < end_of_day:
@@ -132,7 +133,7 @@ def public_schedule():
                 "start_time": cur.strftime("%H:%M"),
                 "end_time": slot_end.strftime("%H:%M"),
                 "status": "booked" if is_booked else "available",
-                "rate": facility_rate_for_hour(fac, cur.hour),
+                "rate": facility_rate_for_hour(fac, cur.hour, dtype),
             }
         )
         cur = slot_end

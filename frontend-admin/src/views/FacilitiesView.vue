@@ -60,12 +60,13 @@ async function saveFac() {
 const showRates = ref(false)
 const rateFac = ref(null)
 const rateRules = ref([])
-const rateForm = ref({ label: '', start_time: '', end_time: '', hourly_rate: 0 })
+const rateForm = ref({ label: '', day_type: 'weekday', start_time: '', end_time: '', hourly_rate: 0 })
+const DAY_LABELS = { weekday: 'Weekday', saturday: 'Sabtu', sunday: 'Minggu', holiday: 'Libur' }
 const rateErr = ref('')
 const savingRate = ref(false)
 async function openRates(f) {
   rateFac.value = f
-  rateForm.value = { label: '', start_time: '', end_time: '', hourly_rate: f.hourly_rate }
+  rateForm.value = { label: '', day_type: 'weekday', start_time: '', end_time: '', hourly_rate: f.hourly_rate }
   rateErr.value = ''
   showRates.value = true
   await loadRateRules()
@@ -200,6 +201,7 @@ watch(venueId, reload)
               <td class="px-4 py-3 text-right">
                 <template v-if="f.rate_rules?.length">
                   <div v-for="r in f.rate_rules" :key="r.id" class="text-xs text-slate-600 whitespace-nowrap">
+                    <span class="text-[10px] text-brand-600">[{{ DAY_LABELS[r.day_type] || r.day_type }}]</span>
                     {{ r.start_time }}–{{ r.end_time }}<span v-if="r.label"> ({{ r.label }})</span>: {{ rupiah(r.hourly_rate) }}
                   </div>
                   <div v-if="f.hourly_rate" class="text-xs text-slate-400">jam lain: {{ rupiah(f.hourly_rate) }}</div>
@@ -304,14 +306,16 @@ watch(venueId, reload)
         <div class="bg-slate-50 rounded-lg border overflow-hidden mb-4">
           <table class="w-full text-sm">
             <thead class="bg-slate-100 text-slate-500 text-left"><tr>
+              <th class="px-3 py-2 font-medium">Hari</th>
               <th class="px-3 py-2 font-medium">Label</th>
               <th class="px-3 py-2 font-medium">Jam</th>
               <th class="px-3 py-2 font-medium text-right">Tarif/jam</th>
               <th class="px-3 py-2"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="!rateRules.length"><td colspan="4" class="px-3 py-5 text-center text-slate-400">Belum ada tarif khusus — semua jam pakai tarif dasar.</td></tr>
+              <tr v-if="!rateRules.length"><td colspan="5" class="px-3 py-5 text-center text-slate-400">Belum ada tarif khusus — semua jam pakai tarif dasar.</td></tr>
               <tr v-for="r in rateRules" :key="r.id" class="border-t">
+                <td class="px-3 py-2"><span class="text-xs bg-brand-50 text-brand-700 rounded px-1.5 py-0.5">{{ DAY_LABELS[r.day_type] || r.day_type }}</span></td>
                 <td class="px-3 py-2 text-slate-700">{{ r.label || '—' }}</td>
                 <td class="px-3 py-2 text-slate-600">{{ r.start_time }}–{{ r.end_time }}</td>
                 <td class="px-3 py-2 text-right">{{ rupiah(r.hourly_rate) }}</td>
@@ -323,6 +327,14 @@ watch(venueId, reload)
 
         <p class="text-sm font-medium text-slate-600 mb-2">Tambah tarif baru</p>
         <div class="grid grid-cols-2 gap-2 mb-2">
+          <div class="col-span-2"><label class="text-xs text-slate-500">Hari berlaku</label>
+            <select v-model="rateForm.day_type" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+              <option value="weekday">Weekday (Senin–Jumat)</option>
+              <option value="saturday">Sabtu</option>
+              <option value="sunday">Minggu</option>
+              <option value="holiday">Hari Libur Nasional</option>
+            </select>
+          </div>
           <input v-model="rateForm.label" placeholder="Label (mis. Malam)" class="col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           <div><label class="text-xs text-slate-500">Mulai</label><input v-model="rateForm.start_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
           <div><label class="text-xs text-slate-500">Selesai</label><input v-model="rateForm.end_time" type="time" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>

@@ -12,6 +12,7 @@ export const usePosStore = defineStore('pos', {
     qrisDynamic: false, // true = QR otomatis via BRIAPI; false = QRIS manual (upload bukti)
     products: [],
     facilities: [],
+    holidays: [], // tanggal libur nasional (ISO) — utk tarif booking 'holiday'
     stations: [],
     addons: [],
     cart: [], // {uid, item_type, name, unit_price, quantity, ...}
@@ -72,6 +73,7 @@ export const usePosStore = defineStore('pos', {
     async fetchFacilities() {
       const { data } = await client.get('/facilities')
       this.facilities = data.facilities
+      this.holidays = data.holidays || []
       return data.facilities
     },
     async fetchFacilityBookings(facilityId, date) {

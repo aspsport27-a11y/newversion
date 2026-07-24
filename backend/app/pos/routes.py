@@ -453,7 +453,15 @@ def pos_facilities():
         .order_by(Facility.name)
         .all()
     )
-    return jsonify(count=len(facilities), facilities=[f.to_dict() for f in facilities]), 200
+    # tanggal libur nasional dikirim supaya preview harga di POS bisa memakai
+    # tarif 'holiday' (bukan cuma weekday/sabtu/minggu) — konsisten dgn backend.
+    from .models import Holiday
+    holidays = [h.date.isoformat() for h in Holiday.query.all()]
+    return jsonify(
+        count=len(facilities),
+        facilities=[f.to_dict() for f in facilities],
+        holidays=holidays,
+    ), 200
 
 
 @pos_bp.get("/facilities/<int:facility_id>/bookings")
