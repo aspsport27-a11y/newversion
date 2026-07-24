@@ -1,8 +1,20 @@
 # Integrasi BRIAPI QRIS (SNAP BI)
 
-Status: **kode selesai & teruji, menunggu kredensial BRI.** Tanpa kredensial,
-QRIS otomatis kembali ke perilaku lama (payment `pending`, konfirmasi manual) —
-jadi aman dibiarkan sampai BRI siap.
+> **Status handoff (2026-07-24):** kode selesai & teruji. Tes ke sandbox BRI:
+> **access token B2B SUKSES** (rantai auth terbukti), **path generate QR = v1.1**
+> (sudah diperbaiki). Berhenti di validasi header — butuh **3 nilai dari BRI**
+> yang tak bisa ditebak:
+> 1. **X-PARTNER-ID** (numerik, khusus app kita) → `BRI_PARTNER_ID`
+> 2. **Merchant ID + Terminal ID** QRIS (onboarding cabang) → `BRI_MERCHANT_ID/BRI_TERMINAL_ID`
+> 3. **Public key BRI** (verifikasi webhook) → `BRI_PUBLIC_KEY_PATH` + daftarkan callback
+>    `https://pos.aspsports.id/api/pos/webhook/bri`
+>
+> Kontak BRI: briapi@bri.co.id / briapi@corp.bri.co.id / RM cabang.
+> Client ID sandbox & private key sudah tersimpan di server. Integrasi OFF
+> (partner/merchant id kosong) → QRIS POS aman, berperilaku spt lama.
+> Melanjutkan: isi 3 nilai ke `.env`, restart backend, tes `briapi.generate_qr`.
+
+---
 
 ## 1. Yang harus diisi di `.env` backend
 
