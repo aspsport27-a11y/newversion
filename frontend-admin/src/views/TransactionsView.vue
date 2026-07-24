@@ -79,6 +79,21 @@ const filtered = computed(() => {
   return list
 })
 
+// ---- Stiker info (ringkasan, mengikuti filter aktif; transaksi batal tak dihitung nominal) ----
+const stats = computed(() => {
+  let count = 0, nilai = 0, diterima = 0, belum = 0, batal = 0
+  for (const o of filtered.value) {
+    if (o.status === 'void') { batal++; continue }
+    count++
+    const total = Number(o.total_amount) || 0
+    const paid = Number(o.amount_paid) || 0
+    nilai += total
+    diterima += paid
+    belum += Math.max(0, total - paid)
+  }
+  return { count, nilai, diterima, belum, batal }
+})
+
 // ---- Paging ----
 const page = ref(1)
 const pageSize = ref(20)
@@ -161,6 +176,27 @@ async function deleteOrder(o, ev) {
         <option value="">Semua kategori</option>
         <option v-for="c in availableCategories" :key="c" :value="c">{{ c }}</option>
       </select>
+    </div>
+
+    <!-- Stiker info -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-500">Transaksi</p>
+        <p class="text-2xl font-bold text-brand-700 mt-1">{{ stats.count }}</p>
+        <p v-if="stats.batal" class="text-[11px] text-red-500 mt-0.5">{{ stats.batal }} dibatalkan (tak dihitung)</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-500">Nilai transaksi</p>
+        <p class="text-xl font-bold text-slate-800 mt-1">{{ rupiah(stats.nilai) }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-500">Pembayaran diterima (ril)</p>
+        <p class="text-xl font-bold text-emerald-600 mt-1">{{ rupiah(stats.diterima) }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-500">Belum lunas</p>
+        <p class="text-xl font-bold mt-1" :class="stats.belum > 0 ? 'text-amber-600' : 'text-slate-400'">{{ rupiah(stats.belum) }}</p>
+      </div>
     </div>
 
     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
