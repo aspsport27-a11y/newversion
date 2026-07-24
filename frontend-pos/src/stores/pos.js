@@ -9,6 +9,7 @@ export const usePosStore = defineStore('pos', {
     openShift: null,
     venue: null,
     bookingEnabled: true, // false = mode tiketing (venue tanpa lapangan, mis. waterpark)
+    qrisDynamic: false, // true = QR otomatis via BRIAPI; false = QRIS manual (upload bukti)
     products: [],
     facilities: [],
     stations: [],
@@ -61,6 +62,7 @@ export const usePosStore = defineStore('pos', {
       this.terminal = data.terminal
       this.venue = data.venue
       this.bookingEnabled = data.booking_enabled
+      this.qrisDynamic = data.qris_dynamic
       this.openShift = data.open_shift
     },
     async fetchProducts() {

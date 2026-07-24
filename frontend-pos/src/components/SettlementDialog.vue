@@ -28,7 +28,7 @@ onMounted(load)
 async function onPay(payload) {
   err.value = ''
   try {
-    const res = await pos.settle(selected.value.id, payload.method, payload.amount, payload.reference)
+    const res = await pos.settle(selected.value.id, payload.method, payload.amount, payload.reference, payload.proof_image)
     emit('paid', res)
   } catch (e) {
     err.value = e?.response?.data?.message || 'Gagal memproses pelunasan.'
@@ -90,6 +90,7 @@ async function cancel(o) {
 
     <!-- Bayar pelunasan -->
     <PaymentDialog v-if="selected" :total="selected.amount_due" title="Pelunasan"
+      :qris-dynamic="pos.qrisDynamic"
       @close="selected = null" @pay="onPay" />
   </div>
 </template>

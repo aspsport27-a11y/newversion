@@ -284,8 +284,12 @@ def _pay_qris_bri(order, payment, **_):
     hasil polling `sync_qris_payment`) — uang tak pernah diakui dari sisi kasir.
     """
     if not briapi.is_configured():
-        # Integrasi belum dinyalakan → perilaku lama: pending, konfirmasi manual.
-        payment.status = "pending"
+        # Integrasi dinamis belum nyala → mode MANUAL, diperlakukan seperti
+        # transfer bank: bukti pembayaran QRIS wajib diupload (dicek di pay_order)
+        # dan kasir sudah memverifikasi dana masuk sebelum konfirmasi. Langsung
+        # lunas; metode tetap tercatat 'qris' supaya rekonsiliasi bank benar.
+        payment.status = "paid"
+        payment.paid_at = datetime.utcnow()
         return
 
     db.session.flush()  # butuh payment.id utk menyusun external_id
@@ -341,6 +345,9 @@ def pay_order(order: Order, shift: Shift, cashier_id: int, data: dict) -> Paymen
         raise PosError("Metode bayar tidak valid (cash|qris|transfer)", "bad_method")
     if method == "transfer" and not data.get("proof_filename"):
         raise PosError("Bukti transfer wajib diupload", "proof_required")
+    # QRIS mode manual (BRIAPI belum aktif) diperlakukan spt transfer: wajib bukti.
+    if method == "qris" and not briapi.is_configured() and not data.get("proof_filename"):
+        raise PosError("Bukti pembayaran QRIS wajib diupload", "proof_required")
     _default_provider = {"cash": "cash", "transfer": "bank_transfer"}
     provider = data.get("provider") or _default_provider.get(method, "bri_qris_mpm")
     if provider not in PROVIDERS:

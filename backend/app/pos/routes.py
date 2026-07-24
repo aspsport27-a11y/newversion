@@ -310,6 +310,7 @@ def pos_me():
         terminal=terminal.to_dict(),
         venue={"id": venue.id, "code": venue.code, "name": venue.name, "type": venue.type} if venue else None,
         booking_enabled=has_facility,  # True = mode booking lapangan; False = mode tiketing
+        qris_dynamic=briapi.is_configured(),  # True = QR otomatis via BRIAPI; False = QRIS manual (upload bukti)
         open_shift=shift.to_dict() if shift else None,
     ), 200
 
@@ -674,10 +675,11 @@ def order_pay(order_id):
     if order.venue_id != terminal.venue_id:
         raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
     data = request.get_json(silent=True) or {}
-    if data.get("method") == "transfer" and data.get("proof_image"):
+    # Bukti disimpan utk transfer, dan utk QRIS mode manual (BRIAPI belum aktif).
+    if data.get("method") in ("transfer", "qris") and data.get("proof_image"):
         fn = _save_payment_proof(data["proof_image"])
         if not fn:
-            raise PosError("Gagal simpan bukti transfer (format/ukuran tak valid, maks 3MB)", "bad_proof")
+            raise PosError("Gagal simpan bukti (format/ukuran tak valid, maks 3MB)", "bad_proof")
         data["proof_filename"] = fn
     payment = pay_order(order, shift, int(get_jwt_identity()), data)
     return jsonify(order=order.to_dict(), payment=payment.to_dict()), 200

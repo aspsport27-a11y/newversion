@@ -432,6 +432,7 @@ function logout() {
 
     <!-- Dialogs -->
     <PaymentDialog v-if="showPayment" :total="pendingStationOrder ? pendingStationOrder.total_amount : pos.total"
+      :qris-dynamic="pos.qrisDynamic"
       @close="showPayment = false; pendingStationOrder = null" @pay="onPay" />
     <QrisDialog v-if="qrisPayment" :payment-id="qrisPayment.id" :amount="qrisPayment.amount"
       @paid="onQrisPaid" @close="onQrisClose" />

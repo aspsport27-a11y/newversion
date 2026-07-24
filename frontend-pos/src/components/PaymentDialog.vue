@@ -5,6 +5,8 @@ const props = defineProps({
   total: Number,
   allowDp: { type: Boolean, default: true },
   title: { type: String, default: 'Pembayaran' },
+  // true = QR otomatis via BRIAPI; false = QRIS manual (customer scan kartu statis, upload bukti)
+  qrisDynamic: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close', 'pay'])
 
@@ -36,6 +38,9 @@ const validAmount = computed(() => {
   return a > 0 && a <= props.total
 })
 const canPayCash = computed(() => validAmount.value && (Number(received.value) || 0) >= (Number(amount.value) || 0))
+// QRIS manual (bukan dinamis) butuh bukti sama seperti transfer
+const qrisManual = computed(() => !props.qrisDynamic)
+const canPayQrisManual = computed(() => validAmount.value && !!proofPreview.value)
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function setDp() { amount.value = Math.round(props.total / 2) }
@@ -45,11 +50,12 @@ function quickReceived(v) { received.value = String(v) }
 async function confirm() {
   submitting.value = true
   try {
+    const needProof = method.value === 'transfer' || (method.value === 'qris' && qrisManual.value)
     await emit('pay', {
       method: method.value,
       amount: Number(amount.value),
       reference: method.value !== 'cash' ? reference.value : null,
-      proof_image: method.value === 'transfer' ? proofPreview.value : null,
+      proof_image: needProof ? proofPreview.value : null,
     })
   } finally { submitting.value = false }
 }
@@ -108,8 +114,8 @@ async function confirm() {
         </button>
       </div>
 
-      <!-- QRIS -->
-      <div v-else-if="method === 'qris'" class="space-y-3">
+      <!-- QRIS DINAMIS (BRIAPI aktif) -->
+      <div v-else-if="method === 'qris' && !qrisManual" class="space-y-3">
         <div class="bg-brand-50 border border-brand-100 rounded-lg p-3 text-sm text-brand-800">
           QR akan ditampilkan untuk dipindai customer. Transaksi otomatis lunas
           begitu bank mengonfirmasi — <span class="font-medium">jangan tutup layar QR</span>
@@ -120,6 +126,27 @@ async function confirm() {
         <button @click="confirm" :disabled="!validAmount || submitting"
           class="w-full py-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold disabled:opacity-50">
           {{ submitting ? 'Membuat QR…' : 'Tampilkan QR' }}
+        </button>
+      </div>
+
+      <!-- QRIS MANUAL (kartu statis — wajib upload bukti, spt transfer) -->
+      <div v-else-if="method === 'qris' && qrisManual" class="space-y-3">
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+          Customer scan QRIS (kartu). <span class="font-medium">Pastikan dana masuk</span>
+          (cek BRImo/notifikasi), lalu foto/upload bukti sebelum konfirmasi.
+        </div>
+        <input ref="fileInput" type="file" accept="image/*" capture="environment" class="hidden" @change="onProofChange" />
+        <button @click="pickProof" type="button"
+          class="w-full py-3 rounded-lg border-2 border-dashed border-slate-300 hover:border-brand-400 text-sm text-slate-500">
+          {{ proofPreview ? '✅ Bukti terpilih — ganti foto?' : '📎 Pilih / Foto Bukti QRIS' }}
+        </button>
+        <img v-if="proofPreview" :src="proofPreview" class="w-full max-h-48 object-contain rounded-lg border border-slate-200" />
+        <input v-model="reference" placeholder="No. referensi / catatan (opsional)"
+          class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+        <p v-if="proofErr" class="text-xs text-red-600">{{ proofErr }}</p>
+        <button @click="confirm" :disabled="!canPayQrisManual || submitting"
+          class="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50">
+          {{ submitting ? 'Memproses…' : (sisa > 0 ? 'Bayar DP & Cetak' : 'Bayar & Cetak Struk') }}
         </button>
       </div>
 
