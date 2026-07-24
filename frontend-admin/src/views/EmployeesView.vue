@@ -27,6 +27,16 @@ const filtered = computed(() => {
     (e.username || '').toLowerCase().includes(q) ||
     (e.position || '').toLowerCase().includes(q))
 })
+// ringkasan (stiker info) — dihitung dari data yang sedang dimuat (sesuai venue terpilih)
+const stats = computed(() => {
+  const list = employees.value
+  return {
+    total: list.length,
+    aktif: list.filter((e) => e.status === 'active').length,
+    nonaktif: list.filter((e) => e.status !== 'active').length,
+    akun: list.filter((e) => e.has_account).length,
+  }
+})
 const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / perPage.value)))
 const paged = computed(() => filtered.value.slice((page.value - 1) * perPage.value, page.value * perPage.value))
 // jaga page tetap valid saat data/filter berubah
@@ -180,6 +190,26 @@ async function resetAccount(pinOnly) {
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
         <button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Karyawan</button>
+      </div>
+    </div>
+
+    <!-- Stiker info total karyawan -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-500">Total karyawan</p>
+        <p class="text-2xl font-bold text-brand-700 mt-1">{{ stats.total }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-500">Aktif</p>
+        <p class="text-2xl font-bold text-emerald-600 mt-1">{{ stats.aktif }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-500">Nonaktif</p>
+        <p class="text-2xl font-bold text-slate-400 mt-1">{{ stats.nonaktif }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-500">Punya akun login</p>
+        <p class="text-2xl font-bold text-slate-700 mt-1">{{ stats.akun }}</p>
       </div>
     </div>
 
