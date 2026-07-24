@@ -173,20 +173,32 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
                 raise PosError("Produk tidak ditemukan/nonaktif", "product_not_found", 404)
             if product.venue_id != shift.venue_id:
                 raise PosError("Produk bukan milik venue ini", "product_wrong_venue")
-            if product.track_stock and product.stock_qty < qty:
-                raise PosError(
-                    f"Stok '{product.name}' kurang (sisa {product.stock_qty})",
-                    "insufficient_stock",
+            if product.open_price:
+                # harga terbuka (mis. Parkir): nominal diketik kasir, tak ada
+                # stok/promo. Ambil dari input, wajib > 0.
+                unit = _D(row.get("unit_price"))
+                if unit <= 0:
+                    raise PosError(f"Nominal '{product.name}' harus diisi (> 0)", "bad_amount")
+                oi = OrderItem(
+                    item_type="product", product_id=product.id, name_snapshot=product.name[:120],
+                    unit_price=unit, quantity=qty,
+                    line_total=(unit * qty).quantize(Decimal("0.01")),
                 )
-            from .promos import active_promo, compute_line, promo_label
+            else:
+                if product.track_stock and product.stock_qty < qty:
+                    raise PosError(
+                        f"Stok '{product.name}' kurang (sisa {product.stock_qty})",
+                        "insufficient_stock",
+                    )
+                from .promos import active_promo, compute_line, promo_label
 
-            promo = active_promo(product.id)
-            unit, line_total = compute_line(product, qty, promo)
-            pname = f"{product.name} ({promo_label(promo)})" if promo else product.name
-            oi = OrderItem(
-                item_type="product", product_id=product.id, name_snapshot=pname[:120],
-                unit_price=unit, quantity=qty, line_total=line_total,
-            )
+                promo = active_promo(product.id)
+                unit, line_total = compute_line(product, qty, promo)
+                pname = f"{product.name} ({promo_label(promo)})" if promo else product.name
+                oi = OrderItem(
+                    item_type="product", product_id=product.id, name_snapshot=pname[:120],
+                    unit_price=unit, quantity=qty, line_total=line_total,
+                )
 
         elif item_type == "ticket":
             qty = _D(row.get("quantity", 1))

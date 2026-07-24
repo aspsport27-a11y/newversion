@@ -449,6 +449,7 @@ def products_create():
         min_stock=int(d.get("min_stock", 0) or 0),
         supplier_id=d.get("supplier_id") or None,
         is_ticket=bool(d.get("is_ticket", False)),
+        open_price=bool(d.get("open_price", False)),
         weekend_price=_promo(d.get("weekend_price")),
         is_consignment=bool(d.get("is_consignment", False)),
         consignment_price=_promo(d.get("consignment_price")),
@@ -499,6 +500,8 @@ def products_update(pid):
             p.category_id = None
     if "is_ticket" in d:
         p.is_ticket = bool(d["is_ticket"])
+    if "open_price" in d:
+        p.open_price = bool(d["open_price"])
     if "weekend_price" in d:
         p.weekend_price = _promo(d["weekend_price"])
     if "is_consignment" in d:

@@ -144,13 +144,13 @@ watch(venueId, () => { search.value = ''; categoryFilter.value = ''; page.value 
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', price: 0, unit: 'pcs', stock_qty: 0, min_stock: 0, track_stock: true, category: '', supplier_id: '', is_consignment: false, consignment_price: null }
+  form.value = { name: '', price: 0, unit: 'pcs', stock_qty: 0, min_stock: 0, track_stock: true, category: '', supplier_id: '', is_consignment: false, consignment_price: null, open_price: false }
   error.value = ''
   showForm.value = true
 }
 function openEdit(p) {
   editing.value = p
-  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock: p.min_stock, track_stock: p.track_stock, supplier_id: p.supplier_id || '', category: p.category_name || '', is_consignment: p.is_consignment || false, consignment_price: p.consignment_price, is_active: p.is_active }
+  form.value = { name: p.name, price: p.price, stock_qty: p.stock_qty, min_stock: p.min_stock, track_stock: p.track_stock, supplier_id: p.supplier_id || '', category: p.category_name || '', is_consignment: p.is_consignment || false, consignment_price: p.consignment_price, is_active: p.is_active, open_price: p.open_price || false }
   error.value = ''
   showForm.value = true
 }
@@ -167,10 +167,13 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
+    // harga terbuka: tak ada harga tetap & stok — paksa nilai netral
+    const payload = { ...form.value }
+    if (payload.open_price) { payload.price = 0; payload.track_stock = false; payload.stock_qty = 0; payload.min_stock = 0 }
     if (editing.value) {
-      await client.put(`/admin/products/${editing.value.id}`, form.value)
+      await client.put(`/admin/products/${editing.value.id}`, payload)
     } else {
-      await client.post('/admin/products', { ...form.value, venue_id: venueId.value })
+      await client.post('/admin/products', { ...payload, venue_id: venueId.value })
     }
     showForm.value = false
     await loadProducts()
@@ -234,11 +237,13 @@ async function save() {
               <td class="px-4 py-3 font-medium text-slate-700">
                 {{ p.name }}
                 <span v-if="p.is_consignment" class="ml-1 text-[10px] bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">Konsinyasi</span>
+                <span v-if="p.open_price" class="ml-1 text-[10px] bg-brand-100 text-brand-700 rounded px-1.5 py-0.5">Harga terbuka</span>
               </td>
               <td class="px-4 py-3 text-slate-500">{{ p.category_name || '—' }}</td>
               <td class="px-4 py-3 text-slate-500">{{ supName(p.supplier_id) }}</td>
               <td class="px-4 py-3 text-right">
-                <template v-if="p.promo && p.effective_price < p.price">
+                <span v-if="p.open_price" class="text-slate-400 text-xs italic">diketik kasir</span>
+                <template v-else-if="p.promo && p.effective_price < p.price">
                   <span class="text-emerald-600 font-medium">{{ rupiah(p.effective_price) }}</span>
                   <span class="text-xs text-slate-400 line-through ml-1">{{ rupiah(p.price) }}</span>
                 </template>
@@ -315,6 +320,13 @@ async function save() {
               <p class="text-xs text-slate-400 mt-1">Bukan persentase — jumlah tetap Rp yg dibayar ke supplier tiap 1 unit terjual. Selisih dgn harga jual jadi margin venue. Dihitung di menu Procurement → tab Konsinyasi.</p>
             </div>
           </div>
+          <div class="bg-brand-50 rounded-lg p-3">
+            <label class="flex items-center gap-2 text-sm text-slate-700 font-medium">
+              <input v-model="form.open_price" type="checkbox" /> Harga terbuka (nominal diketik kasir)
+            </label>
+            <p class="text-xs text-slate-400 mt-1">Untuk item bernominal bebas seperti <b>Parkir</b>. Tanpa harga tetap & tanpa stok — kasir mengetik jumlahnya saat transaksi.</p>
+          </div>
+          <template v-if="!form.open_price">
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="block text-xs text-slate-500 mb-1">Harga</label>
@@ -333,6 +345,7 @@ async function save() {
           <label class="flex items-center gap-2 text-sm text-slate-600">
             <input v-model="form.track_stock" type="checkbox" /> Lacak stok
           </label>
+          </template>
           <label v-if="editing" class="flex items-center gap-2 text-sm text-slate-600">
             <input v-model="form.is_active" type="checkbox" /> Aktif
           </label>

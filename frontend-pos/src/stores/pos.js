@@ -154,6 +154,20 @@ export const usePosStore = defineStore('pos', {
           track_stock: p.track_stock,
         })
     },
+    addOpenPriceProduct(p, amount) {
+      // harga terbuka (mis. Parkir): tiap entry baris tersendiri (tak digabung)
+      // krn nominalnya bisa beda-beda.
+      this.cart.push({
+        uid: 'op' + p.id + '-' + Date.now(),
+        item_type: 'product',
+        product_id: p.id,
+        name: p.name,
+        unit_price: Number(amount),
+        quantity: 1,
+        open_price: true,
+        track_stock: false,
+      })
+    },
     addTicket(p) {
       const found = this.cart.find((i) => i.item_type === 'ticket' && i.product_id === p.id)
       if (found) found.quantity += 1
@@ -207,7 +221,10 @@ export const usePosStore = defineStore('pos', {
             }
           if (i.item_type === 'ticket')
             return { item_type: 'ticket', product_id: i.product_id, quantity: i.quantity }
-          return { item_type: 'product', product_id: i.product_id, quantity: i.quantity }
+          return {
+            item_type: 'product', product_id: i.product_id, quantity: i.quantity,
+            ...(i.open_price ? { unit_price: i.unit_price } : {}),
+          }
         }),
       }
       const { data: created } = await client.post('/orders', payload)

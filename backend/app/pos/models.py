@@ -51,6 +51,7 @@ class Product(db.Model):
     min_stock = db.Column(db.Integer, default=0)  # ambang reorder
     supplier_id = db.Column(db.Integer, db.ForeignKey("suppliers.id", ondelete="SET NULL"))
     is_ticket = db.Column(db.Boolean, nullable=False, default=False)  # tiket masuk (waterpark)
+    open_price = db.Column(db.Boolean, nullable=False, default=False)  # harga diketik kasir saat transaksi (mis. Parkir)
     weekend_price = db.Column(db.Numeric(15, 2))  # harga weekend/libur (khusus tiket)
     is_consignment = db.Column(db.Boolean, nullable=False, default=False)  # produk titipan/konsinyasi
     consignment_price = db.Column(db.Numeric(15, 2))  # jumlah tetap ke supplier per unit terjual
@@ -72,6 +73,7 @@ class Product(db.Model):
             "min_stock": self.min_stock or 0,
             "supplier_id": self.supplier_id,
             "is_ticket": self.is_ticket,
+            "open_price": self.open_price,
             "weekend_price": float(self.weekend_price) if self.weekend_price is not None else None,
             "is_consignment": self.is_consignment,
             "consignment_price": float(self.consignment_price) if self.consignment_price is not None else None,

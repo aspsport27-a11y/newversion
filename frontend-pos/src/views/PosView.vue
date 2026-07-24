@@ -8,6 +8,7 @@ import QrisDialog from '../components/QrisDialog.vue'
 import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
 import BookingDialog from '../components/BookingDialog.vue'
+import OpenPriceDialog from '../components/OpenPriceDialog.vue'
 import MemberBookingDialog from '../components/MemberBookingDialog.vue'
 import SettlementDialog from '../components/SettlementDialog.vue'
 import AbsenDialog from '../components/AbsenDialog.vue'
@@ -27,6 +28,17 @@ const showPayment = ref(false)
 const showReceipt = ref(false)
 const showClose = ref(false)
 const showBooking = ref(false)
+
+// produk harga terbuka (mis. Parkir) → minta nominal dulu
+const openPriceProduct = ref(null)
+function onProductTap(p) {
+  if (p.open_price) openPriceProduct.value = p
+  else pos.addProduct(p)
+}
+function onOpenPriceAdd(amount) {
+  pos.addOpenPriceProduct(openPriceProduct.value, amount)
+  openPriceProduct.value = null
+}
 const showMember = ref(false)
 const showSettle = ref(false)
 const lastResult = ref(null)
@@ -366,16 +378,19 @@ function logout() {
           <button
             v-for="p in filteredFnb"
             :key="p.id"
-            @click="pos.addProduct(p)"
-            :disabled="p.track_stock && p.stock_qty <= 0"
+            @click="onProductTap(p)"
+            :disabled="!p.open_price && p.track_stock && p.stock_qty <= 0"
             class="bg-white rounded-xl border p-3 text-left hover:border-brand-400 active:scale-95 transition disabled:opacity-40"
           >
             <p class="font-medium text-slate-800 text-sm leading-tight">{{ p.name }}</p>
+            <p v-if="p.open_price" class="text-brand-700 font-semibold text-xs mt-1">Nominal diketik ✏️</p>
+            <template v-else>
             <p v-if="p.promo && p.effective_price < p.price" class="mt-1">
               <span class="text-brand-700 font-bold">{{ rupiah(p.effective_price) }}</span>
               <span class="text-[11px] text-slate-400 line-through ml-1">{{ rupiah(p.price) }}</span>
             </p>
             <p v-else class="text-brand-700 font-bold mt-1">{{ rupiah(p.price) }}</p>
+            </template>
             <p v-if="p.promo" class="text-[10px] text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 mt-1 inline-block">🎉 {{ p.promo.label }}</p>
             <p v-if="p.track_stock" class="text-[11px] text-slate-400 mt-0.5">stok: {{ p.stock_qty }}</p>
           </button>
@@ -436,6 +451,8 @@ function logout() {
       @close="showPayment = false; pendingStationOrder = null" @pay="onPay" />
     <QrisDialog v-if="qrisPayment" :payment-id="qrisPayment.id" :amount="qrisPayment.amount"
       @paid="onQrisPaid" @close="onQrisClose" />
+    <OpenPriceDialog v-if="openPriceProduct" :name="openPriceProduct.name"
+      @add="onOpenPriceAdd" @close="openPriceProduct = null" />
     <ReceiptDialog v-if="showReceipt && lastResult" :order="lastResult.order" :payment="lastResult.payment"
       :terminal="pos.terminal" @close="showReceipt = false" />
     <CloseShiftDialog v-if="showClose" :shift="pos.openShift" @close="showClose = false" @submit="onCloseShift" />
