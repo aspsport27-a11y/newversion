@@ -32,7 +32,8 @@ function print() {
             <span>{{ it.name }}</span>
             <span>{{ rupiah(it.line_total) }}</span>
           </div>
-          <div class="text-xs text-slate-500">{{ it.quantity }} x {{ rupiah(it.unit_price) }}</div>
+          <div v-if="it.notes" class="text-xs text-slate-500">{{ it.notes }}</div>
+          <div v-else class="text-xs text-slate-500">{{ it.quantity }} x {{ rupiah(it.unit_price) }}</div>
         </div>
         <div class="border-t border-dashed border-slate-300 my-2"></div>
         <div class="flex justify-between"><span>Subtotal</span><span>{{ rupiah(order.subtotal) }}</span></div>

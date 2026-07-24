@@ -22,7 +22,26 @@ from .models import (
     StockMovement,
     day_type_for_date,
     facility_booking_price,
+    facility_rate_for_hour,
 )
+
+
+def _booking_rate_breakdown(facility, start_hour, end_hour, day_type):
+    """Rincian tarif per jam sbg teks utk struk, mengelompokkan jam berturut yg
+    tarifnya sama. Return None kalau seluruh jam tarifnya seragam (tak perlu
+    rincian). Contoh: '15:00–16:00: Rp 200.000/jam · 16:00–17:00: Rp 250.000/jam'."""
+    segs = []  # (mulai, selesai, tarif)
+    for h in range(start_hour, end_hour):
+        rate = facility_rate_for_hour(facility, h, day_type)
+        if segs and segs[-1][2] == rate:
+            segs[-1] = (segs[-1][0], h + 1, rate)
+        else:
+            segs.append((h, h + 1, rate))
+    if len(segs) <= 1:
+        return None  # tarif seragam → tak perlu rincian
+    hhmm = lambda x: f"{x % 24:02d}:00"
+    rp = lambda n: "Rp " + f"{int(n):,}".replace(",", ".")
+    return " · ".join(f"{hhmm(a)}–{hhmm(b)}: {rp(r)}/jam" for a, b, r in segs)
 
 
 def is_weekend(d) -> bool:
@@ -213,10 +232,13 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
             total_price = _D(facility_booking_price(facility, start.hour, end_hour, dtype)).quantize(Decimal("0.01"))
             unit_price = (total_price / qty).quantize(Decimal("0.01")) if qty else _D(0)
             name = f"{facility.name} {bdate:%d/%m} {row['start_time']}-{row['end_time']}"
+            # rincian tarif per jam kalau tak seragam (mis. 15-16 @200rb, 16-17
+            # @250rb) — supaya struk menampilkan pecahan sebenarnya, bukan rata2.
+            breakdown = _booking_rate_breakdown(facility, start.hour, end_hour, dtype)
             oi = OrderItem(
                 item_type="booking", product_id=None, name_snapshot=name[:120],
                 unit_price=unit_price, quantity=qty,
-                line_total=total_price,
+                line_total=total_price, notes=breakdown,
             )
             booking_specs.append((oi, facility.id, bdate, start, end))
 

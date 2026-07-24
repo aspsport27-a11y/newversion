@@ -393,6 +393,7 @@ class OrderItem(db.Model):
             "unit_price": float(self.unit_price),
             "quantity": float(self.quantity),
             "line_total": float(self.line_total),
+            "notes": self.notes,
         }
 
 
