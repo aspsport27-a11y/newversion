@@ -291,7 +291,7 @@ def _pay_qris_bri(order, payment, **_):
     db.session.flush()  # butuh payment.id utk menyusun external_id
     ext = new_external_id(payment.id)
     try:
-        res = briapi.generate_qr(ext, payment.amount, ext)
+        res = briapi.generate_qr(ext, payment.amount)
     except briapi.BriError as e:
         # Jangan tinggalkan pembayaran menggantung tanpa QR — batalkan supaya
         # kasir langsung tahu dan bisa pilih metode lain (cash/transfer).
@@ -454,11 +454,7 @@ def sync_qris_payment(payment: Payment) -> str:
         return payment.status
 
     try:
-        res = briapi.query_qr(
-            payment.external_id,
-            new_external_id(payment.id),  # X-EXTERNAL-ID harus unik tiap panggilan
-            payment.bri_reference_no,
-        )
+        res = briapi.query_qr(payment.external_id, payment.bri_reference_no)
     except briapi.BriError as e:
         log.warning("Query status QRIS payment #%s gagal: %s", payment.id, e)
         return payment.status  # jangan ubah apa pun kalau BRI tak bisa dihubungi

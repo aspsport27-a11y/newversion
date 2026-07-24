@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import json
 import logging
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -31,10 +32,12 @@ log = logging.getLogger(__name__)
 
 WIB = timezone(timedelta(hours=7))
 
-# endpoint relatif — dipakai apa adanya saat menyusun string tanda tangan
+# Endpoint relatif — dipakai apa adanya saat menyusun string tanda tangan.
+# Jalur QR mengikuti dokumen resmi BRI "QRIS MPM Dynamic" (bukan jalur SNAP
+# generik /v1.0/qr/...). Kalau BRI mengubahnya, cukup ganti di sini.
 PATH_TOKEN = "/snap/v1.0/access-token/b2b"
-PATH_QR_GENERATE = "/v1.0/qr/qr-mpm-generate"
-PATH_QR_QUERY = "/v1.0/qr/qr-mpm-query"
+PATH_QR_GENERATE = "/v1.0/qr-dynamic-mpm/qr-mpm-generate-qr"
+PATH_QR_QUERY = "/v1.0/qr-dynamic-mpm/qr-mpm-query"
 
 
 class BriError(Exception):
@@ -186,8 +189,19 @@ def _json_or_error(resp, what):
 # ------------------------------------------------------------------
 # Pemanggilan transaksional (tanda tangan simetris)
 # ------------------------------------------------------------------
-def _post_signed(path: str, body: dict, external_id: str, what: str) -> dict:
+def new_request_id() -> str:
+    """Nilai untuk X-EXTERNAL-ID: unik per panggilan dan **hanya angka**.
+
+    BRI mensyaratkan header ini numerik (maks 36 digit) — bukan nomor referensi
+    transaksi kita (`partnerReferenceNo`) yang boleh alfanumerik. Dua hal beda,
+    jangan disamakan: menaruh "ASP..." di sini membuat request ditolak.
+    """
+    return f"{int(time.time() * 1000)}{secrets.randbelow(10**9):09d}"  # 13+9 digit
+
+
+def _post_signed(path: str, body: dict, what: str, external_id: str = None) -> dict:
     _require_config()
+    external_id = external_id or new_request_id()
     token = access_token()
     body_str = _minify(body)
     ts = _timestamp()
@@ -198,6 +212,10 @@ def _post_signed(path: str, body: dict, external_id: str, what: str) -> dict:
         "X-SIGNATURE": _symmetric_signature("POST", path, token, body_str, ts),
         "X-PARTNER-ID": _cfg("BRI_PARTNER_ID"),
         "X-EXTERNAL-ID": external_id,
+        # Dokumen BRI menuliskan header ini "X-EXTRENAL-ID" (salah ketik, huruf
+        # tertukar). Kirim kedua ejaan supaya lolos apa pun yang divalidasi
+        # gateway — header berlebih diabaikan oleh sisi yang tidak memakainya.
+        "X-EXTRENAL-ID": external_id,
         "CHANNEL-ID": _cfg("BRI_CHANNEL_ID"),
     }
     url = _cfg("BRI_BASE_URL").rstrip("/") + path
@@ -213,8 +231,7 @@ def _post_signed(path: str, body: dict, external_id: str, what: str) -> dict:
     return _json_or_error(r, what)
 
 
-def generate_qr(partner_reference_no: str, amount, external_id: str,
-                ttl_seconds: int = None) -> dict:
+def generate_qr(partner_reference_no: str, amount, ttl_seconds: int = None) -> dict:
     """QRIS MPM Dinamis — QR dengan nominal terkunci.
 
     Mengembalikan dict: qr_content, bri_reference_no, expires_at (datetime WIB),
@@ -231,7 +248,7 @@ def generate_qr(partner_reference_no: str, amount, external_id: str,
     if _cfg("BRI_TERMINAL_ID"):
         body["terminalId"] = _cfg("BRI_TERMINAL_ID")
 
-    data = _post_signed(PATH_QR_GENERATE, body, external_id, "generate QR")
+    data = _post_signed(PATH_QR_GENERATE, body, "generate QR")
     qr_content = data.get("qrContent") or data.get("qrString") or data.get("qrImage")
     if not qr_content:
         raise BriError("BRI tidak mengembalikan konten QR", payload=data)
@@ -269,8 +286,7 @@ def normalize_status(latest_transaction_status: str, response_code: str = "") ->
     return "pending"
 
 
-def query_qr(partner_reference_no: str, external_id: str,
-             bri_reference_no: str = None) -> dict:
+def query_qr(partner_reference_no: str, bri_reference_no: str = None) -> dict:
     """Tanya status pembayaran QR ke BRI. Dipakai sbg cadangan webhook."""
     body = {
         "originalPartnerReferenceNo": partner_reference_no,
@@ -282,7 +298,7 @@ def query_qr(partner_reference_no: str, external_id: str,
     if _cfg("BRI_TERMINAL_ID"):
         body["terminalId"] = _cfg("BRI_TERMINAL_ID")
 
-    data = _post_signed(PATH_QR_QUERY, body, external_id, "query QR")
+    data = _post_signed(PATH_QR_QUERY, body, "query QR")
     return {
         "status": normalize_status(
             data.get("latestTransactionStatus"), data.get("responseCode")
@@ -295,19 +311,42 @@ def query_qr(partner_reference_no: str, external_id: str,
 # ------------------------------------------------------------------
 # Verifikasi tanda tangan notifikasi (webhook) dari BRI
 # ------------------------------------------------------------------
-def verify_notification(method: str, path: str, body_str: str,
-                        timestamp: str, signature: str, token: str = "") -> bool:
-    """Verifikasi HMAC-SHA512 pada notifikasi masuk, tahan timing attack.
+def verify_notification(timestamp: str, signature: str) -> bool:
+    """Verifikasi tanda tangan notifikasi (webhook) dari BRI.
 
-    PENTING: skema tanda tangan notifikasi BRI perlu dicocokkan dengan dokumen
-    "MPM Notifikasi" milik merchant (sebagian memakai access token di string,
-    sebagian string kosong). Karena itu dicoba kedua varian — keduanya tetap
-    butuh client secret yang benar, jadi tidak melemahkan keamanan.
+    Sesuai dokumen "QRIS MPM Dynamic Notification", BRI menandatangani secara
+    **asimetris**: SHA256withRSA atas `clientId|X-TIMESTAMP` memakai private key
+    BRI. Jadi kita verifikasi dengan **public key BRI** (bukan HMAC client secret).
+
+    ⚠️ Perlu disadari: string yang ditandatangani hanya berisi client id +
+    timestamp — **isi body tidak ikut ditandatangani**. Artinya tanda tangan saja
+    TIDAK menjamin body asli. Karena itu webhook di `routes.py` tetap wajib:
+    mencocokkan nominal, mencari payment lewat nomor referensi, mengunci baris,
+    dan bersifat idempoten. Jangan pernah melonggarkan pemeriksaan itu dengan
+    alasan "kan sudah ada tanda tangan".
     """
-    if not _cfg("BRI_CLIENT_SECRET") or not signature:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    pub_path = _cfg("BRI_PUBLIC_KEY_PATH")
+    if not pub_path or not signature or not timestamp:
         return False
-    for tok in ({token, ""} if token else {""}):
-        expected = _symmetric_signature(method, path, tok, body_str, timestamp)
-        if hmac.compare_digest(expected, signature):
-            return True
-    return False
+    try:
+        with open(pub_path, "rb") as fh:
+            pub = serialization.load_pem_public_key(fh.read())
+    except (OSError, ValueError) as e:
+        log.error("Public key BRI tidak terbaca (%s): %s", pub_path, e)
+        return False
+
+    string_to_sign = f"{_cfg('BRI_CLIENT_ID')}|{timestamp}"
+    try:
+        pub.verify(
+            base64.b64decode(signature),
+            string_to_sign.encode("utf-8"),
+            padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+        return True
+    except (InvalidSignature, ValueError, TypeError):
+        return False

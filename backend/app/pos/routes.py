@@ -989,7 +989,9 @@ def bri_webhook():
     """Notifikasi pembayaran QRIS dari BRI (MPM Notifikasi).
 
     Endpoint publik (tanpa JWT) — karena itu pengamanannya berlapis:
-      1. tanda tangan HMAC wajib valid (tanpa client secret, mustahil dipalsukan);
+      1. tanda tangan RSA BRI wajib valid (diverifikasi dgn public key BRI);
+         CATATAN: BRI hanya menandatangani `clientId|timestamp`, BUKAN isi body —
+         jadi lapis 3-5 di bawah bukan pelengkap, tapi pengaman utama isi pesan;
       2. timestamp harus segar → notifikasi lama tak bisa diputar ulang;
       3. baris payment dikunci (FOR UPDATE) → webhook & polling tak bisa
          sama-sama mengkredit;
@@ -1001,13 +1003,12 @@ def bri_webhook():
     body_str = raw.decode("utf-8", errors="replace")  # bukan hasil re-serialize
     ts = request.headers.get("X-TIMESTAMP", "")
     sig = request.headers.get("X-SIGNATURE", "")
-    token = (request.headers.get("Authorization", "") or "").replace("Bearer ", "").strip()
 
     if not briapi.is_configured():
         log.warning("Webhook BRI masuk tapi kredensial belum diatur — ditolak")
         return _snap_reply("5005200", "Service unavailable", 503)
 
-    if not briapi.verify_notification("POST", request.path, body_str, ts, sig, token):
+    if not briapi.verify_notification(ts, sig):
         log.warning("Webhook BRI: tanda tangan tidak valid (ip=%s)", request.remote_addr)
         return _snap_reply("4015200", "Unauthorized. Invalid signature", 401)
 

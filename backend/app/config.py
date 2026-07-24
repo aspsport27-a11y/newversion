@@ -47,6 +47,9 @@ class Config:
     BRI_CHANNEL_ID = os.environ.get("BRI_CHANNEL_ID", "")        # CHANNEL-ID
     # File private key RSA (PKCS#8 PEM) utk tanda tangan asimetris saat ambil access token
     BRI_PRIVATE_KEY_PATH = os.environ.get("BRI_PRIVATE_KEY_PATH", "")
+    # Public key RSA milik BRI — utk memverifikasi tanda tangan notifikasi (webhook).
+    # Tanpa ini webhook SELALU ditolak (aman: lebih baik tolak drpd salah kredit).
+    BRI_PUBLIC_KEY_PATH = os.environ.get("BRI_PUBLIC_KEY_PATH", "")
     # Identitas merchant QRIS
     BRI_MERCHANT_ID = os.environ.get("BRI_MERCHANT_ID", "")
     BRI_TERMINAL_ID = os.environ.get("BRI_TERMINAL_ID", "")
