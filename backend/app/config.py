@@ -35,3 +35,21 @@ class Config:
     # --- Upload lampiran (bukti operasional) ---
     UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", "/opt/aspsport-uploads")
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10 MB per upload
+
+    # --- BRIAPI QRIS (standar SNAP BI) ---
+    # Kalau kredensial kosong → integrasi mati & QRIS balik ke perilaku lama
+    # (payment 'pending', dikonfirmasi manual). Aman dinyalakan bertahap.
+    # Sandbox: https://sandbox.partner.api.bri.co.id | Prod: https://partner.api.bri.co.id
+    BRI_BASE_URL = os.environ.get("BRI_BASE_URL", "https://sandbox.partner.api.bri.co.id")
+    BRI_CLIENT_ID = os.environ.get("BRI_CLIENT_ID", "")          # consumer key → X-CLIENT-KEY
+    BRI_CLIENT_SECRET = os.environ.get("BRI_CLIENT_SECRET", "")  # utk tanda tangan simetris
+    BRI_PARTNER_ID = os.environ.get("BRI_PARTNER_ID", "")        # X-PARTNER-ID
+    BRI_CHANNEL_ID = os.environ.get("BRI_CHANNEL_ID", "")        # CHANNEL-ID
+    # File private key RSA (PKCS#8 PEM) utk tanda tangan asimetris saat ambil access token
+    BRI_PRIVATE_KEY_PATH = os.environ.get("BRI_PRIVATE_KEY_PATH", "")
+    # Identitas merchant QRIS
+    BRI_MERCHANT_ID = os.environ.get("BRI_MERCHANT_ID", "")
+    BRI_TERMINAL_ID = os.environ.get("BRI_TERMINAL_ID", "")
+    # Masa berlaku QR (detik); lewat ini QR dianggap kedaluwarsa
+    BRI_QR_TTL_SECONDS = int(os.environ.get("BRI_QR_TTL_SECONDS", "900"))
+    BRI_TIMEOUT = int(os.environ.get("BRI_TIMEOUT", "15"))  # timeout HTTP ke BRI

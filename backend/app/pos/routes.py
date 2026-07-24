@@ -1,5 +1,8 @@
 """Endpoint POS — Fase M1. Prefix: /api/pos"""
-from datetime import date, datetime
+import json
+import logging
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import (
@@ -15,16 +18,22 @@ from ..models import Employee, User, Venue
 from ..perms import has_perm
 from ..security import verify_password
 from ..stations.models import GameStation
+from . import briapi
 from .models import Attendance, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift
 from .services import (
     PosError,
     add_cash_movement,
     cancel_order,
     close_shift,
+    confirm_qris_payment,
     create_order,
+    expire_stale_qris,
     open_shift,
     pay_order,
+    sync_qris_payment,
 )
+
+log = logging.getLogger(__name__)
 
 pos_bp = Blueprint("pos", __name__)
 
@@ -920,3 +929,157 @@ def station_stop(sid):
     session.order_id = order.id
     db.session.commit()
     return jsonify(session=session.to_dict(), order=order.to_dict()), 200
+
+
+# ==================================================================
+# QRIS BRIAPI — layar bayar (polling status) & notifikasi dari bank
+# ==================================================================
+def _qris_payload(p: Payment) -> dict:
+    """Data yang dibutuhkan layar bayar QRIS di POS."""
+    return {
+        "payment_id": p.id,
+        "order_id": p.order_id,
+        "amount": float(p.amount),
+        "status": p.status,
+        "qr_content": p.qr_content,
+        "qr_expires_at": p.qr_expires_at.isoformat() if p.qr_expires_at else None,
+        "bri_reference_no": p.bri_reference_no,
+    }
+
+
+@pos_bp.get("/payments/<int:payment_id>/qris")
+@jwt_required()
+def qris_status(payment_id):
+    """Status QRIS untuk layar bayar. Dipanggil berulang (polling) oleh POS.
+
+    Murni baca dari DB — murah, karena webhook-lah yang biasanya lebih dulu
+    mengubah status. Kalau QR sudah lewat masa berlaku, ditandai kedaluwarsa.
+    """
+    p = db.session.get(Payment, payment_id)
+    if p is None or p.method != "qris":
+        raise PosError("Pembayaran QRIS tidak ditemukan", "not_found", 404)
+
+    before = p.status
+    expire_stale_qris(p)
+    if p.status != before:
+        db.session.commit()
+    return jsonify(_qris_payload(p)), 200
+
+
+@pos_bp.post("/payments/<int:payment_id>/qris/sync")
+@jwt_required()
+def qris_sync(payment_id):
+    """Paksa tanya status ke BRI (tombol "Cek status" / cadangan bila webhook telat)."""
+    p = Payment.query.filter_by(id=payment_id).with_for_update().first()
+    if p is None or p.method != "qris":
+        raise PosError("Pembayaran QRIS tidak ditemukan", "not_found", 404)
+
+    sync_qris_payment(p)
+    expire_stale_qris(p)
+    db.session.commit()
+    return jsonify(_qris_payload(p)), 200
+
+
+def _snap_reply(code, message, http=200):
+    return jsonify(responseCode=code, responseMessage=message), http
+
+
+@pos_bp.post("/webhook/bri")
+def bri_webhook():
+    """Notifikasi pembayaran QRIS dari BRI (MPM Notifikasi).
+
+    Endpoint publik (tanpa JWT) — karena itu pengamanannya berlapis:
+      1. tanda tangan HMAC wajib valid (tanpa client secret, mustahil dipalsukan);
+      2. timestamp harus segar → notifikasi lama tak bisa diputar ulang;
+      3. baris payment dikunci (FOR UPDATE) → webhook & polling tak bisa
+         sama-sama mengkredit;
+      4. nominal notifikasi harus sama persis dgn nominal payment;
+      5. konfirmasi idempoten → kiriman ulang tidak menambah uang.
+    Semua penolakan dicatat di log dengan alasannya.
+    """
+    raw = request.get_data()  # byte mentah — tanda tangan dihitung atas ini,
+    body_str = raw.decode("utf-8", errors="replace")  # bukan hasil re-serialize
+    ts = request.headers.get("X-TIMESTAMP", "")
+    sig = request.headers.get("X-SIGNATURE", "")
+    token = (request.headers.get("Authorization", "") or "").replace("Bearer ", "").strip()
+
+    if not briapi.is_configured():
+        log.warning("Webhook BRI masuk tapi kredensial belum diatur — ditolak")
+        return _snap_reply("5005200", "Service unavailable", 503)
+
+    if not briapi.verify_notification("POST", request.path, body_str, ts, sig, token):
+        log.warning("Webhook BRI: tanda tangan tidak valid (ip=%s)", request.remote_addr)
+        return _snap_reply("4015200", "Unauthorized. Invalid signature", 401)
+
+    if not _timestamp_fresh(ts):
+        log.warning("Webhook BRI: timestamp basi/tak terbaca (%s)", ts)
+        return _snap_reply("4005200", "Bad Request. Stale timestamp", 400)
+
+    try:
+        data = json.loads(body_str)
+    except ValueError:
+        return _snap_reply("4005200", "Bad Request. Invalid JSON", 400)
+
+    ref_partner = data.get("originalPartnerReferenceNo") or data.get("partnerReferenceNo")
+    ref_bank = data.get("originalReferenceNo") or data.get("referenceNo")
+
+    q = Payment.query.filter_by(method="qris")
+    if ref_partner:
+        q = q.filter_by(external_id=ref_partner)
+    elif ref_bank:
+        q = q.filter_by(bri_reference_no=ref_bank)
+    else:
+        return _snap_reply("4005200", "Bad Request. Missing reference", 400)
+
+    payment = q.with_for_update().first()  # kunci baris sampai transaksi selesai
+    if payment is None:
+        log.warning("Webhook BRI: payment tak ditemukan (partner=%s bank=%s)",
+                    ref_partner, ref_bank)
+        return _snap_reply("4045200", "Transaction not found", 404)
+
+    status = briapi.normalize_status(data.get("latestTransactionStatus"))
+
+    if status == "paid":
+        # Nominal WAJIB cocok — jangan pernah percaya angka dari luar begitu saja.
+        notified = (data.get("amount") or {}).get("value")
+        if not _amount_matches(notified, payment.amount):
+            log.error(
+                "Webhook BRI: nominal beda utk payment #%s (notifikasi=%s, sistem=%s) — DITOLAK",
+                payment.id, notified, payment.amount,
+            )
+            db.session.rollback()
+            return _snap_reply("4045201", "Amount mismatch", 404)
+
+        changed = confirm_qris_payment(payment, ref_bank)
+        db.session.commit()
+        log.info("Webhook BRI: payment #%s lunas (baru=%s)", payment.id, changed)
+    elif status == "failed":
+        if payment.status == "pending":
+            payment.status = "failed"
+        db.session.commit()
+    else:
+        db.session.rollback()  # masih pending — tak ada yang perlu disimpan
+
+    return _snap_reply("2005200", "Request has been processed successfully")
+
+
+def _timestamp_fresh(ts: str, tolerance_seconds: int = 600) -> bool:
+    """Tolak notifikasi yang timestamp-nya jauh dari sekarang (anti putar-ulang)."""
+    try:
+        sent = datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return False
+    if sent.tzinfo is None:
+        return False  # SNAP mewajibkan offset zona
+    delta = abs((datetime.now(timezone.utc) - sent).total_seconds())
+    return delta <= tolerance_seconds
+
+
+def _amount_matches(notified_value, payment_amount) -> bool:
+    """Bandingkan nominal sebagai Decimal (hindari jebakan pembulatan float)."""
+    if notified_value in (None, ""):
+        return False
+    try:
+        return Decimal(str(notified_value)) == Decimal(str(payment_amount))
+    except (InvalidOperation, TypeError):
+        return False

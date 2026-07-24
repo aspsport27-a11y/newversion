@@ -110,15 +110,16 @@ async function confirm() {
 
       <!-- QRIS -->
       <div v-else-if="method === 'qris'" class="space-y-3">
-        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
-          Integrasi BRIAPI (QRIS Dinamis) menyusul. Transaksi tercatat
-          <span class="font-medium">pending</span> menunggu konfirmasi.
+        <div class="bg-brand-50 border border-brand-100 rounded-lg p-3 text-sm text-brand-800">
+          QR akan ditampilkan untuk dipindai customer. Transaksi otomatis lunas
+          begitu bank mengonfirmasi — <span class="font-medium">jangan tutup layar QR</span>
+          sebelum pembayaran masuk.
         </div>
         <input v-model="reference" placeholder="No. referensi (opsional)"
           class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
         <button @click="confirm" :disabled="!validAmount || submitting"
           class="w-full py-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold disabled:opacity-50">
-          {{ submitting ? 'Memproses…' : 'Buat Transaksi QRIS' }}
+          {{ submitting ? 'Membuat QR…' : 'Tampilkan QR' }}
         </button>
       </div>
 

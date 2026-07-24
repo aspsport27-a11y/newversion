@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { usePosStore } from '../stores/pos'
 import { stationClock, playAlarmBeep } from '../utils/stationClock'
 import PaymentDialog from '../components/PaymentDialog.vue'
+import QrisDialog from '../components/QrisDialog.vue'
 import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
 import BookingDialog from '../components/BookingDialog.vue'
@@ -118,14 +119,54 @@ function onMemberCreated({ order, booked, skipped }) {
 async function onPayStation(payload) {
   try {
     const res = await pos.settle(pendingStationOrder.value.id, payload.method, payload.amount, payload.reference, payload.proof_image)
-    lastResult.value = res
     showPayment.value = false
     pendingStationOrder.value = null
+    if (openQrisIfNeeded(res)) return
+    lastResult.value = res
     showReceipt.value = true
     await pos.fetchProducts()
   } catch (e) {
     flash(e?.response?.data?.message || 'Pembayaran gagal')
   }
+}
+
+// --- QRIS dinamis (BRIAPI) ---
+// Kalau server berhasil membuat QR, tahan struk dulu: uang belum masuk sampai
+// bank mengonfirmasi. Struk baru dicetak setelah status jadi 'paid'.
+const qrisPayment = ref(null)   // { id, amount }
+const qrisResult = ref(null)    // hasil transaksi yg ditahan sampai lunas
+
+function openQrisIfNeeded(result) {
+  const p = result?.payment
+  // qr_expires_at hanya terisi kalau BRIAPI aktif & QR berhasil dibuat.
+  // Kalau integrasi mati, jatuh ke perilaku lama (pending, konfirmasi manual).
+  if (p && p.method === 'qris' && p.status === 'pending' && p.qr_expires_at) {
+    qrisPayment.value = { id: p.id, amount: p.amount }
+    qrisResult.value = result
+    return true
+  }
+  return false
+}
+
+async function onQrisPaid() {
+  const res = qrisResult.value
+  if (res?.payment) res.payment.status = 'paid'
+  qrisPayment.value = null
+  qrisResult.value = null
+  lastResult.value = res
+  showReceipt.value = true
+  pos.clearCart()
+  await pos.fetchProducts()
+  await pos.fetchMe()
+}
+
+function onQrisClose() {
+  // Transaksi tetap tercatat pending di server — bisa dilunasi lewat menu
+  // "Order Belum Bayar" kalau customer menyusul membayar.
+  qrisPayment.value = null
+  qrisResult.value = null
+  pos.clearCart()
+  flash('Transaksi QRIS tersimpan sebagai belum lunas.')
 }
 
 function rupiah(n) {
@@ -156,8 +197,9 @@ async function onPay(payload) {
       reference: payload.reference,
       proof_image: payload.proof_image,
     })
-    lastResult.value = result
     showPayment.value = false
+    if (openQrisIfNeeded(result)) return
+    lastResult.value = result
     showReceipt.value = true
     pos.clearCart()
     await pos.fetchProducts()
@@ -391,6 +433,8 @@ function logout() {
     <!-- Dialogs -->
     <PaymentDialog v-if="showPayment" :total="pendingStationOrder ? pendingStationOrder.total_amount : pos.total"
       @close="showPayment = false; pendingStationOrder = null" @pay="onPay" />
+    <QrisDialog v-if="qrisPayment" :payment-id="qrisPayment.id" :amount="qrisPayment.amount"
+      @paid="onQrisPaid" @close="onQrisClose" />
     <ReceiptDialog v-if="showReceipt && lastResult" :order="lastResult.order" :payment="lastResult.payment"
       :terminal="pos.terminal" @close="showReceipt = false" />
     <CloseShiftDialog v-if="showClose" :shift="pos.openShift" @close="showClose = false" @submit="onCloseShift" />

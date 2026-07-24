@@ -1,9 +1,14 @@
 """Logika bisnis POS: order, pembayaran (provider), shift, stok."""
-from datetime import date, datetime
+import logging
+import secrets
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from ..extensions import db
 from ..models import Venue
+from . import briapi
+
+log = logging.getLogger(__name__)
 from .models import (
     CashMovement,
     Facility,
@@ -251,16 +256,56 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
 
 
 # ------------------------------------------------------------------
-# Provider pembayaran (colok-lepas). M1: cash aktif; qris_bri stub.
+# Provider pembayaran (colok-lepas)
 # ------------------------------------------------------------------
 def _pay_cash(order, payment, **_):
     payment.status = "paid"
     payment.paid_at = datetime.utcnow()
 
 
+def _to_naive_utc(dt):
+    """Datetime ber-timezone → UTC polos, sesuai konvensi kolom waktu di DB."""
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def new_external_id(payment_id: int) -> str:
+    """partnerReferenceNo unik & tak bisa ditebak.
+
+    Dipakai juga sebagai kunci pencocokan notifikasi BRI, jadi ada komponen acak
+    supaya orang luar tak bisa menebak nomor referensi transaksi lain.
+    """
+    return f"ASP{payment_id:08d}{secrets.token_hex(6).upper()}"  # 8+3+12 = 23 char
+
+
 def _pay_qris_bri(order, payment, **_):
-    # M3: integrasi BRIAPI MPM Dinamis (generate QR) + Notifikasi (webhook konfirmasi).
-    # Untuk sekarang: buat transaksi 'pending' — dikonfirmasi via webhook/endpoint terpisah.
+    """QRIS MPM Dinamis: minta QR bernominal terkunci ke BRI.
+
+    Pembayaran tetap 'pending' sampai BRI mengonfirmasi lewat webhook (atau
+    hasil polling `sync_qris_payment`) — uang tak pernah diakui dari sisi kasir.
+    """
+    if not briapi.is_configured():
+        # Integrasi belum dinyalakan → perilaku lama: pending, konfirmasi manual.
+        payment.status = "pending"
+        return
+
+    db.session.flush()  # butuh payment.id utk menyusun external_id
+    ext = new_external_id(payment.id)
+    try:
+        res = briapi.generate_qr(ext, payment.amount, ext)
+    except briapi.BriError as e:
+        # Jangan tinggalkan pembayaran menggantung tanpa QR — batalkan supaya
+        # kasir langsung tahu dan bisa pilih metode lain (cash/transfer).
+        db.session.rollback()
+        log.warning("QRIS generate gagal (order %s): %s", order.id, e)
+        raise PosError(
+            "QRIS sedang tidak bisa dipakai. Coba lagi atau pakai metode lain.",
+            "qris_unavailable", 502,
+        )
+
+    payment.external_id = ext
+    payment.qr_content = res["qr_content"]
+    payment.bri_reference_no = res["bri_reference_no"]
+    payment.qr_expires_at = _to_naive_utc(res["expires_at"])
     payment.status = "pending"
 
 
@@ -348,6 +393,91 @@ def _apply_payment(order: Order, payment: Payment, shift: Shift, cashier_id: int
             _deduct_stock(order, cashier_id)
     else:
         order.status = "partial"
+
+
+# ------------------------------------------------------------------
+# Konfirmasi QRIS (dipanggil dari webhook BRI maupun polling status)
+# ------------------------------------------------------------------
+def confirm_qris_payment(payment: Payment, bri_reference_no: str = None) -> bool:
+    """Tandai pembayaran QRIS lunas & terapkan ke order + shift. Idempoten.
+
+    Mengembalikan True hanya kalau panggilan INI yang mengubah status pending →
+    paid. Panggilan berikutnya (webhook dikirim ulang, polling balapan dgn
+    webhook) mengembalikan False dan tidak menambah uang lagi.
+
+    Pemanggil WAJIB sudah mengunci baris payment (SELECT ... FOR UPDATE) supaya
+    dua proses tidak sama-sama lolos pengecekan status di bawah.
+    """
+    if payment.status == "paid":
+        return False  # sudah pernah dikonfirmasi — jangan kredit dua kali
+    if payment.status == "void":
+        log.warning("Notifikasi lunas utk payment void #%s — diabaikan", payment.id)
+        return False
+
+    order = db.session.get(Order, payment.order_id)
+    if order is None:
+        log.error("Payment #%s menunjuk order hilang", payment.id)
+        return False
+
+    shift = db.session.get(Shift, payment.shift_id) if payment.shift_id else None
+    if shift is None:
+        log.error("Payment #%s tanpa shift — tak bisa dibukukan", payment.id)
+        return False
+    if shift.status == "closed":
+        # Uang QRIS masuk ke rekening bank (bukan laci kas), jadi setoran tunai
+        # shift tidak terpengaruh. Tetap dibukukan ke shift yg melakukan
+        # penjualan supaya laporan penjualan konsisten dgn tanggal ordernya.
+        log.warning(
+            "Pembayaran QRIS #%s dikonfirmasi setelah shift #%s ditutup — "
+            "total QRIS shift itu ikut disesuaikan", payment.id, shift.id
+        )
+
+    payment.status = "paid"
+    payment.paid_at = datetime.utcnow()
+    payment.paid_notified_at = datetime.utcnow()
+    if bri_reference_no:
+        payment.bri_reference_no = bri_reference_no
+
+    _apply_payment(order, payment, shift, payment.confirmed_by)
+    return True
+
+
+def sync_qris_payment(payment: Payment) -> str:
+    """Tanya status ke BRI lalu selaraskan status lokal. Kembalikan status akhir.
+
+    Dipakai sebagai cadangan kalau webhook telat/tidak sampai, dan saat kasir
+    menekan "Cek status" di layar QR.
+    """
+    if payment.status != "pending" or not payment.external_id:
+        return payment.status
+    if not briapi.is_configured():
+        return payment.status
+
+    try:
+        res = briapi.query_qr(
+            payment.external_id,
+            new_external_id(payment.id),  # X-EXTERNAL-ID harus unik tiap panggilan
+            payment.bri_reference_no,
+        )
+    except briapi.BriError as e:
+        log.warning("Query status QRIS payment #%s gagal: %s", payment.id, e)
+        return payment.status  # jangan ubah apa pun kalau BRI tak bisa dihubungi
+
+    if res["status"] == "paid":
+        confirm_qris_payment(payment, res.get("bri_reference_no"))
+    elif res["status"] == "failed":
+        payment.status = "failed"
+    return payment.status
+
+
+def expire_stale_qris(payment: Payment) -> None:
+    """Tandai 'failed' kalau QR sudah lewat masa berlaku & belum dibayar."""
+    if (
+        payment.status == "pending"
+        and payment.qr_expires_at
+        and payment.qr_expires_at < datetime.utcnow()
+    ):
+        payment.status = "failed"
 
 
 def cancel_order(order: Order, uid: int = None) -> Order:

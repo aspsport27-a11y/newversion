@@ -2,18 +2,26 @@
 
 Daftar hal yang sengaja ditunda. Kerjakan setelah fitur inti beres.
 
-## 1. Integrasi BRIAPI QRIS (auto-konfirmasi) — DITUNDA
-**Status:** provider `bri_qris_mpm` di `backend/app/pos/services.py` masih **stub** —
-pembayaran QRIS tercatat `pending` dan **tidak** otomatis dikonfirmasi.
+## 1. Integrasi BRIAPI QRIS (auto-konfirmasi) — KODE SELESAI, MENUNGGU KREDENSIAL
+**Status (2026-07-24):** sudah **dibangun & teruji**. Lihat `docs/BRIAPI_QRIS.md`
+untuk detail lengkap (konfigurasi, alur, pengamanan, daftar cek sandbox).
 
-**Yang perlu dibangun nanti:**
-- MPM Dinamis (generate QR nominal terkunci per transaksi) via BRIAPI (standar SNAP BI: tanda tangan RSA + access token)
-- MPM Notifikasi (webhook) → endpoint `POST /api/pos/webhook/bri` untuk auto-set payment `paid` + jalankan `_apply_payment`
-- Sandbox dulu → production
+**Yang sudah ada:**
+- `app/pos/briapi.py` — client SNAP BI (tanda tangan asimetris RSA-SHA256 utk access
+  token, simetris HMAC-SHA512 utk transaksi, cache token, generate QR, query status)
+- Provider `bri_qris_mpm` bikin QR MPM Dinamis (nominal terkunci)
+- Webhook `POST /api/pos/webhook/bri` — verifikasi tanda tangan, anti replay,
+  cek nominal, kunci baris, idempoten (25 uji integrasi lulus)
+- Polling status + tombol "Cek status" di POS, dialog QR dgn hitung mundur
+- Migrasi 039 (kolom QRIS di `payments`)
 
-**Prasyarat dari user:** registrasi BRIAPI (client id/secret, merchant/terminal ID QRIS), dokumen "View More" MPM Dinamis & Notifikasi.
+**Sisa prasyarat dari user:** kredensial BRIAPI (client id/secret, private key
+terdaftar, merchant/terminal ID) + dokumen "MPM Notifikasi" untuk memastikan
+skema tanda tangan webhook & nama field respons.
 
-**Dampak sekarang:** QRIS di POS bisa dipilih tapi statusnya pending (belum lunas). Operasional bisa jalan penuh dengan **cash** dulu.
+**Dampak sekarang:** kredensial belum diisi → `briapi.is_configured()` False →
+QRIS otomatis kembali ke perilaku lama (pending, konfirmasi manual). Aman, tidak
+mengubah operasional yang sedang jalan.
 
 ---
 

@@ -372,6 +372,13 @@ class Payment(db.Model):
     paid_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # --- QRIS dinamis BRIAPI (kosong utk cash/transfer) ---
+    qr_content = db.Column(db.Text)                      # string QR mentah dari BRI
+    qr_expires_at = db.Column(db.DateTime)               # UTC, spt kolom waktu lain
+    external_id = db.Column(db.String(64), unique=True)  # partnerReferenceNo — kunci cocokkan webhook
+    bri_reference_no = db.Column(db.String(64))          # referenceNo sisi bank
+    paid_notified_at = db.Column(db.DateTime)            # penanda idempoten notifikasi lunas
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -383,6 +390,10 @@ class Payment(db.Model):
             "has_proof": bool(self.proof_image),
             "shift_id": self.shift_id,
             "paid_at": self.paid_at.isoformat() if self.paid_at else None,
+            # qr_content sengaja TIDAK diikutkan — payload besar & cuma perlu di
+            # layar bayar QRIS; ambil lewat endpoint status QRIS.
+            "qr_expires_at": self.qr_expires_at.isoformat() if self.qr_expires_at else None,
+            "bri_reference_no": self.bri_reference_no,
         }
 
 

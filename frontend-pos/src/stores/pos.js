@@ -236,6 +236,18 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.post(`/orders/${orderId}/cancel`)
       return data
     },
+    // --- QRIS dinamis (BRIAPI) ---
+    // qrisStatus dipanggil berulang (polling) — murni baca DB di server, murah.
+    async qrisStatus(paymentId) {
+      const { data } = await client.get(`/payments/${paymentId}/qris`)
+      return data
+    },
+    // qrisSync memaksa server bertanya ke BRI — dipakai tombol "Cek status",
+    // jangan dipakai untuk polling otomatis (membebani API bank).
+    async qrisSync(paymentId) {
+      const { data } = await client.post(`/payments/${paymentId}/qris/sync`)
+      return data
+    },
     logout() {
       this.$reset()
       localStorage.removeItem('pos_token')
