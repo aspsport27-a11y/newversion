@@ -29,6 +29,9 @@ onMounted(async () => {
 
 const facility = computed(() => pos.facilities.find((f) => f.id === facilityId.value))
 
+// venue padel pakai "Court", lainnya "Lapangan"
+const unitTerm = computed(() => (pos.venue?.type || '').toLowerCase() === 'padel' ? 'Court' : 'Lapangan')
+
 // jam tutup 00:00 = jam ke-24 (sama pola BookingDialog)
 const hours = computed(() => {
   const f = facility.value
@@ -95,7 +98,7 @@ const grandTotal = computed(() => Math.max(0, subtotal.value - Math.min(discount
 
 async function submit() {
   err.value = ''
-  if (!facility.value) return (err.value = 'Pilih lapangan.')
+  if (!facility.value) return (err.value = `Pilih ${unitTerm.value.toLowerCase()}.`)
   if (!days.value.length) return (err.value = 'Pilih minimal 1 hari.')
   if (startH.value == null || endH.value == null || endH.value <= startH.value) return (err.value = 'Pilih jam mulai & selesai yang benar.')
   busy.value = true
@@ -128,7 +131,7 @@ async function submit() {
         <button @click="emit('close')" class="text-slate-400 text-xl">✕</button>
       </div>
 
-      <div v-if="!pos.facilities.length" class="text-center text-slate-400 py-6">Belum ada lapangan untuk venue ini.</div>
+      <div v-if="!pos.facilities.length" class="text-center text-slate-400 py-6">Belum ada {{ unitTerm.toLowerCase() }} untuk venue ini.</div>
 
       <template v-else>
         <div class="grid grid-cols-2 gap-2 mb-3">
@@ -142,7 +145,7 @@ async function submit() {
           </div>
         </div>
 
-        <label class="block text-sm text-slate-600 mb-1">Lapangan</label>
+        <label class="block text-sm text-slate-600 mb-1">{{ unitTerm }}</label>
         <select v-model="facilityId" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 mb-3 outline-none focus:border-brand-500">
           <option v-for="f in pos.facilities" :key="f.id" :value="f.id">{{ f.name }}</option>
         </select>

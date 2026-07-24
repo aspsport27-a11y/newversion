@@ -22,6 +22,9 @@ onMounted(async () => {
 
 const facility = computed(() => pos.facilities.find((f) => f.id === facilityId.value))
 
+// istilah unit sewa: venue padel pakai "Court", lainnya "Lapangan"
+const unitTerm = computed(() => (pos.venue?.type || '').toLowerCase() === 'padel' ? 'Court' : 'Lapangan')
+
 // jam tutup "00:00" berarti tengah malam (akhir hari), bukan awal hari — diperlakukan
 // sbg jam ke-24 supaya urutan jam tetap benar (mis. buka 08:00 tutup 00:00 → 08..24)
 const hours = computed(() => {
@@ -137,7 +140,7 @@ function facilityRateLabel(f) {
 
 function add() {
   error.value = ''
-  if (!facility.value) return (error.value = 'Pilih lapangan.')
+  if (!facility.value) return (error.value = `Pilih ${unitTerm.value.toLowerCase()}.`)
   if (startH.value == null || endH.value == null) return (error.value = 'Pilih jam mulai & selesai.')
   if (durationHours.value <= 0) return (error.value = 'Jam selesai harus setelah jam mulai.')
   if (overlaps(startH.value, endH.value)) return (error.value = 'Jadwal bentrok dengan booking lain.')
@@ -163,12 +166,12 @@ function add() {
   <div class="fixed inset-0 z-40 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[92vh] overflow-auto">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="text-lg font-bold text-slate-800">Booking Lapangan</h3>
+        <h3 class="text-lg font-bold text-slate-800">Booking {{ unitTerm }}</h3>
         <button @click="emit('close')" class="text-slate-400 text-xl">✕</button>
       </div>
 
       <div v-if="!pos.facilities.length" class="text-center text-slate-400 py-6">
-        Belum ada lapangan untuk venue ini.
+        Belum ada {{ unitTerm.toLowerCase() }} untuk venue ini.
       </div>
 
       <template v-else>
@@ -183,7 +186,7 @@ function add() {
           </div>
         </div>
 
-        <label class="block text-sm text-slate-600 mb-1">Lapangan</label>
+        <label class="block text-sm text-slate-600 mb-1">{{ unitTerm }}</label>
         <select v-model="facilityId" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 mb-1 outline-none focus:border-brand-500">
           <option v-for="f in pos.facilities" :key="f.id" :value="f.id">
             {{ f.name }} — {{ facilityRateLabel(f) }}
