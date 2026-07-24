@@ -52,24 +52,43 @@ function toggleDay(v) {
   else days.value.push(v)
 }
 
-// tarif per rentang jam (mirror facility_rate_for_hour backend, utk preview)
-function rateForHour(f, h) {
-  for (const r of f.rate_rules || []) {
+// tarif per jam SADAR-HARI (mirror facility_rate_for_hour backend): hanya rule
+// day_type yg cocok, carry-forward utk jam celah, fallback bila hari tak diatur.
+function isoLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function dayTypeFor(d) {
+  if ((pos.holidays || []).includes(isoLocal(d))) return 'holiday'
+  const wd = d.getDay() // 0=Minggu, 6=Sabtu
+  if (wd === 6) return 'saturday'
+  if (wd === 0) return 'sunday'
+  return 'weekday'
+}
+function rateForHour(f, h, dt) {
+  const rules = (f.rate_rules || []).filter((r) => (r.day_type || 'weekday') === dt)
+  if (!rules.length) {
+    const fb = { holiday: 'sunday', saturday: 'weekday', sunday: 'weekday' }[dt]
+    if (fb) return rateForHour(f, h, fb)
+  }
+  let carry = null
+  for (const r of rules) {
     let sh = parseInt(r.start_time.slice(0, 2))
     let eh = parseInt(r.end_time.slice(0, 2))
     if (r.end_time === '00:00' || eh <= sh) eh += 24
     const hh = h >= sh ? h : h + 24
     if (hh >= sh && hh < eh) return Number(r.hourly_rate)
+    if (h >= sh && (carry === null || sh > carry[0])) carry = [sh, Number(r.hourly_rate)]
   }
+  if (carry !== null) return carry[1]
   return Number(f.hourly_rate || 0)
 }
-const perSession = computed(() => {
+function sessionPrice(dt) {
   const f = facility.value
   if (!f || startH.value == null || endH.value == null || endH.value <= startH.value) return 0
   let t = 0
-  for (let h = startH.value; h < endH.value; h++) t += rateForHour(f, h % 24)
+  for (let h = startH.value; h < endH.value; h++) t += rateForHour(f, h % 24, dt)
   return t
-})
+}
 // daftar tanggal yang akan dibooking (preview lokal, sama pola dgn backend:
 // JS getDay Min=0..Sab=6 → py weekday Sen=0..Min=6). Ditampilkan sbg chip biar
 // kasir langsung lihat & sadar kalau ada tanggal kurang sebelum konfirmasi.
@@ -89,7 +108,12 @@ const estDates = computed(() => estDatesList.value.length)
 function fmtChip(d) {
   return `${DAY_LBL[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
 }
-const subtotal = computed(() => perSession.value * estDates.value)
+// harga tiap sesi ikut hari tanggalnya → subtotal = jumlah semua sesi
+const sessionPrices = computed(() => estDatesList.value.map((d) => sessionPrice(dayTypeFor(d))))
+const subtotal = computed(() => sessionPrices.value.reduce((s, p) => s + p, 0))
+// harga per sesi utk ditampilkan; kalau antar-hari beda, tandai "beragam"
+const perSession = computed(() => sessionPrices.value.length ? sessionPrices.value[0] : sessionPrice('weekday'))
+const uniformSession = computed(() => new Set(sessionPrices.value).size <= 1)
 const discountRp = computed(() => {
   if (discType.value === 'percent') return Math.round(subtotal.value * Math.min(Math.max(discValue.value || 0, 0), 100) / 100)
   return Math.max(0, discValue.value || 0)
@@ -201,7 +225,7 @@ async function submit() {
               <span v-for="(d, i) in estDatesList" :key="i" class="text-xs bg-white border border-slate-200 rounded px-1.5 py-0.5 text-slate-600">{{ fmtChip(d) }}</span>
             </div>
           </div>
-          <div class="flex justify-between"><span class="text-slate-500">{{ estDates }} sesi × {{ rupiah(perSession) }}</span><span>{{ rupiah(subtotal) }}</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">{{ estDates }} sesi <template v-if="uniformSession">× {{ rupiah(perSession) }}</template><template v-else>(tarif beragam per hari)</template></span><span>{{ rupiah(subtotal) }}</span></div>
           <div v-if="discountRp > 0" class="flex justify-between text-amber-600"><span>Diskon</span><span>− {{ rupiah(discountRp) }}</span></div>
           <div class="flex justify-between font-bold text-base border-t pt-1.5"><span>Perkiraan total</span><span class="text-brand-700">{{ rupiah(grandTotal) }}</span></div>
           <p class="text-xs text-slate-400 pt-1">Tanggal yang bentrok booking lain akan dilewati otomatis. Total final dihitung server.</p>

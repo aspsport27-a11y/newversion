@@ -564,7 +564,7 @@ def booking_member():
     DILEWATI otomatis & dilaporkan. weekdays: list int 0=Senin..6=Minggu."""
     from datetime import timedelta
     from .services import _hours_between, _parse_time, is_slot_available
-    from .models import Facility, facility_booking_price
+    from .models import Facility, facility_booking_price, day_type_for_date
 
     terminal = _current_terminal()
     shift = _current_open_shift(terminal.id)
@@ -613,8 +613,14 @@ def booking_member():
     } for cd in booked]
 
     end_hour = start.hour + int(hours)
-    per_session = round(facility_booking_price(facility, start.hour, end_hour), 2)
-    subtotal = round(per_session * len(booked), 2)
+    # harga tiap sesi ikut kategori hari tanggalnya (weekday/sabtu/minggu/libur)
+    # — subtotal = jumlah harga per-tanggal, BUKAN per_session flat × jumlah.
+    per_date = [
+        round(facility_booking_price(facility, start.hour, end_hour, day_type_for_date(cd)), 2)
+        for cd in booked
+    ]
+    subtotal = round(sum(per_date), 2)
+    per_session = per_date[0] if per_date else 0  # representatif (bisa beda antar hari)
     dtype = data.get("discount_type")
     dval = float(data.get("discount_value") or 0)
     if dtype == "percent":

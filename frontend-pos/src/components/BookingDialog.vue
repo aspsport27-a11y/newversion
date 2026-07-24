@@ -22,8 +22,9 @@ onMounted(async () => {
 
 const facility = computed(() => pos.facilities.find((f) => f.id === facilityId.value))
 
-// istilah unit sewa: venue padel pakai "Court", lainnya "Lapangan"
-const unitTerm = computed(() => (pos.venue?.type || '').toLowerCase() === 'padel' ? 'Court' : 'Lapangan')
+// venue padel: pakai istilah "Court" & tak menampilkan rincian tarif
+const isPadel = computed(() => (pos.venue?.type || '').toLowerCase() === 'padel')
+const unitTerm = computed(() => (isPadel.value ? 'Court' : 'Lapangan'))
 
 // jam tutup "00:00" berarti tengah malam (akhir hari), bukan awal hari — diperlakukan
 // sbg jam ke-24 supaya urutan jam tetap benar (mis. buka 08:00 tutup 00:00 → 08..24)
@@ -189,10 +190,10 @@ function add() {
         <label class="block text-sm text-slate-600 mb-1">{{ unitTerm }}</label>
         <select v-model="facilityId" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 mb-1 outline-none focus:border-brand-500">
           <option v-for="f in pos.facilities" :key="f.id" :value="f.id">
-            {{ f.name }} — {{ facilityRateLabel(f) }}
+            {{ f.name }}<span v-if="!isPadel"> — {{ facilityRateLabel(f) }}</span>
           </option>
         </select>
-        <div v-if="facility?.rate_rules?.length" class="text-xs text-slate-500 mb-3 space-y-0.5">
+        <div v-if="!isPadel && facility?.rate_rules?.length" class="text-xs text-slate-500 mb-3 space-y-0.5">
           <div v-for="r in facility.rate_rules" :key="r.id">
             {{ r.start_time }}–{{ r.end_time }}<span v-if="r.label"> ({{ r.label }})</span>: {{ rupiah(r.hourly_rate) }}/jam
           </div>
