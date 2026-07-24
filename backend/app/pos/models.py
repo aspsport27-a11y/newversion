@@ -230,10 +230,15 @@ def facility_rate_for_hour(facility, hour, day_type="weekday"):
     saat band siang 07-15 dan band sore mulai 16:00) memakai tarif band
     sebelumnya (carry-forward), sesuai intuisi 'harga berubah saat band
     berikutnya mulai'. Kalau tak ada band sama sekali → tarif dasar facility."""
+    rules = [r for r in facility.rate_rules if (r.day_type or "weekday") == day_type]
+    if not rules:
+        # belum ada tarif utk hari ini → fallback: libur→minggu→weekday,
+        # sabtu/minggu→weekday. Supaya tak jatuh ke tarif dasar (bisa 0).
+        fb = {"holiday": "sunday", "saturday": "weekday", "sunday": "weekday"}.get(day_type)
+        if fb:
+            return facility_rate_for_hour(facility, hour, fb)
     carry = None  # (start_jam, tarif) band terdekat sebelum `hour` pd hari ini
-    for r in facility.rate_rules:
-        if (r.day_type or "weekday") != day_type:
-            continue
+    for r in rules:
         sh, eh = _expand_range(r.start_time, r.end_time)
         hh = hour if hour >= sh else hour + 24
         if sh <= hh < eh:

@@ -71,9 +71,14 @@ function expandRange(startStr, endStr) {
   return [sh, eh]
 }
 function rateForHour(f, h, dt) {
+  const rules = (f.rate_rules || []).filter((r) => (r.day_type || 'weekday') === dt)
+  if (!rules.length) {
+    // fallback bila tarif hari ini belum diatur — cermin backend
+    const fb = { holiday: 'sunday', saturday: 'weekday', sunday: 'weekday' }[dt]
+    if (fb) return rateForHour(f, h, fb)
+  }
   let carry = null // [startJam, tarif] band terdekat sebelum h pd hari ini
-  for (const r of f.rate_rules || []) {
-    if ((r.day_type || 'weekday') !== dt) continue
+  for (const r of rules) {
     const [sh, eh] = expandRange(r.start_time, r.end_time)
     const hh = h >= sh ? h : h + 24
     if (hh >= sh && hh < eh) return Number(r.hourly_rate)
