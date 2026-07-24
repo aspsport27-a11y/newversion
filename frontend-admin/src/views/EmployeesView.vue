@@ -14,6 +14,25 @@ const positions = ref([])
 const loading = ref(false)
 const toast = ref('')
 
+// paging + pencarian
+const search = ref('')
+const page = ref(1)
+const perPage = ref(15)
+const filtered = computed(() => {
+  const q = search.value.trim().toLowerCase()
+  if (!q) return employees.value
+  return employees.value.filter((e) =>
+    (e.name || '').toLowerCase().includes(q) ||
+    (e.employee_id || '').toLowerCase().includes(q) ||
+    (e.username || '').toLowerCase().includes(q) ||
+    (e.position || '').toLowerCase().includes(q))
+})
+const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / perPage.value)))
+const paged = computed(() => filtered.value.slice((page.value - 1) * perPage.value, page.value * perPage.value))
+// jaga page tetap valid saat data/filter berubah
+watch([filtered, perPage], () => { if (page.value > totalPages.value) page.value = totalPages.value })
+watch(search, () => { page.value = 1 })
+
 // form karyawan
 const showForm = ref(false)
 const editing = ref(null)
@@ -47,6 +66,7 @@ async function load() {
     const { data } = await client.get('/admin/employees', { params })
     employees.value = data.employees
     positions.value = data.positions
+    page.value = 1
   } finally { loading.value = false }
 }
 onMounted(async () => { await loadVenues(); await load() })
@@ -153,7 +173,9 @@ async function resetAccount(pinOnly) {
         <h1 class="text-2xl font-bold text-slate-800">Karyawan</h1>
         <p class="text-slate-500 mt-1">Data karyawan, kasbon/piutang, dan akun login.</p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex gap-2 flex-wrap">
+        <input v-model="search" placeholder="Cari nama / kode / jabatan…"
+          class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 w-48" />
         <select v-if="!isManager" v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
@@ -179,7 +201,8 @@ async function resetAccount(pinOnly) {
           <tbody>
             <tr v-if="loading"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
             <tr v-else-if="!employees.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada karyawan.</td></tr>
-            <tr v-for="e in employees" :key="e.id" class="border-t hover:bg-slate-50">
+            <tr v-else-if="!filtered.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Tidak ada yang cocok dengan pencarian.</td></tr>
+            <tr v-for="e in paged" :key="e.id" class="border-t hover:bg-slate-50">
               <td class="px-4 py-3 font-mono text-slate-500">{{ e.employee_id }}</td>
               <td class="px-4 py-3 font-medium text-slate-700">{{ e.name }}</td>
               <td class="px-4 py-3"><span class="text-xs bg-brand-50 text-brand-700 rounded px-2 py-0.5">{{ e.position || '—' }}</span></td>
@@ -200,6 +223,28 @@ async function resetAccount(pinOnly) {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Paging -->
+      <div v-if="filtered.length" class="flex items-center justify-between gap-3 flex-wrap px-4 py-3 border-t bg-slate-50 text-sm text-slate-600">
+        <div class="flex items-center gap-2">
+          <span>Tampil per halaman</span>
+          <select v-model.number="perPage" class="rounded-lg border border-slate-300 px-2 py-1 outline-none focus:border-brand-500">
+            <option :value="15">15</option>
+            <option :value="30">30</option>
+            <option :value="50">50</option>
+            <option :value="100">100</option>
+          </select>
+          <span class="text-slate-400">·</span>
+          <span>{{ filtered.length }} karyawan</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button @click="page--" :disabled="page <= 1"
+            class="rounded-lg border border-slate-300 px-3 py-1 disabled:opacity-40 hover:bg-white">‹ Sebelumnya</button>
+          <span>Hal. {{ page }} / {{ totalPages }}</span>
+          <button @click="page++" :disabled="page >= totalPages"
+            class="rounded-lg border border-slate-300 px-3 py-1 disabled:opacity-40 hover:bg-white">Berikutnya ›</button>
+        </div>
       </div>
     </div>
 
