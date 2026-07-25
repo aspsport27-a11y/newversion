@@ -1525,12 +1525,12 @@ def attendance_roster():
 
     def status_of(a):
         if a and a.status:
-            return a.status  # izin | sakit | cuti
+            return a.status  # izin | sakit | cuti | off
         if a and a.check_in:
             return "hadir"
         return "belum" if is_today else "alpha"
 
-    rows, summary = [], {"hadir": 0, "belum": 0, "alpha": 0, "izin": 0, "sakit": 0, "cuti": 0}
+    rows, summary = [], {"hadir": 0, "belum": 0, "alpha": 0, "izin": 0, "sakit": 0, "cuti": 0, "off": 0}
     for e in employees:
         a = atts.get(e.id)
         st = status_of(a)
@@ -1566,8 +1566,8 @@ def attendance_set_leave():
     if vids is not None and emp.venue_id not in vids:
         return _err("Karyawan di luar cakupan venue Anda", "forbidden", 403)
     status = (d.get("status") or "").strip()
-    if status not in ("izin", "sakit", "cuti", "clear"):
-        return _err("status harus izin/sakit/cuti/clear", "bad_request")
+    if status not in ("izin", "sakit", "cuti", "off", "clear"):
+        return _err("status harus izin/sakit/cuti/off/clear", "bad_request")
     try:
         the_date = date.fromisoformat(d.get("date"))
     except (ValueError, TypeError):
@@ -1605,7 +1605,7 @@ def attendance_leave_report():
 
     q = Attendance.query.filter(
         Attendance.date.between(d_from, d_to),
-        Attendance.status.in_(["izin", "sakit", "cuti"]),
+        Attendance.status.in_(["izin", "sakit", "cuti", "off"]),
     )
     if vid:
         q = q.filter(Attendance.venue_id == vid)
@@ -1623,14 +1623,14 @@ def attendance_leave_report():
         nm = e.name if e else "—"
         pe = per_emp.setdefault(r.employee_id, {
             "employee_id": r.employee_id, "name": nm,
-            "venue_code": vmap.get(r.venue_id), "izin": 0, "sakit": 0, "cuti": 0,
+            "venue_code": vmap.get(r.venue_id), "izin": 0, "sakit": 0, "cuti": 0, "off": 0,
         })
         pe[r.status] = pe.get(r.status, 0) + 1
         detail.append({
             "date": r.date.isoformat(), "name": nm, "venue_code": vmap.get(r.venue_id),
             "status": r.status,
         })
-    total = {"izin": 0, "sakit": 0, "cuti": 0}
+    total = {"izin": 0, "sakit": 0, "cuti": 0, "off": 0}
     for pe in per_emp.values():
         for k in total:
             total[k] += pe[k]

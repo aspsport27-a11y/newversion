@@ -27,6 +27,7 @@ const STATUS = {
   izin: ['Izin', 'bg-blue-100 text-blue-700'],
   sakit: ['Sakit', 'bg-amber-100 text-amber-700'],
   cuti: ['Cuti', 'bg-purple-100 text-purple-700'],
+  off: ['Off', 'bg-teal-100 text-teal-700'],
 }
 function stLabel(s) { return STATUS[s]?.[0] || s }
 function stClass(s) { return STATUS[s]?.[1] || 'bg-slate-100 text-slate-500' }
@@ -120,7 +121,7 @@ function exportRoster() {
       r.work_hours != null ? r.work_hours : '']))
 }
 function exportLeave() {
-  csvDownload(`izin-sakit-cuti-${lvFrom.value}_${lvTo.value}.csv`,
+  csvDownload(`izin-sakit-cuti-off-${lvFrom.value}_${lvTo.value}.csv`,
     ['Tanggal', 'Nama', 'Venue', 'Keterangan'],
     lvDetail.value.map((r) => [r.date, r.name, r.venue_code || '', r.status]))
 }
@@ -136,7 +137,7 @@ onMounted(async () => { await loadVenues(); await loadRoster() })
     <!-- Tabs -->
     <div class="flex gap-1 mb-5 border-b">
       <button @click="switchTab('roster')" :class="tab === 'roster' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Kehadiran</button>
-      <button @click="switchTab('leave')" :class="tab === 'leave' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Izin / Sakit / Cuti</button>
+      <button @click="switchTab('leave')" :class="tab === 'leave' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Izin / Sakit / Cuti / Off</button>
     </div>
 
     <!-- ============ TAB KEHADIRAN (roster) ============ -->
@@ -154,7 +155,7 @@ onMounted(async () => { await loadVenues(); await loadRoster() })
             <option value="">Semua status</option>
             <option value="belum">Belum absen</option><option value="hadir">Hadir</option>
             <option value="alpha">Alpha</option><option value="izin">Izin</option>
-            <option value="sakit">Sakit</option><option value="cuti">Cuti</option>
+            <option value="sakit">Sakit</option><option value="cuti">Cuti</option><option value="off">Off</option>
           </select></div>
         <div><label class="block text-xs text-slate-500 mb-1">Cari nama</label>
           <input v-model="nameSearch" placeholder="Nama…" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
@@ -163,7 +164,7 @@ onMounted(async () => { await loadVenues(); await loadRoster() })
 
       <!-- Ringkasan status -->
       <div class="flex flex-wrap gap-2 mb-4">
-        <span v-for="k in ['hadir','belum','alpha','izin','sakit','cuti']" :key="k"
+        <span v-for="k in ['hadir','belum','alpha','izin','sakit','cuti','off']" :key="k"
           :class="stClass(k)" class="text-xs rounded-full px-3 py-1 font-medium">{{ stLabel(k) }}: {{ rosterSummary[k] || 0 }}</span>
       </div>
 
@@ -202,13 +203,14 @@ onMounted(async () => { await loadVenues(); await loadRoster() })
                 </td>
                 <td class="px-4 py-2 text-right text-slate-600">{{ r.work_hours != null ? r.work_hours : '—' }}</td>
                 <td v-if="canManage" class="px-4 py-2 text-center whitespace-nowrap">
-                  <template v-if="['izin','sakit','cuti'].includes(r.att_status)">
+                  <template v-if="['izin','sakit','cuti','off'].includes(r.att_status)">
                     <button @click="setLeave(r, 'clear')" :disabled="busy" class="text-xs text-red-500 hover:underline disabled:opacity-50">Batal</button>
                   </template>
                   <template v-else-if="!r.check_in">
                     <button @click="setLeave(r, 'izin')" :disabled="busy" class="text-xs bg-blue-50 text-blue-700 rounded px-1.5 py-0.5 mr-1">Izin</button>
                     <button @click="setLeave(r, 'sakit')" :disabled="busy" class="text-xs bg-amber-50 text-amber-700 rounded px-1.5 py-0.5 mr-1">Sakit</button>
-                    <button @click="setLeave(r, 'cuti')" :disabled="busy" class="text-xs bg-purple-50 text-purple-700 rounded px-1.5 py-0.5">Cuti</button>
+                    <button @click="setLeave(r, 'cuti')" :disabled="busy" class="text-xs bg-purple-50 text-purple-700 rounded px-1.5 py-0.5 mr-1">Cuti</button>
+                    <button @click="setLeave(r, 'off')" :disabled="busy" class="text-xs bg-teal-50 text-teal-700 rounded px-1.5 py-0.5">Off</button>
                   </template>
                   <span v-else class="text-slate-300 text-xs">—</span>
                 </td>
@@ -239,23 +241,25 @@ onMounted(async () => { await loadVenues(); await loadRoster() })
         <span class="text-xs rounded-full px-3 py-1 font-medium bg-blue-100 text-blue-700">Izin: {{ lvTotal.izin || 0 }} hari</span>
         <span class="text-xs rounded-full px-3 py-1 font-medium bg-amber-100 text-amber-700">Sakit: {{ lvTotal.sakit || 0 }} hari</span>
         <span class="text-xs rounded-full px-3 py-1 font-medium bg-purple-100 text-purple-700">Cuti: {{ lvTotal.cuti || 0 }} hari</span>
+        <span class="text-xs rounded-full px-3 py-1 font-medium bg-teal-100 text-teal-700">Off: {{ lvTotal.off || 0 }} hari</span>
       </div>
 
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-5">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
             <th class="px-4 py-2 font-medium">Nama</th><th class="px-4 py-2 font-medium">Venue</th>
-            <th class="px-4 py-2 font-medium text-right">Izin</th><th class="px-4 py-2 font-medium text-right">Sakit</th><th class="px-4 py-2 font-medium text-right">Cuti</th>
+            <th class="px-4 py-2 font-medium text-right">Izin</th><th class="px-4 py-2 font-medium text-right">Sakit</th><th class="px-4 py-2 font-medium text-right">Cuti</th><th class="px-4 py-2 font-medium text-right">Off</th>
           </tr></thead>
           <tbody>
-            <tr v-if="lvLoading"><td colspan="5" class="px-4 py-6 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!lvPerEmp.length"><td colspan="5" class="px-4 py-6 text-center text-slate-400">Tidak ada izin/sakit/cuti pada periode ini.</td></tr>
+            <tr v-if="lvLoading"><td colspan="6" class="px-4 py-6 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!lvPerEmp.length"><td colspan="6" class="px-4 py-6 text-center text-slate-400">Tidak ada izin/sakit/cuti/off pada periode ini.</td></tr>
             <tr v-for="e in lvPerEmp" :key="e.employee_id" class="border-t">
               <td class="px-4 py-2 text-slate-700 font-medium">{{ e.name }}</td>
               <td class="px-4 py-2 text-slate-500">{{ e.venue_code || '—' }}</td>
               <td class="px-4 py-2 text-right">{{ e.izin }}</td>
               <td class="px-4 py-2 text-right">{{ e.sakit }}</td>
               <td class="px-4 py-2 text-right">{{ e.cuti }}</td>
+              <td class="px-4 py-2 text-right">{{ e.off }}</td>
             </tr>
           </tbody>
         </table>

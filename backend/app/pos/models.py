@@ -506,7 +506,7 @@ class Attendance(db.Model):
     # alamat hasil reverse geocoding (Nominatim/OSM), disimpan sekali saat absen
     check_in_address = db.Column(db.String(255))
     check_out_address = db.Column(db.String(255))
-    # keterangan tak-hadir: izin | sakit | cuti (NULL = hari kerja normal,
+    # keterangan tak-hadir: izin | sakit | cuti | off (NULL = hari kerja normal,
     # status hadir/belum/alpha dihitung dr check_in). Ditandai manual di portal.
     status = db.Column(db.String(10))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
