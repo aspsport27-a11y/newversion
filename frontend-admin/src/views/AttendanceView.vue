@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
@@ -53,6 +53,15 @@ const rosterShown = computed(() => {
   if (q) list = list.filter((r) => (r.name || '').toLowerCase().includes(q))
   return list
 })
+
+// paging roster (sisi-klien)
+const rosterPage = ref(1)
+const rosterPerPage = ref(20)
+const rosterTotalPages = computed(() => Math.max(1, Math.ceil(rosterShown.value.length / rosterPerPage.value)))
+const rosterPaged = computed(() => rosterShown.value.slice((rosterPage.value - 1) * rosterPerPage.value, rosterPage.value * rosterPerPage.value))
+// balik ke hal.1 saat filter/data berubah; jaga page tetap valid
+watch([statusFilter, nameSearch, rosterDate, venueId], () => { rosterPage.value = 1 })
+watch([rosterShown, rosterPerPage], () => { if (rosterPage.value > rosterTotalPages.value) rosterPage.value = rosterTotalPages.value })
 
 async function setLeave(row, status) {
   const emp = row.name
@@ -184,7 +193,7 @@ onMounted(async () => { await loadVenues(); await loadRoster() })
             <tbody>
               <tr v-if="rosterLoading"><td :colspan="canManage ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
               <tr v-else-if="!rosterShown.length"><td :colspan="canManage ? 8 : 7" class="px-4 py-8 text-center text-slate-400">Tidak ada karyawan.</td></tr>
-              <tr v-for="r in rosterShown" :key="r.employee_id" class="border-t">
+              <tr v-for="r in rosterPaged" :key="r.employee_id" class="border-t">
                 <td class="px-4 py-2 text-slate-700 font-medium">{{ r.name }}</td>
                 <td class="px-4 py-2 text-slate-500 text-xs">{{ r.position || '—' }}</td>
                 <td class="px-4 py-2 text-center"><span :class="stClass(r.att_status)" class="text-xs rounded-full px-2 py-0.5">{{ stLabel(r.att_status) }}</span></td>
@@ -217,6 +226,24 @@ onMounted(async () => { await loadVenues(); await loadRoster() })
               </tr>
             </tbody>
           </table>
+        </div>
+        <!-- Paging roster -->
+        <div v-if="rosterShown.length" class="flex items-center justify-between gap-3 flex-wrap px-4 py-3 border-t bg-slate-50 text-sm text-slate-600">
+          <div class="flex items-center gap-2">
+            <span>Tampil per halaman</span>
+            <select v-model.number="rosterPerPage" class="rounded-lg border border-slate-300 px-2 py-1 outline-none focus:border-brand-500">
+              <option :value="20">20</option>
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+            </select>
+            <span class="text-slate-400">·</span>
+            <span>{{ rosterShown.length }} karyawan</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="rosterPage--" :disabled="rosterPage <= 1" class="rounded-lg border border-slate-300 px-3 py-1 disabled:opacity-40 hover:bg-white">‹ Sebelumnya</button>
+            <span>Hal. {{ rosterPage }} / {{ rosterTotalPages }}</span>
+            <button @click="rosterPage++" :disabled="rosterPage >= rosterTotalPages" class="rounded-lg border border-slate-300 px-3 py-1 disabled:opacity-40 hover:bg-white">Berikutnya ›</button>
+          </div>
         </div>
       </div>
     </template>
