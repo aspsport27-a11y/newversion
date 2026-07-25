@@ -23,6 +23,7 @@ from .models import Attendance, Facility, FacilityBooking, Order, OrderItem, Pay
 from .services import (
     PosError,
     add_cash_movement,
+    add_items_to_order,
     cancel_order,
     close_shift,
     confirm_qris_payment,
@@ -673,6 +674,24 @@ def order_get(order_id):
     order = db.session.get(Order, order_id)
     if order is None:
         raise PosError("Order tidak ditemukan", "not_found", 404)
+    return jsonify(order=order.to_dict()), 200
+
+
+@pos_bp.post("/orders/<int:order_id>/items")
+@jwt_required()
+def order_add_items(order_id):
+    """Tambah item ke bill (order) yang masih terbuka — open bill."""
+    from .models import Order
+
+    terminal = _current_terminal()
+    _current_open_shift(terminal.id)  # wajib ada shift terbuka
+    order = db.session.get(Order, order_id)
+    if order is None:
+        raise PosError("Order tidak ditemukan", "not_found", 404)
+    if order.venue_id != terminal.venue_id:
+        raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
+    data = request.get_json(silent=True) or {}
+    order = add_items_to_order(order, data.get("items") or [])
     return jsonify(order=order.to_dict()), 200
 
 

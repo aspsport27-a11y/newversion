@@ -205,27 +205,28 @@ export const usePosStore = defineStore('pos', {
       this.customerName = ''
       this.customerPhone = ''
     },
+    // pemetaan keranjang → payload item (dipakai checkout, buka bill, tambah item)
+    _cartItems() {
+      return this.cart.map((i) => {
+        if (i.item_type === 'booking')
+          return {
+            item_type: 'booking', facility_id: i.facility_id,
+            booking_date: i.booking_date, start_time: i.start_time, end_time: i.end_time,
+          }
+        if (i.item_type === 'ticket')
+          return { item_type: 'ticket', product_id: i.product_id, quantity: i.quantity }
+        return {
+          item_type: 'product', product_id: i.product_id, quantity: i.quantity,
+          ...(i.open_price ? { unit_price: i.unit_price } : {}),
+        }
+      })
+    },
     async checkout(method, extra = {}) {
       const payload = {
         discount_amount: Number(this.discount) || 0,
         customer_name: this.customerName || null,
         customer_phone: this.customerPhone || null,
-        items: this.cart.map((i) => {
-          if (i.item_type === 'booking')
-            return {
-              item_type: 'booking',
-              facility_id: i.facility_id,
-              booking_date: i.booking_date,
-              start_time: i.start_time,
-              end_time: i.end_time,
-            }
-          if (i.item_type === 'ticket')
-            return { item_type: 'ticket', product_id: i.product_id, quantity: i.quantity }
-          return {
-            item_type: 'product', product_id: i.product_id, quantity: i.quantity,
-            ...(i.open_price ? { unit_price: i.unit_price } : {}),
-          }
-        }),
+        items: this._cartItems(),
       }
       const { data: created } = await client.post('/orders', payload)
       const { data: paid } = await client.post(`/orders/${created.order.id}/pay`, {
@@ -235,6 +236,21 @@ export const usePosStore = defineStore('pos', {
         proof_image: extra.proof_image || null,
       })
       return paid // { order, payment }
+    },
+    // Buka bill: buat order TERBUKA dari keranjang tanpa dibayar (open bill)
+    async openBill() {
+      const { data } = await client.post('/orders', {
+        discount_amount: Number(this.discount) || 0,
+        customer_name: this.customerName || null,
+        customer_phone: this.customerPhone || null,
+        items: this._cartItems(),
+      })
+      return data.order
+    },
+    // Tambah item keranjang ke bill terbuka yang sudah ada
+    async addItemsToBill(orderId) {
+      const { data } = await client.post(`/orders/${orderId}/items`, { items: this._cartItems() })
+      return data.order
     },
     async fetchOutstanding() {
       const { data } = await client.get('/orders/outstanding')

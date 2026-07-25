@@ -9,6 +9,7 @@ import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
 import BookingDialog from '../components/BookingDialog.vue'
 import OpenPriceDialog from '../components/OpenPriceDialog.vue'
+import OpenBillDialog from '../components/OpenBillDialog.vue'
 import MemberBookingDialog from '../components/MemberBookingDialog.vue'
 import SettlementDialog from '../components/SettlementDialog.vue'
 import AbsenDialog from '../components/AbsenDialog.vue'
@@ -28,6 +29,41 @@ const showPayment = ref(false)
 const showReceipt = ref(false)
 const showClose = ref(false)
 const showBooking = ref(false)
+
+// ---- Open Bill (bon terbuka) ----
+const showOpenBills = ref(false)
+const activeBill = ref(null)   // bill yang sedang ditambah item-nya
+const draftBill = ref(null)    // bill untuk cetak sementara
+async function doOpenBill() {
+  if (!pos.cart.length) return
+  const name = window.prompt('Nama untuk bill ini (mis. nama customer / meja):', pos.customerName || '')
+  if (name === null) return
+  pos.customerName = (name || '').trim()
+  try {
+    await pos.openBill()
+    pos.clearCart()
+    flash('Bill dibuka — bisa ditambah item lewat "Bill Terbuka".')
+  } catch (e) { flash(e?.response?.data?.message || 'Gagal membuka bill') }
+}
+function onBillAddItem(order) {
+  activeBill.value = order
+  showOpenBills.value = false
+  flash(`Pilih item, lalu tekan "Tambahkan ke Bill".`)
+}
+async function doAddToBill() {
+  if (!pos.cart.length || !activeBill.value) return
+  try {
+    await pos.addItemsToBill(activeBill.value.id)
+    pos.clearCart()
+    flash('Item ditambahkan ke bill.')
+    activeBill.value = null
+  } catch (e) { flash(e?.response?.data?.message || 'Gagal menambah item') }
+}
+function onBillPaid(res) {
+  showOpenBills.value = false
+  lastResult.value = res
+  showReceipt.value = true
+}
 
 // produk harga terbuka (mis. Parkir) → minta nominal dulu
 const openPriceProduct = ref(null)
@@ -308,6 +344,10 @@ function logout() {
             class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium border border-amber-100 flex items-center justify-center gap-2">
             💰 Pelunasan
           </button>
+          <button @click="showOpenBills = true"
+            class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-700 font-medium border border-teal-100 flex items-center justify-center gap-2">
+            🧾 Bill Terbuka
+          </button>
         </div>
 
         <!-- Station Gaming (arena esport) -->
@@ -436,11 +476,26 @@ function logout() {
           <div class="flex justify-between font-bold text-lg">
             <span>Total</span><span class="text-brand-700">{{ rupiah(pos.total) }}</span>
           </div>
-          <button
-            @click="showPayment = true"
-            :disabled="!pos.cart.length"
-            class="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-40"
-          >Bayar</button>
+
+          <!-- Mode: menambah item ke bill terbuka -->
+          <template v-if="activeBill">
+            <div class="text-xs bg-teal-50 border border-teal-200 text-teal-800 rounded-lg px-2 py-1.5">
+              ➕ Menambah ke bill: <b>{{ activeBill.customer_name || 'Tanpa nama' }}</b>
+            </div>
+            <button @click="doAddToBill" :disabled="!pos.cart.length"
+              class="w-full py-3 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-semibold disabled:opacity-40">
+              Tambahkan ke Bill
+            </button>
+            <button @click="activeBill = null" class="w-full py-1.5 text-xs text-slate-500 hover:text-slate-700">Batal menambah</button>
+          </template>
+
+          <!-- Mode normal: bayar langsung / buka bill -->
+          <template v-else>
+            <button @click="showPayment = true" :disabled="!pos.cart.length"
+              class="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-40">Bayar</button>
+            <button @click="doOpenBill" :disabled="!pos.cart.length"
+              class="w-full py-2 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-medium border border-teal-200 disabled:opacity-40">🧾 Buka Bill (bayar nanti)</button>
+          </template>
         </div>
       </div>
     </div>
@@ -459,6 +514,9 @@ function logout() {
     <BookingDialog v-if="showBooking" @close="showBooking = false" @added="flash('Booking ditambahkan ke keranjang')" />
     <MemberBookingDialog v-if="showMember" @close="showMember = false" @created="onMemberCreated" />
     <SettlementDialog v-if="showSettle" @close="showSettle = false" @paid="onSettlePaid" />
+    <OpenBillDialog v-if="showOpenBills" @close="showOpenBills = false"
+      @add-item="onBillAddItem" @paid="onBillPaid" @print="draftBill = $event" />
+    <ReceiptDialog v-if="draftBill" :order="draftBill" :terminal="pos.terminal" draft @close="draftBill = null" />
     <StationStartDialog v-if="startStation" :station="startStation" @close="startStation = null"
       @started="startStation = null; pos.fetchStations()" />
     <StationSessionDialog v-if="sessionStation" :station="sessionStation" @close="sessionStation = null; pos.fetchStations()"

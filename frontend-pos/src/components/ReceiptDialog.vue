@@ -1,7 +1,7 @@
 <script setup>
 import { parseUTC } from '../utils/datetime'
 
-const props = defineProps({ order: Object, payment: Object, terminal: Object })
+const props = defineProps({ order: Object, payment: Object, terminal: Object, draft: { type: Boolean, default: false } })
 const emit = defineEmits(['close'])
 
 function rupiah(n) {
@@ -39,17 +39,26 @@ function print() {
         <div class="flex justify-between"><span>Subtotal</span><span>{{ rupiah(order.subtotal) }}</span></div>
         <div v-if="order.discount_amount > 0" class="flex justify-between"><span>Diskon</span><span>-{{ rupiah(order.discount_amount) }}</span></div>
         <div class="flex justify-between font-bold text-base"><span>TOTAL</span><span>{{ rupiah(order.total_amount) }}</span></div>
-        <div class="flex justify-between text-xs mt-1">
-          <span>Dibayar ({{ payment.method.toUpperCase() }})</span>
-          <span>{{ rupiah(payment.amount) }}</span>
-        </div>
-        <div v-if="order.amount_due > 0" class="flex justify-between text-xs">
-          <span>Sisa</span><span>{{ rupiah(order.amount_due) }}</span>
-        </div>
-        <div class="flex justify-between text-xs font-bold mt-0.5">
-          <span>STATUS</span>
-          <span>{{ order.status === 'paid' ? 'LUNAS' : (order.status === 'partial' ? 'DP / BELUM LUNAS' : payment.status.toUpperCase()) }}</span>
-        </div>
+        <!-- BILL SEMENTARA (belum dibayar) -->
+        <template v-if="draft || !payment">
+          <div class="border-t border-dashed border-slate-300 my-2"></div>
+          <p class="text-center text-xs font-bold tracking-wide">*** BILL SEMENTARA ***</p>
+          <p class="text-center text-[11px] text-slate-500">Belum dibayar — bukan bukti pembayaran</p>
+        </template>
+        <!-- STRUK LUNAS/DP -->
+        <template v-else>
+          <div class="flex justify-between text-xs mt-1">
+            <span>Dibayar ({{ payment.method.toUpperCase() }})</span>
+            <span>{{ rupiah(payment.amount) }}</span>
+          </div>
+          <div v-if="order.amount_due > 0" class="flex justify-between text-xs">
+            <span>Sisa</span><span>{{ rupiah(order.amount_due) }}</span>
+          </div>
+          <div class="flex justify-between text-xs font-bold mt-0.5">
+            <span>STATUS</span>
+            <span>{{ order.status === 'paid' ? 'LUNAS' : (order.status === 'partial' ? 'DP / BELUM LUNAS' : payment.status.toUpperCase()) }}</span>
+          </div>
+        </template>
         <div class="border-t border-dashed border-slate-300 my-2"></div>
         <p class="text-center text-xs">Terima kasih 🙏</p>
       </div>

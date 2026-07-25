@@ -137,26 +137,11 @@ def generate_order_number(venue: Venue) -> str:
     return f"{prefix}{max_seq + 1:04d}"
 
 
-# ------------------------------------------------------------------
-# Buat order (status open) + item; hitung total. Stok belum dikurangi.
-# ------------------------------------------------------------------
-def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
-    items_in = data.get("items") or []
-    if not items_in:
-        raise PosError("Order tidak boleh kosong", "empty_order")
-
-    venue = db.session.get(Venue, shift.venue_id)
-    order = Order(
-        order_number=generate_order_number(venue),
-        venue_id=shift.venue_id,
-        terminal_id=shift.terminal_id,
-        shift_id=shift.id,
-        cashier_id=cashier_id,
-        customer_name=(data.get("customer_name") or None),
-        customer_phone=(data.get("customer_phone") or None),
-        status="open",
-    )
-
+def _build_order_items(order, items_in, venue_id):
+    """Bangun OrderItem dari `items_in`, append ke `order.items`, return
+    (subtotal_item, booking_specs). TIDAK mengubah subtotal/total order & tidak
+    membuat FacilityBooking (butuh order_item.id → urusan pemanggil). Dipakai
+    bersama create_order (bill baru) & add_items_to_order (tambah ke open bill)."""
     subtotal = Decimal("0")
     booking_specs = []  # (order_item, facility_id, date, start, end)
     for row in items_in:
@@ -171,7 +156,7 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
             product = db.session.get(Product, row.get("product_id"))
             if product is None or not product.is_active:
                 raise PosError("Produk tidak ditemukan/nonaktif", "product_not_found", 404)
-            if product.venue_id != shift.venue_id:
+            if product.venue_id != venue_id:
                 raise PosError("Produk bukan milik venue ini", "product_wrong_venue")
             if product.open_price:
                 # harga terbuka (mis. Parkir): nominal diketik kasir, tak ada
@@ -207,7 +192,7 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
             product = db.session.get(Product, row.get("product_id"))
             if product is None or not product.is_active or not product.is_ticket:
                 raise PosError("Tiket tidak ditemukan/nonaktif", "ticket_not_found", 404)
-            if product.venue_id != shift.venue_id:
+            if product.venue_id != venue_id:
                 raise PosError("Tiket bukan milik venue ini", "ticket_wrong_venue")
             unit = _D(ticket_unit_price(product))  # harga weekday/weekend otomatis
             oi = OrderItem(
@@ -217,7 +202,7 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
 
         elif item_type == "booking":
             facility = db.session.get(Facility, row.get("facility_id"))
-            if facility is None or not facility.is_active or facility.venue_id != shift.venue_id:
+            if facility is None or not facility.is_active or facility.venue_id != venue_id:
                 raise PosError("Lapangan tidak ditemukan/nonaktif", "facility_not_found", 404)
             try:
                 bdate = date.fromisoformat(row["booking_date"])
@@ -254,7 +239,7 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
             )
             booking_specs.append((oi, facility.id, bdate, start, end))
 
-        else:  # ticket | rental: nama & harga dari input
+        else:  # rental: nama & harga dari input
             qty = _D(row.get("quantity", 1))
             if qty <= 0:
                 raise PosError("Quantity harus > 0", "bad_quantity")
@@ -268,6 +253,59 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
 
         subtotal += oi.line_total
         order.items.append(oi)
+    return subtotal, booking_specs
+
+
+def _create_facility_bookings(order, booking_specs):
+    """Reservasi slot (FacilityBooking) utk item booking — setelah order_item punya id."""
+    for oi, fid, bdate, start, end in booking_specs:
+        db.session.add(
+            FacilityBooking(
+                facility_id=fid, venue_id=order.venue_id, order_item_id=oi.id,
+                booking_date=bdate, start_time=start, end_time=end, status="booked",
+            )
+        )
+
+
+def add_items_to_order(order: Order, items_in: list) -> Order:
+    """Tambah item ke bill (order) yang masih TERBUKA — inti open bill. Stok baru
+    dipotong saat bill dibayar lunas (lihat _apply_payment), jadi di sini hanya
+    menambah item & menghitung ulang total (diskon awal dipertahankan)."""
+    if not items_in:
+        raise PosError("Tak ada item untuk ditambahkan", "empty_order")
+    if order.status != "open":
+        raise PosError("Bill sudah tidak terbuka (sudah dibayar/dibatalkan)", "bill_not_open", 409)
+    add_subtotal, booking_specs = _build_order_items(order, items_in, order.venue_id)
+    db.session.flush()  # item baru dapat id utk reservasi slot
+    _create_facility_bookings(order, booking_specs)
+    order.subtotal = _D(order.subtotal) + add_subtotal
+    order.total_amount = _D(order.subtotal) - _D(order.discount_amount)
+    order.updated_at = datetime.utcnow()
+    db.session.commit()
+    return order
+
+
+# ------------------------------------------------------------------
+# Buat order (status open) + item; hitung total. Stok belum dikurangi.
+# ------------------------------------------------------------------
+def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
+    items_in = data.get("items") or []
+    if not items_in:
+        raise PosError("Order tidak boleh kosong", "empty_order")
+
+    venue = db.session.get(Venue, shift.venue_id)
+    order = Order(
+        order_number=generate_order_number(venue),
+        venue_id=shift.venue_id,
+        terminal_id=shift.terminal_id,
+        shift_id=shift.id,
+        cashier_id=cashier_id,
+        customer_name=(data.get("customer_name") or None),
+        customer_phone=(data.get("customer_phone") or None),
+        status="open",
+    )
+
+    subtotal, booking_specs = _build_order_items(order, items_in, shift.venue_id)
 
     discount = _D(data.get("discount_amount"))
     if discount < 0 or discount > subtotal:
@@ -278,15 +316,7 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
 
     db.session.add(order)
     db.session.flush()
-
-    # buat facility_bookings setelah order_item punya id (reservasi slot)
-    for oi, fid, bdate, start, end in booking_specs:
-        db.session.add(
-            FacilityBooking(
-                facility_id=fid, venue_id=order.venue_id, order_item_id=oi.id,
-                booking_date=bdate, start_time=start, end_time=end, status="booked",
-            )
-        )
+    _create_facility_bookings(order, booking_specs)
     db.session.flush()
     return order
 
