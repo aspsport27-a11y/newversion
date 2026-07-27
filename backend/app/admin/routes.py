@@ -2098,6 +2098,123 @@ def booking_delete(bid):
     return jsonify(message="Booking dihapus"), 200
 
 
+def _norm_phone(p):
+    """Normalisasi no HP jadi kunci: hanya digit, awalan 0/62 disamakan → 62..."""
+    if not p:
+        return None
+    d = "".join(ch for ch in str(p) if ch.isdigit())
+    if not d:
+        return None
+    if d.startswith("620"):
+        d = "62" + d[3:]
+    elif d.startswith("0"):
+        d = "62" + d[1:]
+    elif not d.startswith("62"):
+        d = "62" + d
+    return d
+
+
+def _customer_key(name, phone):
+    """Kunci identitas customer: no HP (utama) atau nama (cadangan)."""
+    np = _norm_phone(phone)
+    if np:
+        return "hp:" + np
+    nm = (name or "").strip().lower()
+    return "nm:" + nm if nm else None
+
+
+def _booking_order_ids():
+    return {
+        r[0] for r in db.session.query(OrderItem.order_id)
+        .filter(OrderItem.item_type == "booking").distinct().all()
+    }
+
+
+@admin_bp.get("/customers")
+@jwt_required()
+@VIEW
+def customers_list():
+    """CRM: daftar customer yang pernah BOOKING, diagregasi dari order (non-void).
+    Dikelompokkan per no HP (atau nama bila HP kosong)."""
+    bids = _booking_order_ids()
+    if not bids:
+        return jsonify(count=0, customers=[]), 200
+    q = Order.query.filter(Order.status != "void", Order.id.in_(bids))
+    forced = _forced_venue()
+    if forced is not None:
+        q = q.filter(Order.venue_id == forced)
+    vmap = {v.id: v.code for v in Venue.query.all()}
+
+    cust = {}
+    for o in q.all():
+        key = _customer_key(o.customer_name, o.customer_phone)
+        if not key:
+            continue
+        c = cust.get(key)
+        if c is None:
+            c = cust[key] = {
+                "key": key, "name": o.customer_name or "—",
+                "phone": o.customer_phone or None, "booking_count": 0,
+                "total_spend": 0.0, "last_visit": None, "first_seen": None,
+                "is_member": False, "_venues": {},
+            }
+        c["booking_count"] += 1
+        c["total_spend"] += float(o.amount_paid or 0)
+        if o.is_member:
+            c["is_member"] = True
+        vc = vmap.get(o.venue_id)
+        if vc:
+            c["_venues"][vc] = c["_venues"].get(vc, 0) + 1
+        dt = o.created_at.isoformat() if o.created_at else None
+        if dt:
+            if c["last_visit"] is None or dt > c["last_visit"]:
+                c["last_visit"] = dt
+                if o.customer_name:
+                    c["name"] = o.customer_name  # pakai nama dari booking terbaru
+                if o.customer_phone:
+                    c["phone"] = o.customer_phone
+            if c["first_seen"] is None or dt < c["first_seen"]:
+                c["first_seen"] = dt
+
+    out = []
+    for c in cust.values():
+        venues = sorted(c.pop("_venues").items(), key=lambda x: -x[1])
+        c["favorite_venue"] = venues[0][0] if venues else None
+        c["total_spend"] = round(c["total_spend"], 2)
+        out.append(c)
+    out.sort(key=lambda x: x["last_visit"] or "", reverse=True)
+    return jsonify(count=len(out), customers=out), 200
+
+
+@admin_bp.get("/customers/history")
+@jwt_required()
+@VIEW
+def customer_history():
+    """Riwayat booking 1 customer (dicocokkan lewat kunci HP/nama)."""
+    key = request.args.get("key") or _customer_key(request.args.get("name"), request.args.get("phone"))
+    if not key:
+        return _err("Kunci customer tidak valid", "bad_request")
+    bids = _booking_order_ids()
+    q = Order.query.filter(Order.status != "void", Order.id.in_(bids))
+    forced = _forced_venue()
+    if forced is not None:
+        q = q.filter(Order.venue_id == forced)
+    vmap = {v.id: v.code for v in Venue.query.all()}
+    rows = []
+    for o in q.order_by(Order.created_at.desc()).all():
+        if _customer_key(o.customer_name, o.customer_phone) != key:
+            continue
+        slots = [i.name_snapshot for i in o.items if i.item_type == "booking"]
+        rows.append({
+            "order_id": o.id, "order_number": o.order_number,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "venue_code": vmap.get(o.venue_id), "slots": slots,
+            "total_amount": float(o.total_amount or 0), "amount_paid": float(o.amount_paid or 0),
+            "status": o.status, "is_member": o.is_member,
+        })
+    return jsonify(count=len(rows), history=rows), 200
+
+
 @admin_bp.get("/orders")
 @jwt_required()
 @VIEW

@@ -637,6 +637,7 @@ def booking_member():
         "items": items, "discount_amount": discount,
         "customer_name": data.get("customer_name"), "customer_phone": data.get("customer_phone"),
     })
+    order.is_member = True  # penanda order booking member (utk CRM & laporan)
     db.session.commit()
     return jsonify(
         order=order.to_dict(),

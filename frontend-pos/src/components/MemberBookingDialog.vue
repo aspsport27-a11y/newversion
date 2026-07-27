@@ -123,6 +123,7 @@ const grandTotal = computed(() => Math.max(0, subtotal.value - Math.min(discount
 async function submit() {
   err.value = ''
   if (!facility.value) return (err.value = `Pilih ${unitTerm.value.toLowerCase()}.`)
+  if (!(custPhone.value || '').trim()) return (err.value = 'No. HP customer wajib diisi.')
   if (!days.value.length) return (err.value = 'Pilih minimal 1 hari.')
   if (startH.value == null || endH.value == null || endH.value <= startH.value) return (err.value = 'Pilih jam mulai & selesai yang benar.')
   busy.value = true
@@ -164,8 +165,8 @@ async function submit() {
             <input v-model="custName" placeholder="Nama" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
           </div>
           <div>
-            <label class="block text-sm text-slate-600 mb-1">No. HP</label>
-            <input v-model="custPhone" placeholder="opsional" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+            <label class="block text-sm text-slate-600 mb-1">No. HP <span class="text-red-500">*</span></label>
+            <input v-model="custPhone" placeholder="wajib" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
           </div>
         </div>
 

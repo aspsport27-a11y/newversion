@@ -142,6 +142,7 @@ function facilityRateLabel(f) {
 function add() {
   error.value = ''
   if (!facility.value) return (error.value = `Pilih ${unitTerm.value.toLowerCase()}.`)
+  if (!(pos.customerPhone || '').trim()) return (error.value = 'No. HP customer wajib diisi untuk booking.')
   if (startH.value == null || endH.value == null) return (error.value = 'Pilih jam mulai & selesai.')
   if (durationHours.value <= 0) return (error.value = 'Jam selesai harus setelah jam mulai.')
   if (overlaps(startH.value, endH.value)) return (error.value = 'Jadwal bentrok dengan booking lain.')
@@ -182,8 +183,8 @@ function add() {
             <input v-model="pos.customerName" placeholder="Nama pemesan" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
           </div>
           <div>
-            <label class="block text-sm text-slate-600 mb-1">No. HP</label>
-            <input v-model="pos.customerPhone" placeholder="opsional" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
+            <label class="block text-sm text-slate-600 mb-1">No. HP <span class="text-red-500">*</span></label>
+            <input v-model="pos.customerPhone" placeholder="wajib" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500" />
           </div>
         </div>
 

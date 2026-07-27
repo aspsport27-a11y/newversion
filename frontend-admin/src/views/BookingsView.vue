@@ -227,9 +227,60 @@ async function loadForfeited() {
     fdTotal.value = data.total
   } finally { fdLoading.value = false }
 }
+// ---------- Data Customer (CRM booking) ----------
+const custRows = ref([])
+const custLoading = ref(false)
+const custSearch = ref('')
+const custFilter = ref('') // '' | 'member' | 'reguler'
+const custSort = ref('last') // last | count | spend | idle
+const custDetail = ref(null) // { customer, history }
+async function loadCustomers() {
+  custLoading.value = true
+  try {
+    const { data } = await client.get('/admin/customers')
+    custRows.value = data.customers
+  } finally { custLoading.value = false }
+}
+const custShown = computed(() => {
+  let list = custRows.value
+  if (custFilter.value === 'member') list = list.filter((c) => c.is_member)
+  else if (custFilter.value === 'reguler') list = list.filter((c) => !c.is_member)
+  const q = custSearch.value.trim().toLowerCase()
+  if (q) list = list.filter((c) => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q))
+  const arr = [...list]
+  if (custSort.value === 'count') arr.sort((a, b) => b.booking_count - a.booking_count)
+  else if (custSort.value === 'spend') arr.sort((a, b) => b.total_spend - a.total_spend)
+  else if (custSort.value === 'idle') arr.sort((a, b) => (a.last_visit || '').localeCompare(b.last_visit || '')) // lama tak datang dulu
+  else arr.sort((a, b) => (b.last_visit || '').localeCompare(a.last_visit || ''))
+  return arr
+})
+function fmtVisit(iso) { return iso ? parseUTC(iso).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
+async function openCustomer(c) {
+  custDetail.value = { customer: c, history: null }
+  try {
+    const { data } = await client.get('/admin/customers/history', { params: { key: c.key } })
+    custDetail.value = { customer: c, history: data.history }
+  } catch { custDetail.value = { customer: c, history: [] } }
+}
+function exportCustomersCsv() {
+  const head = ['Nama', 'No HP', 'Jumlah Booking', 'Total Belanja', 'Terakhir Booking', 'Venue Favorit', 'Status']
+  const rows = custShown.value.map((c) => [
+    c.name, c.phone || '', c.booking_count, c.total_spend,
+    c.last_visit ? c.last_visit.slice(0, 10) : '', c.favorite_venue || '',
+    c.is_member ? 'Member' : 'Reguler',
+  ])
+  const csv = [head, ...rows].map((r) => r.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(',')).join('\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `data-customer-${today}.csv`
+  a.click()
+}
+
 function switchTab(t) {
   tab.value = t
   if (t === 'forfeited' && !fdRows.value.length) loadForfeited()
+  if (t === 'customers' && !custRows.value.length) loadCustomers()
 }
 function fmtDatesShort(arr) {
   return (arr || []).map((d) => {
@@ -301,6 +352,104 @@ onMounted(async () => { await loadVenues(); await run() })
     <div class="flex gap-1 mb-5 border-b">
       <button @click="switchTab('list')" :class="tab === 'list' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Booking</button>
       <button @click="switchTab('forfeited')" :class="tab === 'forfeited' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">DP Hangus</button>
+      <button @click="switchTab('customers')" :class="tab === 'customers' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Data Customer</button>
+    </div>
+
+    <!-- ================= TAB DATA CUSTOMER (CRM) ================= -->
+    <div v-if="tab === 'customers'">
+      <div class="flex flex-wrap items-center gap-2 mb-4">
+        <input v-model="custSearch" placeholder="🔍 Cari nama / no HP…" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 w-56" />
+        <select v-model="custFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="">Semua</option>
+          <option value="member">Member</option>
+          <option value="reguler">Reguler</option>
+        </select>
+        <select v-model="custSort" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="last">Terbaru booking</option>
+          <option value="idle">Lama tak datang</option>
+          <option value="count">Paling sering</option>
+          <option value="spend">Belanja terbesar</option>
+        </select>
+        <span class="text-xs text-slate-400">{{ custShown.length }} customer</span>
+        <button @click="exportCustomersCsv" class="ml-auto bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">📥 Export CSV</button>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-3 font-medium">Nama</th>
+              <th class="px-4 py-3 font-medium">No HP</th>
+              <th class="px-4 py-3 font-medium text-center">Status</th>
+              <th class="px-4 py-3 font-medium text-right">Booking</th>
+              <th class="px-4 py-3 font-medium text-right">Total Belanja</th>
+              <th class="px-4 py-3 font-medium">Terakhir</th>
+              <th class="px-4 py-3 font-medium">Venue Fav.</th>
+              <th class="px-4 py-3"></th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="custLoading"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!custRows.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada data customer booking.</td></tr>
+              <tr v-else-if="!custShown.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Tidak ada yang cocok.</td></tr>
+              <tr v-for="c in custShown" :key="c.key" class="border-t hover:bg-slate-50 cursor-pointer" @click="openCustomer(c)">
+                <td class="px-4 py-3 font-medium text-slate-700">{{ c.name }}</td>
+                <td class="px-4 py-3 text-slate-500 font-mono text-xs">
+                  {{ c.phone || '—' }}
+                  <a v-if="waLink(c.phone)" :href="waLink(c.phone)" target="_blank" rel="noopener" @click.stop class="ml-1">💬</a>
+                </td>
+                <td class="px-4 py-3 text-center">
+                  <span v-if="c.is_member" class="text-[10px] bg-purple-100 text-purple-700 rounded-full px-2 py-0.5">Member</span>
+                  <span v-else class="text-[10px] text-slate-400">Reguler</span>
+                </td>
+                <td class="px-4 py-3 text-right">{{ c.booking_count }}</td>
+                <td class="px-4 py-3 text-right font-medium">{{ rupiah(c.total_spend) }}</td>
+                <td class="px-4 py-3 text-slate-500 whitespace-nowrap">{{ fmtVisit(c.last_visit) }}</td>
+                <td class="px-4 py-3 text-slate-500">{{ c.favorite_venue || '—' }}</td>
+                <td class="px-4 py-3 text-right text-brand-600 text-xs">Riwayat ›</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-2">Data dari booking (non-batal), dikelompokkan per no HP. Klik baris untuk riwayat booking customer.</p>
+    </div>
+
+    <!-- Modal riwayat customer -->
+    <div v-if="custDetail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="custDetail = null">
+      <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
+        <div class="flex justify-between items-start mb-3">
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">{{ custDetail.customer.name }}
+              <span v-if="custDetail.customer.is_member" class="text-[10px] bg-purple-100 text-purple-700 rounded-full px-2 py-0.5 align-middle">Member</span>
+            </h3>
+            <p class="text-sm text-slate-500 font-mono">{{ custDetail.customer.phone || 'tanpa HP' }}
+              <a v-if="waLink(custDetail.customer.phone)" :href="waLink(custDetail.customer.phone)" target="_blank" rel="noopener" class="ml-1">💬 WA</a>
+            </p>
+          </div>
+          <button @click="custDetail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        </div>
+        <div class="grid grid-cols-3 gap-2 mb-3 text-center">
+          <div class="bg-slate-50 rounded-lg p-2"><p class="text-[11px] text-slate-500">Booking</p><p class="font-bold text-slate-700">{{ custDetail.customer.booking_count }}</p></div>
+          <div class="bg-slate-50 rounded-lg p-2"><p class="text-[11px] text-slate-500">Total Belanja</p><p class="font-bold text-slate-700 text-sm">{{ rupiah(custDetail.customer.total_spend) }}</p></div>
+          <div class="bg-slate-50 rounded-lg p-2"><p class="text-[11px] text-slate-500">Terakhir</p><p class="font-bold text-slate-700 text-sm">{{ fmtVisit(custDetail.customer.last_visit) }}</p></div>
+        </div>
+        <p class="text-xs font-medium text-slate-500 mb-1">Riwayat Booking</p>
+        <p v-if="!custDetail.history" class="text-sm text-slate-400 py-3">Memuat…</p>
+        <p v-else-if="!custDetail.history.length" class="text-sm text-slate-400 py-3">Belum ada riwayat.</p>
+        <div v-else class="space-y-1">
+          <div v-for="h in custDetail.history" :key="h.order_id" class="border rounded-lg p-2 text-sm">
+            <div class="flex justify-between">
+              <span class="font-mono text-xs text-slate-500">{{ h.order_number }}</span>
+              <span :class="statusClass(h.status)" class="text-[10px] rounded-full px-2 py-0.5">{{ statusLabel(h.status) }}</span>
+            </div>
+            <div class="text-slate-700">{{ (h.slots || []).join(', ') }}</div>
+            <div class="flex justify-between text-xs text-slate-500">
+              <span>{{ h.venue_code }} · {{ fmtVisit(h.created_at) }}</span>
+              <span>{{ rupiah(h.total_amount) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ================= TAB DP HANGUS ================= -->

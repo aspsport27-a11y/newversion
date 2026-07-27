@@ -334,6 +334,7 @@ class Order(db.Model):
     customer_name = db.Column(db.String(100))
     customer_phone = db.Column(db.String(20))
     status = db.Column(db.String(10), nullable=False, default="open")  # open|paid|void
+    is_member = db.Column(db.Boolean, nullable=False, default=False)  # order booking member (berulang)
     subtotal = db.Column(db.Numeric(15, 2), nullable=False, default=0)
     discount_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
     total_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
@@ -357,6 +358,7 @@ class Order(db.Model):
             "order_number": self.order_number,
             "venue_id": self.venue_id,
             "status": self.status,
+            "is_member": self.is_member,
             "customer_name": self.customer_name,
             "customer_phone": self.customer_phone,
             "subtotal": f(self.subtotal),

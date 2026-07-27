@@ -294,6 +294,10 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
     if not items_in:
         raise PosError("Order tidak boleh kosong", "empty_order")
 
+    # No HP WAJIB kalau ada item booking (agar data customer/CRM terisi & bisa dihubungi)
+    if any(r.get("item_type") == "booking" for r in items_in) and not (data.get("customer_phone") or "").strip():
+        raise PosError("No HP customer wajib diisi untuk booking", "phone_required")
+
     venue = db.session.get(Venue, shift.venue_id)
     order = Order(
         order_number=generate_order_number(venue),
