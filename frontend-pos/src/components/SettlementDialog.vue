@@ -2,9 +2,21 @@
 import { ref, onMounted } from 'vue'
 import { usePosStore } from '../stores/pos'
 import PaymentDialog from './PaymentDialog.vue'
+import RescheduleDialog from './RescheduleDialog.vue'
 
 const pos = usePosStore()
 const emit = defineEmits(['close', 'paid'])
+const rescheduleOrder = ref(null)
+function hasBooking(o) { return (o.items || []).some((i) => i.item_type === 'booking') }
+async function onRescheduled(res) {
+  const info = res.reschedule || {}
+  const d = info.amount_due || 0
+  rescheduleOrder.value = null
+  msg.value = d >= 0
+    ? `Reschedule berhasil. Sisa tagih ${rupiah(d)}.`
+    : `Reschedule berhasil. Kelebihan ${rupiah(Math.abs(d))} — kembalikan ke customer.`
+  await load()
+}
 
 const orders = ref([])
 const loading = ref(true)
@@ -79,6 +91,7 @@ async function cancel(o) {
           </div>
           <div class="flex gap-2 mt-2">
             <button @click="selected = o" class="flex-1 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium">Bayar Pelunasan</button>
+            <button v-if="hasBooking(o)" @click="rescheduleOrder = o" class="py-2 px-3 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 text-sm font-medium">📅 Reschedule</button>
             <button @click="cancel(o)" class="py-2 px-3 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 text-sm font-medium">Batalkan</button>
           </div>
         </div>
@@ -92,5 +105,8 @@ async function cancel(o) {
     <PaymentDialog v-if="selected" :total="selected.amount_due" title="Pelunasan"
       :qris-dynamic="pos.qrisDynamic"
       @close="selected = null" @pay="onPay" />
+    <!-- Reschedule booking -->
+    <RescheduleDialog v-if="rescheduleOrder" :order="rescheduleOrder"
+      @close="rescheduleOrder = null" @done="onRescheduled" />
   </div>
 </template>

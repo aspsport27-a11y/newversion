@@ -321,6 +321,89 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
     return order
 
 
+def reschedule_booking(order, item_id, facility_id, booking_date, start_time, end_time):
+    """Pindah jadwal 1 slot booking ke slot baru (boleh beda court, dalam venue
+    yg sama). DP TIDAK hangus — tetap tercatat; harga dihitung ulang sesuai tarif
+    slot baru (sadar hari/jam) & total order diperbarui. Return (order, info)
+    dgn selisih harga. Jejak lama→baru dicatat di log."""
+    booking_items = [i for i in order.items if i.item_type == "booking"]
+    if not booking_items:
+        raise PosError("Order ini bukan booking", "not_booking", 400)
+    if item_id:
+        item = next((i for i in booking_items if i.id == item_id), None)
+        if item is None:
+            raise PosError("Item booking tidak ditemukan di order ini", "item_not_found", 404)
+    elif len(booking_items) == 1:
+        item = booking_items[0]
+    else:
+        raise PosError("Order punya beberapa booking — sebutkan item yang direschedule", "ambiguous_item", 400)
+
+    fb = FacilityBooking.query.filter_by(order_item_id=item.id, status="booked").first()
+    if fb is None:
+        raise PosError("Slot booking tidak ditemukan/aktif", "slot_not_found", 404)
+
+    facility = db.session.get(Facility, facility_id)
+    if facility is None or not facility.is_active or facility.venue_id != order.venue_id:
+        raise PosError("Lapangan tujuan tidak valid (harus di venue yang sama)", "bad_facility", 400)
+    try:
+        bdate = date.fromisoformat(booking_date)
+        start = _parse_time(start_time)
+        end = _parse_time(end_time)
+    except (ValueError, TypeError):
+        raise PosError("Tanggal/jam baru tidak valid", "bad_time", 400)
+    hours = _hours_between(start, end)
+    if hours <= 0:
+        raise PosError("Jam selesai harus setelah jam mulai", "bad_range", 400)
+    # slot baru harus kosong (kecuali slot ini sendiri)
+    if not is_slot_available(facility.id, bdate, start, end, exclude_id=fb.id):
+        raise PosError(f"Slot {facility.name} {start_time}-{end_time} sudah dibooking", "slot_taken", 409)
+
+    old_desc = f"{item.name_snapshot}"
+    old_line = _D(item.line_total)
+
+    # harga baru
+    end_hour = start.hour + int(hours)
+    dtype = day_type_for_date(bdate)
+    new_total = _D(facility_booking_price(facility, start.hour, end_hour, dtype)).quantize(Decimal("0.01"))
+    breakdown = _booking_rate_breakdown(facility, start.hour, end_hour, dtype)
+
+    # update item
+    item.name_snapshot = f"{facility.name} {bdate:%d/%m} {start_time}-{end_time}"[:120]
+    item.quantity = _D(hours)
+    item.unit_price = (new_total / _D(hours)).quantize(Decimal("0.01")) if hours else _D(0)
+    item.line_total = new_total
+    item.notes = breakdown
+    # update slot (slot lama otomatis lepas krn baris yg sama pindah)
+    fb.facility_id = facility.id
+    fb.booking_date = bdate
+    fb.start_time = start
+    fb.end_time = end
+
+    # hitung ulang total order; DP (amount_paid) dipertahankan
+    order.subtotal = _D(order.subtotal) - old_line + new_total
+    order.total_amount = _D(order.subtotal) - _D(order.discount_amount)
+    paid = _D(order.amount_paid)
+    if paid > 0 and paid >= _D(order.total_amount):
+        order.status = "paid"
+    elif paid > 0:
+        order.status = "partial"
+    else:
+        order.status = "open"
+    order.updated_at = datetime.utcnow()
+
+    diff = (_D(order.total_amount) - paid).quantize(Decimal("0.01"))  # >0 = kurang bayar, <0 = kelebihan
+    log.info("Reschedule order %s item %s: '%s' → '%s' (total %s→%s, sisa %s)",
+             order.order_number, item.id, old_desc, item.name_snapshot, old_line, new_total, diff)
+    db.session.commit()
+    return order, {
+        "old_line_total": float(old_line),
+        "new_line_total": float(new_total),
+        "amount_due": float(diff),  # >0 tagih ke customer; <0 kembalikan
+        "total_amount": float(order.total_amount),
+        "amount_paid": float(paid),
+    }
+
+
 # ------------------------------------------------------------------
 # Provider pembayaran (colok-lepas)
 # ------------------------------------------------------------------

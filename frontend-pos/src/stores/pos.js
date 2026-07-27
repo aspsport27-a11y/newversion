@@ -260,6 +260,10 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.post('/bookings/member', payload)
       return data // { order, per_session, booked_dates, skipped_dates }
     },
+    async rescheduleBooking(orderId, payload) {
+      const { data } = await client.post(`/orders/${orderId}/reschedule`, payload)
+      return data // { order, reschedule: {amount_due, new_line_total, ...} }
+    },
     async settle(orderId, method, amount, reference, proofImage) {
       const { data } = await client.post(`/orders/${orderId}/pay`, {
         method,

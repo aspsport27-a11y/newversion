@@ -31,6 +31,7 @@ from .services import (
     expire_stale_qris,
     open_shift,
     pay_order,
+    reschedule_booking,
     sync_qris_payment,
 )
 
@@ -693,6 +694,30 @@ def order_add_items(order_id):
     data = request.get_json(silent=True) or {}
     order = add_items_to_order(order, data.get("items") or [])
     return jsonify(order=order.to_dict()), 200
+
+
+@pos_bp.post("/orders/<int:order_id>/reschedule")
+@jwt_required()
+def order_reschedule(order_id):
+    """Pindah jadwal 1 slot booking ke slot baru (DP tetap, harga dihitung ulang)."""
+    from .models import Order
+
+    terminal = _current_terminal()
+    _current_open_shift(terminal.id)  # wajib ada shift terbuka
+    order = db.session.get(Order, order_id)
+    if order is None:
+        raise PosError("Order tidak ditemukan", "not_found", 404)
+    if order.venue_id != terminal.venue_id:
+        raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
+    d = request.get_json(silent=True) or {}
+    for f in ("facility_id", "booking_date", "start_time", "end_time"):
+        if not d.get(f):
+            return jsonify(error="bad_request", message=f"{f} wajib diisi"), 400
+    order, info = reschedule_booking(
+        order, d.get("order_item_id"), d["facility_id"],
+        d["booking_date"], d["start_time"], d["end_time"],
+    )
+    return jsonify(order=order.to_dict(), reschedule=info), 200
 
 
 @pos_bp.post("/orders/<int:order_id>/pay")
