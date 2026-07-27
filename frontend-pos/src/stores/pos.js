@@ -17,6 +17,7 @@ export const usePosStore = defineStore('pos', {
     addons: [],
     cart: [], // {uid, item_type, name, unit_price, quantity, ...}
     discount: 0,
+    discountType: 'rp', // 'rp' = nominal, 'percent' = persen dari subtotal
     customerName: '',
     customerPhone: '',
   }),
@@ -40,8 +41,16 @@ export const usePosStore = defineStore('pos', {
     subtotal() {
       return this.cart.reduce((s, i) => s + this.lineTotal(i), 0)
     },
+    // nominal diskon (rupiah) — dari persen atau nominal, dibatasi ≤ subtotal
+    discountRp() {
+      const v = Number(this.discount) || 0
+      const rp = this.discountType === 'percent'
+        ? Math.round(this.subtotal * Math.min(Math.max(v, 0), 100) / 100)
+        : v
+      return Math.min(Math.max(rp, 0), this.subtotal)
+    },
     total() {
-      return Math.max(0, this.subtotal - (Number(this.discount) || 0))
+      return Math.max(0, this.subtotal - this.discountRp)
     },
   },
   actions: {
@@ -212,6 +221,7 @@ export const usePosStore = defineStore('pos', {
     clearCart() {
       this.cart = []
       this.discount = 0
+      this.discountType = 'rp'
       this.customerName = ''
       this.customerPhone = ''
     },
@@ -233,7 +243,7 @@ export const usePosStore = defineStore('pos', {
     },
     async checkout(method, extra = {}) {
       const payload = {
-        discount_amount: Number(this.discount) || 0,
+        discount_amount: this.discountRp,
         customer_name: this.customerName || null,
         customer_phone: this.customerPhone || null,
         items: this._cartItems(),
@@ -250,7 +260,7 @@ export const usePosStore = defineStore('pos', {
     // Buka bill: buat order TERBUKA dari keranjang tanpa dibayar (open bill)
     async openBill() {
       const { data } = await client.post('/orders', {
-        discount_amount: Number(this.discount) || 0,
+        discount_amount: this.discountRp,
         customer_name: this.customerName || null,
         customer_phone: this.customerPhone || null,
         items: this._cartItems(),

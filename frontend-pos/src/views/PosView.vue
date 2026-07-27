@@ -511,8 +511,19 @@ function logout() {
         <div class="p-3 border-t space-y-2">
           <div class="flex items-center justify-between text-sm">
             <span class="text-slate-500">Diskon</span>
-            <input v-model="pos.discount" type="number" inputmode="numeric" placeholder="0"
-              class="w-24 rounded border border-slate-300 px-2 py-1 text-right text-sm outline-none focus:border-brand-500" />
+            <div class="flex items-center gap-1">
+              <div class="flex rounded border border-slate-300 overflow-hidden text-xs">
+                <button @click="pos.discountType = 'rp'" :class="pos.discountType === 'rp' ? 'bg-brand-600 text-white' : 'bg-white text-slate-500'" class="px-2 py-1 font-medium">Rp</button>
+                <button @click="pos.discountType = 'percent'" :class="pos.discountType === 'percent' ? 'bg-brand-600 text-white' : 'bg-white text-slate-500'" class="px-2 py-1 font-medium">%</button>
+              </div>
+              <input v-model="pos.discount" type="number" inputmode="numeric" placeholder="0"
+                :max="pos.discountType === 'percent' ? 100 : undefined"
+                class="w-20 rounded border border-slate-300 px-2 py-1 text-right text-sm outline-none focus:border-brand-500" />
+            </div>
+          </div>
+          <div v-if="pos.discountRp > 0" class="flex justify-between text-xs text-amber-600">
+            <span>Potongan{{ pos.discountType === 'percent' ? ` (${pos.discount || 0}%)` : '' }}</span>
+            <span>- {{ rupiah(pos.discountRp) }}</span>
           </div>
           <div class="flex justify-between font-bold text-lg">
             <span>Total</span><span class="text-brand-700">{{ rupiah(pos.total) }}</span>
