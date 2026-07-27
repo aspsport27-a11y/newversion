@@ -35,6 +35,17 @@ async function onPay(payload) {
     err.value = e?.response?.data?.message || 'Gagal memproses pembayaran.'
   }
 }
+
+async function cancelBill(o) {
+  if (!window.confirm(`Batalkan bill a/n ${o.customer_name || 'tanpa nama'} (${rupiah(o.total_amount)})?\nBill akan dihapus dari daftar. Tidak bisa dibatalkan.`)) return
+  err.value = ''
+  try {
+    await pos.cancelOrder(o.id)
+    await load()
+  } catch (e) {
+    err.value = e?.response?.data?.message || 'Gagal membatalkan bill.'
+  }
+}
 </script>
 
 <template>
@@ -68,6 +79,7 @@ async function onPay(payload) {
             <button @click="emit('print', o)" class="py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium">🧾 Cetak</button>
             <button @click="payFor = o" class="py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium">💳 Bayar</button>
           </div>
+          <button @click="cancelBill(o)" class="w-full mt-2 py-1.5 rounded-lg text-xs text-red-500 hover:bg-red-50 font-medium">Batalkan Bill</button>
         </div>
       </div>
 
