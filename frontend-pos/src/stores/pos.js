@@ -97,12 +97,12 @@ export const usePosStore = defineStore('pos', {
         booked_minutes: bookedMinutes,
       })
       await this.fetchStations()
-      return data.session
+      return data // { session, order } — order durasi utk dibayar di depan
     },
     async topupStation(id, payload) {
       const { data } = await client.post(`/stations/${id}/topup`, payload)
       await this.fetchStations()
-      return data.session
+      return data // { session, order } — order dgn tambahan waktu utk dibayar
     },
     async attachAddon(id, payload) {
       const { data } = await client.post(`/stations/${id}/addons`, payload)

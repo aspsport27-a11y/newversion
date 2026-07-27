@@ -25,8 +25,8 @@ async function start() {
   if (bookedMinutes.value <= 0) { err.value = 'Isi durasi main (jam) dulu.'; return }
   busy.value = true
   try {
-    await pos.startStation(props.station.id, customerName.value, bookedMinutes.value)
-    emit('started')
+    const res = await pos.startStation(props.station.id, customerName.value, bookedMinutes.value)
+    emit('started', res) // { session, order } — durasi dibayar di depan
   } catch (e) {
     err.value = e?.response?.data?.message || 'Gagal memulai sesi.'
   } finally {
@@ -64,7 +64,7 @@ async function start() {
       <p v-if="err" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">{{ err }}</p>
       <button @click="start" :disabled="busy || bookedMinutes <= 0"
         class="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50">
-        {{ busy ? 'Memulai…' : '▶ Mulai Sesi' }}
+        {{ busy ? 'Memulai…' : '▶ Bayar & Mulai Sesi' }}
       </button>
     </div>
   </div>

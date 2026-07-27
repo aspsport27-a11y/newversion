@@ -154,10 +154,30 @@ const stationsByTier = computed(() => {
   for (const s of pos.stations) (g[s.tier || 'reguler'] ||= []).push(s)
   return g
 })
+// PRABAYAR station: order dgn sisa tagihan → ke PaymentDialog; kalau lunas → selesai
+function payStationOrder(order) {
+  if (order && Number(order.amount_due) > 0) {
+    pendingStationOrder.value = order
+    showPayment.value = true
+    return true
+  }
+  return false
+}
+function onStationStarted(res) {
+  startStation.value = null
+  payStationOrder(res.order) // bayar durasi di depan
+}
+function onStationPayOrder(order) {
+  sessionStation.value = null
+  payStationOrder(order) // bayar tambahan waktu (topup)
+}
 function onStationStopped(result) {
   sessionStation.value = null
-  pendingStationOrder.value = result.order
-  showPayment.value = true
+  if (!payStationOrder(result.order)) {
+    // durasi sudah lunas & tak ada F&B/add-on → sesi selesai tanpa bayar lagi
+    flash('Sesi selesai — sudah lunas.')
+    pos.fetchStations()
+  }
 }
 // booking member: order sudah dibuat di server → langsung ke pembayaran
 // (reuse jalur pendingStationOrder = "order yg sudah ada, tinggal bayar")
@@ -510,7 +530,7 @@ function logout() {
     </div>
 
     <!-- Dialogs -->
-    <PaymentDialog v-if="showPayment" :total="pendingStationOrder ? pendingStationOrder.total_amount : pos.total"
+    <PaymentDialog v-if="showPayment" :total="pendingStationOrder ? (pendingStationOrder.amount_due ?? pendingStationOrder.total_amount) : pos.total"
       :qris-dynamic="pos.qrisDynamic"
       @close="showPayment = false; pendingStationOrder = null" @pay="onPay" />
     <QrisDialog v-if="qrisPayment" :payment-id="qrisPayment.id" :amount="qrisPayment.amount"
@@ -527,9 +547,9 @@ function logout() {
       @add-item="onBillAddItem" @paid="onBillPaid" @print="draftBill = $event" />
     <ReceiptDialog v-if="draftBill" :order="draftBill" :terminal="pos.terminal" draft @close="draftBill = null" />
     <StationStartDialog v-if="startStation" :station="startStation" @close="startStation = null"
-      @started="startStation = null; pos.fetchStations()" />
+      @started="onStationStarted" />
     <StationSessionDialog v-if="sessionStation" :station="sessionStation" @close="sessionStation = null; pos.fetchStations()"
-      @stopped="onStationStopped" />
+      @stopped="onStationStopped" @pay-order="onStationPayOrder" />
 
     <!-- Toast -->
     <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">

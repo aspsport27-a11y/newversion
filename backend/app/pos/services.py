@@ -274,13 +274,23 @@ def add_items_to_order(order: Order, items_in: list) -> Order:
     menambah item & menghitung ulang total (diskon awal dipertahankan)."""
     if not items_in:
         raise PosError("Tak ada item untuk ditambahkan", "empty_order")
-    if order.status != "open":
-        raise PosError("Bill sudah tidak terbuka (sudah dibayar/dibatalkan)", "bill_not_open", 409)
+    # open bill (open/partial) ATAU running-tab station yang durasinya sudah dibayar
+    # (paid) tapi F&B/topup menyusul. Void tak boleh.
+    if order.status == "void":
+        raise PosError("Bill sudah dibatalkan", "bill_not_open", 409)
     add_subtotal, booking_specs = _build_order_items(order, items_in, order.venue_id)
     db.session.flush()  # item baru dapat id utk reservasi slot
     _create_facility_bookings(order, booking_specs)
     order.subtotal = _D(order.subtotal) + add_subtotal
     order.total_amount = _D(order.subtotal) - _D(order.discount_amount)
+    # kalau menambah ke order yang tadinya lunas → jadi 'partial' lagi (masih ada sisa)
+    paid = _D(order.amount_paid)
+    if paid <= 0:
+        order.status = "open"
+    elif paid >= _D(order.total_amount):
+        order.status = "paid"
+    else:
+        order.status = "partial"
     order.updated_at = datetime.utcnow()
     db.session.commit()
     return order

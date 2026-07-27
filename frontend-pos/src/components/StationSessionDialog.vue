@@ -4,7 +4,7 @@ import { usePosStore } from '../stores/pos'
 import { stationClock } from '../utils/stationClock'
 
 const props = defineProps({ station: Object })
-const emit = defineEmits(['close', 'stopped'])
+const emit = defineEmits(['close', 'stopped', 'pay-order'])
 const pos = usePosStore()
 
 // sesi disimpan lokal & di-update dr response tiap aksi (topup/addon/fnb) —
@@ -42,7 +42,7 @@ const err = ref('')
 // nominal langsung muncul otomatis dr durasi × tarif/jam, dikurangi diskon —
 // kasir masih bisa override manual (mis. ada nego harga) via topupTotalOverride
 const topupAutoTotal = computed(() => {
-  const gross = (Number(topupDuration.value) || 0) / 60 * Number(props.station.hourly_rate)
+  const gross = (Number(topupDuration.value) || 0) / 60 * Number(props.station.today_rate ?? props.station.hourly_rate)
   return Math.max(0, Math.round((gross - (Number(topupDiscount.value) || 0)) * 100) / 100)
 })
 const topupTotal = computed({
@@ -53,13 +53,16 @@ const topupTotal = computed({
 async function submitTopup() {
   busy.value = true; err.value = ''
   try {
-    sessionState.value = await pos.topupStation(props.station.id, {
+    const res = await pos.topupStation(props.station.id, {
       duration_minutes: topupDuration.value,
       discount_amount: Number(topupDiscount.value) || 0,
       total_amount: Number(topupTotal.value),
     })
+    sessionState.value = res.session
     showTopup.value = false
     topupDuration.value = 60; topupDiscount.value = 0; topupTotalOverride.value = null
+    // PRABAYAR: tambah waktu langsung dibayar → tutup dialog & ke pembayaran delta
+    if (res.order && Number(res.order.amount_due) > 0) emit('pay-order', res.order)
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah jam.' } finally { busy.value = false }
 }
 

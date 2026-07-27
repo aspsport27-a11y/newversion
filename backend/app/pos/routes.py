@@ -811,6 +811,7 @@ def station_start(sid):
     if booked_minutes <= 0:
         raise PosError("Durasi main (menit) wajib diisi", "bad_duration")
     from .services import is_weekend
+    shift = _current_open_shift(terminal.id)  # butuh shift utk order durasi
     rate = station.rate_for(is_weekend(date.today()))  # tarif weekday/weekend hari ini
     session = GameSession(
         station_id=sid, venue_id=terminal.venue_id,
@@ -819,8 +820,20 @@ def station_start(sid):
         opened_by=int(get_jwt_identity()),
     )
     db.session.add(session)
+    db.session.flush()
+    # PRABAYAR: buat order durasi (running-tab) langsung, dibayar di depan.
+    dur_charge = round(booked_minutes / 60 * float(rate), 2)
+    order = create_order(shift, int(get_jwt_identity()), {
+        "items": [{
+            "item_type": "rental",
+            "name": f"Sewa {station.name} ({booked_minutes} menit)",
+            "unit_price": dur_charge, "quantity": 1,
+        }],
+        "customer_name": session.customer_name,
+    })
+    session.order_id = order.id
     db.session.commit()
-    return jsonify(session=session.to_dict()), 201
+    return jsonify(session=session.to_dict(), order=order.to_dict()), 201
 
 
 def _current_ongoing_session(sid, venue_id):
@@ -852,8 +865,18 @@ def station_topup(sid):
         total_amount=float(total), created_by=int(get_jwt_identity()),
     )
     db.session.add(topup)
-    db.session.commit()
-    return jsonify(session=session.to_dict()), 201
+    db.session.flush()
+    # PRABAYAR: tambah waktu ditagih saat itu → masuk ke order sesi (jadi partial).
+    order = db.session.get(Order, session.order_id) if session.order_id else None
+    if order is not None:
+        order = add_items_to_order(order, [{
+            "item_type": "rental",
+            "name": f"Tambah waktu {int(duration)} menit — {session.station.name}",
+            "unit_price": float(total), "quantity": 1,
+        }])
+    else:
+        db.session.commit()  # sesi lama tanpa order → dibayar di stop (perilaku lama)
+    return jsonify(session=session.to_dict(), order=order.to_dict() if order else None), 201
 
 
 @pos_bp.get("/addons")
@@ -963,39 +986,46 @@ def station_stop(sid):
     session.stopped_at = datetime.utcnow()
 
     data = request.get_json(silent=True) or {}
-    # sewa station = paket tetap (jam dipesan x tarif); durasi utk penamaan &
-    # basis add-on ikut waktu yg dibayar (paket+tambah waktu), fallback elapsed
-    # utk sesi lama. Lihat GameSession.time_charge/_billable_minutes.
-    base_minutes = session.elapsed_minutes() if session._is_legacy() else int(session.booked_minutes)
     billable_minutes = session._billable_minutes()
-    items = [{
-        "item_type": "rental", "name": f"Sewa {station.name} ({base_minutes} menit)",
-        "unit_price": session.time_charge(), "quantity": 1,
-    }]
-    for t in session.topups:
-        items.append({
-            "item_type": "rental", "name": f"Tambah waktu {t.duration_minutes} menit — {station.name}",
-            "unit_price": float(t.total_amount), "quantity": 1,
-        })
+    # add-on & F&B ditagih di AKHIR (durasi + topup sudah dibayar di depan)
+    end_items = []
     for a in session.addons:
         charge = round(billable_minutes / 60 * float(a.rate_per_hour) * a.quantity, 2)
-        items.append({
+        end_items.append({
             "item_type": "rental",
             "name": f"{a.name_snapshot} x{a.quantity} ({billable_minutes} menit)",
             "unit_price": charge, "quantity": 1,
         })
-    # F&B yg dipesan di tengah sesi (tersimpan di server) — dikirim sbg item
-    # 'product' spy harga final & potong stok ditangani kanonik create_order
     for f in session.fnb_items:
         if f.product_id:
-            items.append({"item_type": "product", "product_id": f.product_id, "quantity": f.quantity})
-    items.extend(data.get("extra_items") or [])
+            end_items.append({"item_type": "product", "product_id": f.product_id, "quantity": f.quantity})
+    end_items.extend(data.get("extra_items") or [])
 
-    order = create_order(shift, int(get_jwt_identity()), {
-        "items": items, "customer_name": session.customer_name,
-    })
-    session.order_id = order.id
-    db.session.commit()
+    order = db.session.get(Order, session.order_id) if session.order_id else None
+    if order is not None:
+        # sesi PRABAYAR: durasi sudah lunas di order ini; tambah F&B/add-on saja.
+        if end_items:
+            order = add_items_to_order(order, end_items)  # order jadi partial (sisa = F&B/add-on)
+        else:
+            db.session.commit()  # tak ada tambahan → order sudah lunas
+    else:
+        # sesi LAMA (tanpa order prabayar) → bangun order penuh (durasi+topup+F&B) spt dulu
+        base_minutes = session.elapsed_minutes() if session._is_legacy() else int(session.booked_minutes)
+        items = [{
+            "item_type": "rental", "name": f"Sewa {station.name} ({base_minutes} menit)",
+            "unit_price": session.time_charge(), "quantity": 1,
+        }]
+        for t in session.topups:
+            items.append({
+                "item_type": "rental", "name": f"Tambah waktu {t.duration_minutes} menit — {station.name}",
+                "unit_price": float(t.total_amount), "quantity": 1,
+            })
+        items.extend(end_items)
+        order = create_order(shift, int(get_jwt_identity()), {
+            "items": items, "customer_name": session.customer_name,
+        })
+        session.order_id = order.id
+        db.session.commit()
     return jsonify(session=session.to_dict(), order=order.to_dict()), 200
 
 
