@@ -47,8 +47,8 @@ async function loadStations() {
 function openStation(s = null) {
   editingStation.value = s
   stationForm.value = s
-    ? { code: s.code, name: s.name, tier: s.tier, hourly_rate: s.hourly_rate, is_active: s.is_active }
-    : { code: '', name: '', tier: 'reguler', hourly_rate: 0, is_active: true }
+    ? { code: s.code, name: s.name, tier: s.tier, hourly_rate: s.hourly_rate, weekend_rate: s.weekend_rate, is_active: s.is_active }
+    : { code: '', name: '', tier: 'reguler', hourly_rate: 0, weekend_rate: null, is_active: true }
   stationErr.value = ''; showStation.value = true
 }
 async function saveStation() {
@@ -142,7 +142,10 @@ watch(tab, reloadTab)
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ s.code }}</td>
                 <td class="px-4 py-3 font-medium text-slate-700">{{ s.name }}</td>
                 <td class="px-4 py-3 text-slate-500 capitalize">{{ tierLabel(s.tier) }}</td>
-                <td class="px-4 py-3 text-right">{{ rupiah(s.hourly_rate) }}</td>
+                <td class="px-4 py-3 text-right whitespace-nowrap">
+                  {{ rupiah(s.hourly_rate) }}
+                  <span v-if="s.weekend_rate != null" class="text-xs text-purple-600 block">wknd {{ rupiah(s.weekend_rate) }}</span>
+                </td>
                 <td class="px-4 py-3 text-center">
                   <span :class="s.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5">{{ s.is_active ? 'Aktif' : 'Nonaktif' }}</span>
                 </td>
@@ -204,8 +207,13 @@ watch(tab, reloadTab)
             <select v-model="stationForm.tier" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
               <option v-for="t in TIERS" :key="t.value" :value="t.value">{{ t.label }}</option>
             </select></div>
-          <div><label class="block text-xs text-slate-500 mb-1">Tarif per jam</label>
-            <input v-model.number="stationForm.hourly_rate" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="block text-xs text-slate-500 mb-1">Tarif Weekday /jam</label>
+              <input v-model.number="stationForm.hourly_rate" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+            <div><label class="block text-xs text-slate-500 mb-1">Tarif Weekend /jam</label>
+              <input v-model.number="stationForm.weekend_rate" type="number" placeholder="kosong = sama" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          </div>
+          <p class="text-xs text-slate-400">Weekend kosong = pakai tarif weekday juga di akhir pekan/libur.</p>
           <label v-if="editingStation" class="flex items-center gap-2 text-sm text-slate-600">
             <input v-model="stationForm.is_active" type="checkbox" /> Aktif
           </label>

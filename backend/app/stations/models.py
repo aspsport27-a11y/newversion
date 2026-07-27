@@ -21,16 +21,25 @@ class GameStation(db.Model):
     code = db.Column(db.String(20), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     tier = db.Column(db.String(20), nullable=False, default="reguler")
-    hourly_rate = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    hourly_rate = db.Column(db.Numeric(15, 2), nullable=False, default=0)  # tarif weekday
+    weekend_rate = db.Column(db.Numeric(15, 2))  # tarif akhir pekan/libur; NULL = pakai hourly_rate
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     sessions = db.relationship("GameSession", backref="station", lazy="selectin")
 
-    def to_dict(self, active_session=None):
+    def rate_for(self, weekend: bool) -> float:
+        """Tarif berlaku: weekend_rate bila akhir pekan & terisi, else hourly_rate."""
+        if weekend and self.weekend_rate is not None:
+            return float(self.weekend_rate)
+        return float(self.hourly_rate or 0)
+
+    def to_dict(self, active_session=None, weekend=False):
         return {
             "id": self.id, "venue_id": self.venue_id, "code": self.code, "name": self.name,
-            "tier": self.tier, "hourly_rate": float(self.hourly_rate or 0), "is_active": self.is_active,
+            "tier": self.tier, "hourly_rate": float(self.hourly_rate or 0),
+            "weekend_rate": float(self.weekend_rate) if self.weekend_rate is not None else None,
+            "today_rate": self.rate_for(weekend), "is_active": self.is_active,
             "status": "ongoing" if active_session else "ready",
             "session": active_session.to_dict() if active_session else None,
         }

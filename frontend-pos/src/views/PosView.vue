@@ -147,6 +147,13 @@ function openStation(s) {
   if (s.status === 'ongoing') sessionStation.value = s
   else startStation.value = s
 }
+// station dikelompokkan per tier (rapi walau banyak station)
+const TIER_LABEL = { reguler: 'Reguler', vip: 'VIP', simulator: 'Simulator' }
+const stationsByTier = computed(() => {
+  const g = {}
+  for (const s of pos.stations) (g[s.tier || 'reguler'] ||= []).push(s)
+  return g
+})
 function onStationStopped(result) {
   sessionStation.value = null
   pendingStationOrder.value = result.order
@@ -350,28 +357,30 @@ function logout() {
           </button>
         </div>
 
-        <!-- Station Gaming (arena esport) -->
+        <!-- Station Gaming (arena esport) — dikelompokkan per tier -->
         <div v-if="pos.hasStations" class="mb-4">
           <p class="text-xs font-semibold text-slate-400 mb-1.5">🎮 STATION</p>
-          <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-            <button v-for="s in pos.stations" :key="s.id" @click="openStation(s)"
-              class="rounded-xl border p-3 text-left active:scale-95 transition"
-              :class="s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-200') : 'bg-white hover:border-brand-400'">
-              <div class="flex justify-between items-start">
-                <p class="font-semibold text-slate-800 text-sm">{{ s.name }}</p>
-                <span class="text-[10px] rounded px-1.5 py-0.5"
-                  :class="s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700') : 'bg-slate-100 text-slate-500'">
-                  {{ s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'LEWAT WAKTU' : 'ONGOING') : 'READY' }}
-                </span>
-              </div>
-              <p class="text-[11px] text-slate-400 capitalize mt-0.5">{{ s.tier }}</p>
-              <template v-if="s.status === 'ongoing'">
-                <p class="text-xs text-slate-600 font-medium mt-1 truncate">{{ s.session.customer_name || 'Tanpa nama' }}</p>
-                <p class="font-mono text-sm font-bold mt-0.5" :class="stationClockFor(s).isOvertime ? 'text-red-600' : 'text-emerald-700'">{{ stationClockFor(s).clockLabel }}</p>
-                <p class="text-xs text-brand-700 font-semibold">{{ rupiah(stationClockFor(s).runningTotal) }}</p>
-              </template>
-              <p v-else class="text-xs text-slate-400 mt-1">{{ rupiah(s.hourly_rate) }}/jam</p>
-            </button>
+          <div v-for="(list, tier) in stationsByTier" :key="tier" class="mb-3">
+            <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">{{ TIER_LABEL[tier] || tier }} <span class="text-slate-300 font-normal">· {{ list.length }}</span></p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+              <button v-for="s in list" :key="s.id" @click="openStation(s)"
+                class="rounded-xl border p-3 text-left active:scale-95 transition"
+                :class="s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'bg-red-50 border-red-300' : 'bg-emerald-50 border-emerald-200') : 'bg-white hover:border-brand-400'">
+                <div class="flex justify-between items-start">
+                  <p class="font-semibold text-slate-800 text-sm">{{ s.name }}</p>
+                  <span class="text-[10px] rounded px-1.5 py-0.5"
+                    :class="s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700') : 'bg-slate-100 text-slate-500'">
+                    {{ s.status === 'ongoing' ? (stationClockFor(s).isOvertime ? 'LEWAT WAKTU' : 'ONGOING') : 'READY' }}
+                  </span>
+                </div>
+                <template v-if="s.status === 'ongoing'">
+                  <p class="text-xs text-slate-600 font-medium mt-1 truncate">{{ s.session.customer_name || 'Tanpa nama' }}</p>
+                  <p class="font-mono text-sm font-bold mt-0.5" :class="stationClockFor(s).isOvertime ? 'text-red-600' : 'text-emerald-700'">{{ stationClockFor(s).clockLabel }}</p>
+                  <p class="text-xs text-brand-700 font-semibold">{{ rupiah(stationClockFor(s).runningTotal) }}</p>
+                </template>
+                <p v-else class="text-xs text-slate-400 mt-1">{{ rupiah(s.today_rate ?? s.hourly_rate) }}/jam</p>
+              </button>
+            </div>
           </div>
         </div>
 

@@ -78,9 +78,11 @@ def stations_create():
         return _err(f"Tier tidak valid ({', '.join(TIERS)})")
     if GameStation.query.filter_by(venue_id=d["venue_id"], code=d["code"]).first():
         return _err("Kode station sudah dipakai di venue ini", "duplicate", 409)
+    wr = d.get("weekend_rate")
     s = GameStation(
         venue_id=d["venue_id"], code=d["code"], name=d["name"], tier=tier,
-        hourly_rate=float(d.get("hourly_rate") or 0), is_active=True,
+        hourly_rate=float(d.get("hourly_rate") or 0),
+        weekend_rate=(float(wr) if wr not in (None, "") else None), is_active=True,
     )
     db.session.add(s)
     db.session.commit()
@@ -110,6 +112,9 @@ def stations_update(sid):
         s.tier = d["tier"]
     if "hourly_rate" in d:
         s.hourly_rate = float(d["hourly_rate"] or 0)
+    if "weekend_rate" in d:
+        wr = d["weekend_rate"]
+        s.weekend_rate = float(wr) if wr not in (None, "") else None
     if "is_active" in d:
         s.is_active = bool(d["is_active"])
     db.session.commit()

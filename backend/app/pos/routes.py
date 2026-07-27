@@ -784,7 +784,12 @@ def stations_list():
             GameSession.station_id.in_([s.id for s in stations]), GameSession.status == "ongoing"
         ).all()
     } if stations else {}
-    return jsonify(count=len(stations), stations=[s.to_dict(active.get(s.id)) for s in stations]), 200
+    from .services import is_weekend
+    wknd = is_weekend(date.today())  # tarif weekday/weekend otomatis
+    return jsonify(
+        count=len(stations), weekend=wknd,
+        stations=[s.to_dict(active.get(s.id), weekend=wknd) for s in stations],
+    ), 200
 
 
 @pos_bp.post("/stations/<int:sid>/start")
@@ -805,10 +810,12 @@ def station_start(sid):
         booked_minutes = 0
     if booked_minutes <= 0:
         raise PosError("Durasi main (menit) wajib diisi", "bad_duration")
+    from .services import is_weekend
+    rate = station.rate_for(is_weekend(date.today()))  # tarif weekday/weekend hari ini
     session = GameSession(
         station_id=sid, venue_id=terminal.venue_id,
         customer_name=(data.get("customer_name") or None),
-        rate_per_hour=station.hourly_rate, booked_minutes=booked_minutes,
+        rate_per_hour=rate, booked_minutes=booked_minutes,
         opened_by=int(get_jwt_identity()),
     )
     db.session.add(session)

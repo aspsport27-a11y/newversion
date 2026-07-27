@@ -17,7 +17,8 @@ const err = ref('')
 function rupiah(n) { return 'Rp ' + Math.round(Number(n) || 0).toLocaleString('id-ID') }
 
 const bookedMinutes = computed(() => Math.round((Number(hours.value) || 0) * 60))
-const sewaTotal = computed(() => (bookedMinutes.value / 60) * Number(props.station.hourly_rate))
+const todayRate = computed(() => Number(props.station.today_rate ?? props.station.hourly_rate))
+const sewaTotal = computed(() => (bookedMinutes.value / 60) * todayRate.value)
 
 async function start() {
   err.value = ''
@@ -41,7 +42,7 @@ async function start() {
         <h3 class="text-lg font-bold text-slate-800">Mulai Sesi — {{ station.name }}</h3>
         <button @click="emit('close')" class="text-slate-400 text-xl">✕</button>
       </div>
-      <p class="text-sm text-slate-500 mb-3">Tarif {{ rupiah(station.hourly_rate) }} / jam</p>
+      <p class="text-sm text-slate-500 mb-3">Tarif hari ini {{ rupiah(todayRate) }} / jam</p>
 
       <input v-model="customerName" placeholder="Nama pelanggan / member (opsional)"
         class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-brand-500 mb-3" />
