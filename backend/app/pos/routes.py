@@ -906,13 +906,32 @@ def station_addon_attach(sid):
     qty = int(data.get("quantity") or 1)
     if qty <= 0:
         raise PosError("Quantity harus > 0", "bad_quantity")
+    try:
+        booked_minutes = int(data.get("booked_minutes") or 0)
+    except (TypeError, ValueError):
+        booked_minutes = 0
+    if booked_minutes <= 0:
+        raise PosError("Durasi sewa add-on (menit) wajib diisi", "bad_duration")
+    charge = round(booked_minutes / 60 * float(addon.hourly_rate) * qty, 2)
     sa = GameSessionAddon(
         session_id=session.id, addon_id=addon.id, name_snapshot=addon.name,
-        rate_per_hour=addon.hourly_rate, quantity=qty, created_by=int(get_jwt_identity()),
+        rate_per_hour=addon.hourly_rate, quantity=qty,
+        booked_minutes=booked_minutes, started_at=datetime.utcnow(), total_amount=charge,
+        created_by=int(get_jwt_identity()),
     )
     db.session.add(sa)
-    db.session.commit()
-    return jsonify(session=session.to_dict()), 201
+    db.session.flush()
+    # PRABAYAR: biaya add-on ditagih saat itu → masuk ke order sesi (jadi partial)
+    order = db.session.get(Order, session.order_id) if session.order_id else None
+    if order is not None:
+        order = add_items_to_order(order, [{
+            "item_type": "rental",
+            "name": f"Sewa {addon.name} x{qty} ({booked_minutes} menit)",
+            "unit_price": charge, "quantity": 1,
+        }])
+    else:
+        db.session.commit()  # sesi lama tanpa order → ditagih di stop (perilaku lama)
+    return jsonify(session=session.to_dict(), order=order.to_dict() if order else None), 201
 
 
 @pos_bp.delete("/stations/<int:sid>/addons/<int:said>")
@@ -925,6 +944,8 @@ def station_addon_detach(sid, said):
     sa = db.session.get(GameSessionAddon, said)
     if sa is None or sa.session_id != session.id:
         raise PosError("Add-on pada sesi ini tidak ditemukan", "not_found", 404)
+    if sa.booked_minutes and sa.booked_minutes > 0:
+        raise PosError("Add-on prabayar sudah dibayar — tak bisa dilepas", "prepaid_locked", 409)
     db.session.delete(sa)
     db.session.commit()
     return jsonify(session=session.to_dict()), 200
@@ -987,9 +1008,12 @@ def station_stop(sid):
 
     data = request.get_json(silent=True) or {}
     billable_minutes = session._billable_minutes()
-    # add-on & F&B ditagih di AKHIR (durasi + topup sudah dibayar di depan)
+    # F&B ditagih di AKHIR. Add-on PRABAYAR (booked_minutes>0) sudah dibayar saat
+    # ditempel → tak ditagih lagi; add-on LAMA (booked_minutes 0) ikut durasi sesi.
     end_items = []
     for a in session.addons:
+        if a.booked_minutes and a.booked_minutes > 0:
+            continue  # prabayar, sudah lunas
         charge = round(billable_minutes / 60 * float(a.rate_per_hour) * a.quantity, 2)
         end_items.append({
             "item_type": "rental",

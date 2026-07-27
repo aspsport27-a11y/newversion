@@ -106,9 +106,13 @@ class GameSession(db.Model):
         return self.elapsed_minutes() if self._is_legacy() else self.allocated_minutes()
 
     def addon_charge(self):
-        # add-on ditagih per jam MENGIKUTI durasi sesi (paket yg dibayar)
+        # add-on PRABAYAR (booked_minutes>0) sudah dibayar saat ditempel → tak
+        # dihitung lagi di stop. Add-on LAMA (booked_minutes 0) ikut durasi sesi.
         minutes = self._billable_minutes()
-        return round(sum(minutes / 60 * float(a.rate_per_hour) * a.quantity for a in self.addons), 2)
+        return round(sum(
+            minutes / 60 * float(a.rate_per_hour) * a.quantity
+            for a in self.addons if not (a.booked_minutes and a.booked_minutes > 0)
+        ), 2)
 
     def fnb_charge(self):
         return round(sum(float(f.unit_price) * f.quantity for f in self.fnb_items), 2)
@@ -190,6 +194,11 @@ class GameSessionAddon(db.Model):
     name_snapshot = db.Column(db.String(100), nullable=False)
     rate_per_hour = db.Column(db.Numeric(15, 2), nullable=False)
     quantity = db.Column(db.Integer, nullable=False, default=1)
+    # PRABAYAR + timer sendiri: durasi sewa add-on (terpisah dari station).
+    # 0 = add-on lama (ikut durasi sesi & ditagih di stop).
+    booked_minutes = db.Column(db.Integer, nullable=False, default=0)
+    started_at = db.Column(db.DateTime)
+    total_amount = db.Column(db.Numeric(15, 2))  # biaya prabayar (kalau booked_minutes>0)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -197,6 +206,10 @@ class GameSessionAddon(db.Model):
         return {
             "id": self.id, "addon_id": self.addon_id, "name": self.name_snapshot,
             "rate_per_hour": float(self.rate_per_hour), "quantity": self.quantity,
+            "booked_minutes": int(self.booked_minutes or 0),
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "total_amount": float(self.total_amount) if self.total_amount is not None else None,
+            "prepaid": bool(self.booked_minutes and self.booked_minutes > 0),
         }
 
 

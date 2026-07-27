@@ -107,7 +107,7 @@ export const usePosStore = defineStore('pos', {
     async attachAddon(id, payload) {
       const { data } = await client.post(`/stations/${id}/addons`, payload)
       await this.fetchStations()
-      return data.session
+      return data // { session, order } — add-on prabayar, order utk dibayar
     },
     async detachAddon(id, sessionAddonId) {
       const { data } = await client.delete(`/stations/${id}/addons/${sessionAddonId}`)

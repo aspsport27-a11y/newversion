@@ -66,28 +66,48 @@ async function submitTopup() {
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah jam.' } finally { busy.value = false }
 }
 
-// --- add-on ---
+// --- add-on (PRABAYAR + durasi/timer sendiri) ---
 const showAddon = ref(false)
 const addonId = ref(null)
 const addonQty = ref(1)
+const addonHours = ref(1)
 onMounted(async () => { try { await pos.fetchAddons() } catch (_) { /* ignore */ } })
 
-// nominal per jam langsung muncul begitu add-on & qty dipilih (ditagih
-// berjalan mengikuti waktu, sama spt sewa station — bukan sekali bayar)
-const addonPreviewPerHour = computed(() => {
+const addonBookedMinutes = computed(() => Math.round((Number(addonHours.value) || 0) * 60))
+// biaya prabayar add-on = durasi × tarif/jam × qty (dibayar di depan)
+const addonPreviewTotal = computed(() => {
   const a = pos.addons.find((x) => x.id === addonId.value)
   if (!a) return 0
-  return Number(a.hourly_rate || 0) * (Number(addonQty.value) || 0)
+  return (addonBookedMinutes.value / 60) * Number(a.hourly_rate || 0) * (Number(addonQty.value) || 0)
 })
 
 async function submitAddon() {
   if (!addonId.value) { err.value = 'Pilih add-on dulu.'; return }
+  if (addonBookedMinutes.value <= 0) { err.value = 'Isi durasi sewa add-on.'; return }
   busy.value = true; err.value = ''
   try {
-    sessionState.value = await pos.attachAddon(props.station.id, { addon_id: addonId.value, quantity: addonQty.value })
+    const res = await pos.attachAddon(props.station.id, {
+      addon_id: addonId.value, quantity: addonQty.value, booked_minutes: addonBookedMinutes.value,
+    })
+    sessionState.value = res.session
     showAddon.value = false
-    addonId.value = null; addonQty.value = 1
+    addonId.value = null; addonQty.value = 1; addonHours.value = 1
+    // PRABAYAR: langsung ke pembayaran biaya add-on
+    if (res.order && Number(res.order.amount_due) > 0) emit('pay-order', res.order)
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah add-on.' } finally { busy.value = false }
+}
+
+// timer add-on: sisa waktu per add-on prabayar (started_at + booked_minutes)
+function addonClock(a) {
+  if (!a.booked_minutes || !a.started_at) return null
+  const end = new Date(a.started_at + 'Z').getTime() + a.booked_minutes * 60000
+  const remMs = end - now.value
+  const over = remMs < 0
+  const s = Math.floor(Math.abs(remMs) / 1000)
+  const hh = String(Math.floor(s / 3600)).padStart(2, '0')
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+  const ss = String(s % 60).padStart(2, '0')
+  return { over, label: (over ? '-' : '') + `${hh}:${mm}:${ss}` }
 }
 
 async function removeAddon(a) {
@@ -123,8 +143,14 @@ async function decExtra(it) {
   try { sessionState.value = await pos.fnbStation(props.station.id, it.product_id, -1) }
   catch (e) { err.value = e?.response?.data?.message || 'Gagal.' }
 }
+// total add-on: prabayar pakai nominal tetap (durasi sendiri), legacy ikut waktu sesi
+function addonLineTotal(a) {
+  if (a.booked_minutes && a.booked_minutes > 0) return Number(a.total_amount || 0)
+  return (billableMinutes.value / 60) * Number(a.rate_per_hour) * a.quantity
+}
+const addonTotal = computed(() => (session.value.addons || []).reduce((s, a) => s + addonLineTotal(a), 0))
 const grandTotal = computed(() =>
-  timeCharge.value + topupCharge.value + addonCharge.value +
+  timeCharge.value + topupCharge.value + addonTotal.value +
   fnbItems.value.reduce((s, i) => s + i.line_total, 0),
 )
 
@@ -161,10 +187,16 @@ async function doStop() {
         <div class="flex justify-between"><span class="text-slate-500">Sewa station</span><span>{{ rupiah(timeCharge) }}</span></div>
         <div v-if="session.topups.length" class="flex justify-between"><span class="text-slate-500">Tambah waktu ({{ session.topups.length }}x)</span><span>{{ rupiah(topupCharge) }}</span></div>
         <div v-for="a in session.addons" :key="a.id" class="flex justify-between items-center">
-          <span class="text-slate-500">{{ a.name }} x{{ a.quantity }}</span>
+          <span class="text-slate-500">
+            {{ a.name }} x{{ a.quantity }}
+            <template v-if="a.prepaid && addonClock(a)">
+              · <span class="font-mono" :class="addonClock(a).over ? 'text-red-600 font-bold' : 'text-purple-600'">{{ addonClock(a).label }}</span>
+              <span class="text-[10px] bg-purple-100 text-purple-700 rounded px-1">prabayar</span>
+            </template>
+          </span>
           <span class="flex items-center gap-2">
-            {{ rupiah((billableMinutes / 60) * a.rate_per_hour * a.quantity) }}
-            <button @click="removeAddon(a)" class="text-red-400 text-xs">✕</button>
+            {{ rupiah(addonLineTotal(a)) }}
+            <button v-if="!a.prepaid" @click="removeAddon(a)" class="text-red-400 text-xs">✕</button>
           </span>
         </div>
         <div v-for="f in fnbItems" :key="f.id" class="flex justify-between items-center">
@@ -200,9 +232,14 @@ async function doStop() {
           <option :value="null">— pilih add-on —</option>
           <option v-for="a in pos.addons" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.hourly_rate) }}/jam)</option>
         </select>
-        <input v-model.number="addonQty" type="number" min="1" placeholder="Qty" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm outline-none" />
-        <p v-if="addonId" class="text-xs text-slate-500">≈ {{ rupiah(addonPreviewPerHour) }}/jam (ditagih mengikuti waktu berjalan)</p>
-        <button @click="submitAddon" :disabled="busy" class="w-full py-2 rounded-lg bg-purple-600 text-white text-sm font-medium disabled:opacity-50">Simpan</button>
+        <div class="grid grid-cols-2 gap-2">
+          <div><label class="block text-xs text-slate-500 mb-1">Qty</label>
+            <input v-model.number="addonQty" type="number" min="1" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm outline-none" /></div>
+          <div><label class="block text-xs text-slate-500 mb-1">Durasi sewa (jam)</label>
+            <input v-model.number="addonHours" type="number" min="0.5" step="0.5" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm outline-none" /></div>
+        </div>
+        <p v-if="addonId" class="text-xs text-slate-600">Biaya prabayar: <b>{{ rupiah(addonPreviewTotal) }}</b> ({{ addonBookedMinutes }} menit, timer sendiri)</p>
+        <button @click="submitAddon" :disabled="busy" class="w-full py-2 rounded-lg bg-purple-600 text-white text-sm font-medium disabled:opacity-50">Bayar & Sewa Add-on</button>
       </div>
 
       <div class="mb-3">
