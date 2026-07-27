@@ -10,19 +10,23 @@ import { parseUTC } from './datetime'
 // final saat stop) — ini cuma preview live.
 export function stationClock(session, nowMs, hourlyRate) {
   if (!session) return null
-  const started = parseUTC(session.started_at).getTime()
-  const elapsedSeconds = Math.max(0, Math.floor((nowMs - started) / 1000))
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
-
   const bookedMinutes = Number(session.booked_minutes || 0)
   const isLegacy = bookedMinutes <= 0
+  // anchor MAIN = play_started_at (klik Play). Sesi lama pakai started_at (dianggap
+  // langsung main). play_started_at null utk sesi baru = BELUM dimainkan.
+  const playAnchor = session.play_started_at || (isLegacy ? session.started_at : null)
+  const notStarted = !playAnchor
+  const started = notStarted ? nowMs : parseUTC(playAnchor).getTime()
+  const elapsedSeconds = notStarted ? 0 : Math.max(0, Math.floor((nowMs - started) / 1000))
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60)
+
   const topupMinutes = (session.topups || []).reduce((s, t) => s + Number(t.duration_minutes || 0), 0)
   // waktu yg dibeli (paket + tambah waktu); sesi lama pakai topup saja (perilaku lama)
   const allocatedMinutes = isLegacy ? topupMinutes : bookedMinutes + topupMinutes
 
   const isCountdown = allocatedMinutes > 0
   const remainingSeconds = allocatedMinutes * 60 - elapsedSeconds
-  const isOvertime = isCountdown && remainingSeconds < 0
+  const isOvertime = !notStarted && isCountdown && remainingSeconds < 0
 
   const clockSeconds = Math.abs(isCountdown ? remainingSeconds : elapsedSeconds)
   const h = String(Math.floor(clockSeconds / 3600)).padStart(2, '0')
@@ -41,7 +45,7 @@ export function stationClock(session, nowMs, hourlyRate) {
   )
 
   return {
-    elapsedSeconds, elapsedMinutes, allocatedMinutes, billableMinutes, isCountdown, remainingSeconds, isOvertime,
+    notStarted, elapsedSeconds, elapsedMinutes, allocatedMinutes, billableMinutes, isCountdown, remainingSeconds, isOvertime,
     clockLabel, timeCharge, topupCharge, addonCharge,
     runningTotal: timeCharge + topupCharge + addonCharge,
   }

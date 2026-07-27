@@ -57,7 +57,8 @@ class GameSession(db.Model):
     # ditagih FIX dari sini (jam dipesan x tarif), bukan per menit terpakai.
     # 0 = sesi lama sebelum fitur ini (fallback ke perhitungan elapsed).
     booked_minutes = db.Column(db.Integer, nullable=False, default=0)
-    started_at = db.Column(db.DateTime, default=datetime.utcnow)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow)  # dibuat/dibayar
+    play_started_at = db.Column(db.DateTime)  # mulai MAIN (klik Play); NULL = belum dimainkan
     status = db.Column(db.String(12), nullable=False, default="ongoing")  # ongoing|stopped
     stopped_at = db.Column(db.DateTime)
     order_id = db.Column(db.Integer, db.ForeignKey("orders.id", ondelete="SET NULL"))
@@ -129,6 +130,8 @@ class GameSession(db.Model):
             "booked_minutes": int(self.booked_minutes or 0),
             "allocated_minutes": self.allocated_minutes(),
             "started_at": (self.started_at.isoformat() + "Z") if self.started_at else None,
+            "play_started_at": (self.play_started_at.isoformat() + "Z") if self.play_started_at else None,
+            "playing": self.play_started_at is not None,
             "status": self.status,
             "stopped_at": (self.stopped_at.isoformat() + "Z") if self.stopped_at else None,
             "elapsed_minutes": self.elapsed_minutes(),

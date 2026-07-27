@@ -99,6 +99,16 @@ export const usePosStore = defineStore('pos', {
       await this.fetchStations()
       return data // { session, order } — order durasi utk dibayar di depan
     },
+    async startStationFull(id, payload) {
+      const { data } = await client.post(`/stations/${id}/start`, payload)
+      await this.fetchStations()
+      return { data } // { session, order }
+    },
+    async playStation(id) {
+      const { data } = await client.post(`/stations/${id}/play`)
+      await this.fetchStations()
+      return data.session
+    },
     async topupStation(id, payload) {
       const { data } = await client.post(`/stations/${id}/topup`, payload)
       await this.fetchStations()

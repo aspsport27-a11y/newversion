@@ -28,6 +28,13 @@ const billableMinutes = computed(() => clock.value.billableMinutes)
 const isCountdown = computed(() => clock.value.isCountdown)
 const clockLabel = computed(() => clock.value.clockLabel)
 const isOvertime = computed(() => clock.value.isOvertime)
+const notStarted = computed(() => clock.value.notStarted) // sudah dibayar, belum di-Play
+
+async function play() {
+  busy.value = true; err.value = ''
+  try { sessionState.value = await pos.playStation(props.station.id) }
+  catch (e) { err.value = e?.response?.data?.message || 'Gagal memulai main.' } finally { busy.value = false }
+}
 
 function rupiah(n) { return 'Rp ' + Math.round(Number(n) || 0).toLocaleString('id-ID') }
 
@@ -99,7 +106,8 @@ async function submitAddon() {
 
 // timer add-on: sisa waktu per add-on prabayar (started_at + booked_minutes)
 function addonClock(a) {
-  if (!a.booked_minutes || !a.started_at) return null
+  if (!a.booked_minutes) return null
+  if (!a.started_at) return { over: false, label: 'belum main' } // menunggu Play
   const end = new Date(a.started_at + 'Z').getTime() + a.booked_minutes * 60000
   const remMs = end - now.value
   const over = remMs < 0
@@ -176,11 +184,21 @@ async function doStop() {
       </div>
 
       <div class="text-center bg-slate-50 rounded-xl py-4 mb-3">
-        <p class="text-3xl font-bold font-mono" :class="isOvertime ? 'text-red-600' : 'text-emerald-600'">{{ clockLabel }}</p>
-        <p class="text-xs text-slate-400 mt-1">
-          {{ rupiah(station.hourly_rate) }} / jam
-          <span v-if="isCountdown">· {{ isOvertime ? 'lewat waktu' : 'sisa waktu' }} (paket {{ allocatedMinutes }} menit)</span>
-        </p>
+        <template v-if="notStarted">
+          <p class="text-2xl font-bold font-mono text-slate-400">{{ clockLabel }}</p>
+          <p class="text-xs text-amber-600 mt-1 font-medium">Sudah dibayar — klik Play untuk mulai main</p>
+          <button @click="play" :disabled="busy"
+            class="mt-2 px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50">
+            ▶ Play (Mulai Main)
+          </button>
+        </template>
+        <template v-else>
+          <p class="text-3xl font-bold font-mono" :class="isOvertime ? 'text-red-600' : 'text-emerald-600'">{{ clockLabel }}</p>
+          <p class="text-xs text-slate-400 mt-1">
+            {{ rupiah(station.hourly_rate) }} / jam
+            <span v-if="isCountdown">· {{ isOvertime ? 'lewat waktu' : 'sisa waktu' }} (paket {{ allocatedMinutes }} menit)</span>
+          </p>
+        </template>
       </div>
 
       <div class="space-y-1 text-sm mb-3">
@@ -265,10 +283,12 @@ async function doStop() {
       </div>
 
       <p v-if="err" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">{{ err }}</p>
-      <button @click="doStop" :disabled="busy"
+      <!-- STOP & Bayar hanya muncul kalau sesi sudah dimainkan (di-Play) -->
+      <button v-if="!notStarted" @click="doStop" :disabled="busy"
         class="w-full py-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50">
         {{ busy ? 'Memproses…' : '⏹ STOP & Bayar' }}
       </button>
+      <p v-else class="text-center text-xs text-slate-400">Sesi belum dimainkan — tekan Play dulu sebelum bisa STOP.</p>
     </div>
   </div>
 </template>

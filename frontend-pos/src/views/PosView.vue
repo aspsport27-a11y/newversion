@@ -155,6 +155,7 @@ const stationsByTier = computed(() => {
   return g
 })
 // PRABAYAR station: order dgn sisa tagihan → ke PaymentDialog; kalau lunas → selesai
+const sessionToOpenAfterPay = ref(null) // station id yg dibuka lagi setelah bayar
 function payStationOrder(order) {
   if (order && Number(order.amount_due) > 0) {
     pendingStationOrder.value = order
@@ -163,13 +164,22 @@ function payStationOrder(order) {
   }
   return false
 }
+function openSessionAfterPay() {
+  const sid = sessionToOpenAfterPay.value
+  sessionToOpenAfterPay.value = null
+  if (sid == null) return
+  const s = pos.stations.find((x) => x.id === sid)
+  if (s) sessionStation.value = s // masuk ke dialog sesi (state 'belum main / Play')
+}
 function onStationStarted(res) {
   startStation.value = null
-  payStationOrder(res.order) // bayar durasi di depan
+  sessionToOpenAfterPay.value = res.session?.station_id ?? null
+  if (!payStationOrder(res.order)) { pos.fetchStations().then(openSessionAfterPay) }
 }
 function onStationPayOrder(order) {
+  sessionToOpenAfterPay.value = sessionStation.value?.id ?? null
   sessionStation.value = null
-  payStationOrder(order) // bayar tambahan waktu (topup)
+  if (!payStationOrder(order)) { pos.fetchStations().then(openSessionAfterPay) }
 }
 function onStationStopped(result) {
   sessionStation.value = null
@@ -197,9 +207,11 @@ async function onPayStation(payload) {
     showPayment.value = false
     pendingStationOrder.value = null
     if (openQrisIfNeeded(res)) return
+    await pos.fetchProducts()
+    // sesi station (start/topup/add-on) → kembali ke dialog sesi, bukan struk
+    if (sessionToOpenAfterPay.value != null) { await pos.fetchStations(); openSessionAfterPay(); return }
     lastResult.value = res
     showReceipt.value = true
-    await pos.fetchProducts()
   } catch (e) {
     flash(e?.response?.data?.message || 'Pembayaran gagal')
   }

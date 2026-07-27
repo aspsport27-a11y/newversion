@@ -821,19 +821,56 @@ def station_start(sid):
     )
     db.session.add(session)
     db.session.flush()
-    # PRABAYAR: buat order durasi (running-tab) langsung, dibayar di depan.
+    # PRABAYAR: order durasi (running-tab) + add-on yg dipilih di awal, dibayar di depan.
     dur_charge = round(booked_minutes / 60 * float(rate), 2)
-    order = create_order(shift, int(get_jwt_identity()), {
-        "items": [{
+    items = [{
+        "item_type": "rental",
+        "name": f"Sewa {station.name} ({booked_minutes} menit)",
+        "unit_price": dur_charge, "quantity": 1,
+    }]
+    from ..stations.models import GameAddon, GameSessionAddon
+    for row in (data.get("addons") or []):
+        addon = db.session.get(GameAddon, row.get("addon_id"))
+        if addon is None or addon.venue_id != terminal.venue_id or not addon.is_active:
+            raise PosError("Add-on tidak ditemukan", "not_found", 404)
+        aqty = int(row.get("quantity") or 1)
+        amin = int(row.get("booked_minutes") or 0)
+        if aqty <= 0 or amin <= 0:
+            raise PosError("Add-on: qty & durasi wajib > 0", "bad_addon")
+        acharge = round(amin / 60 * float(addon.hourly_rate) * aqty, 2)
+        db.session.add(GameSessionAddon(
+            session_id=session.id, addon_id=addon.id, name_snapshot=addon.name,
+            rate_per_hour=addon.hourly_rate, quantity=aqty, booked_minutes=amin,
+            started_at=None, total_amount=acharge, created_by=int(get_jwt_identity()),
+        ))
+        items.append({
             "item_type": "rental",
-            "name": f"Sewa {station.name} ({booked_minutes} menit)",
-            "unit_price": dur_charge, "quantity": 1,
-        }],
-        "customer_name": session.customer_name,
+            "name": f"Sewa {addon.name} x{aqty} ({amin} menit)",
+            "unit_price": acharge, "quantity": 1,
+        })
+    order = create_order(shift, int(get_jwt_identity()), {
+        "items": items, "customer_name": session.customer_name,
     })
     session.order_id = order.id
     db.session.commit()
     return jsonify(session=session.to_dict(), order=order.to_dict()), 201
+
+
+@pos_bp.post("/stations/<int:sid>/play")
+@jwt_required()
+def station_play(sid):
+    """Mulai MAIN (klik Play manual kasir): jalankan timer station + semua add-on
+    yang belum jalan. Idempoten kalau sudah main."""
+    terminal = _current_terminal()
+    session = _current_ongoing_session(sid, terminal.venue_id)
+    now = datetime.utcnow()
+    if session.play_started_at is None:
+        session.play_started_at = now
+    for a in session.addons:
+        if a.booked_minutes and a.booked_minutes > 0 and a.started_at is None:
+            a.started_at = now
+    db.session.commit()
+    return jsonify(session=session.to_dict()), 200
 
 
 def _current_ongoing_session(sid, venue_id):
@@ -913,11 +950,13 @@ def station_addon_attach(sid):
     if booked_minutes <= 0:
         raise PosError("Durasi sewa add-on (menit) wajib diisi", "bad_duration")
     charge = round(booked_minutes / 60 * float(addon.hourly_rate) * qty, 2)
+    # timer add-on mulai saat sesi sudah di-Play; kalau belum, mulai nanti pas Play
     sa = GameSessionAddon(
         session_id=session.id, addon_id=addon.id, name_snapshot=addon.name,
         rate_per_hour=addon.hourly_rate, quantity=qty,
-        booked_minutes=booked_minutes, started_at=datetime.utcnow(), total_amount=charge,
-        created_by=int(get_jwt_identity()),
+        booked_minutes=booked_minutes,
+        started_at=(datetime.utcnow() if session.play_started_at else None),
+        total_amount=charge, created_by=int(get_jwt_identity()),
     )
     db.session.add(sa)
     db.session.flush()
