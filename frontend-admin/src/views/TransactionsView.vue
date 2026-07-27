@@ -294,6 +294,23 @@ async function deleteOrder(o, ev) {
           </table>
         </div>
 
+        <!-- Riwayat reschedule (kalau ada) -->
+        <div v-if="detail.reschedules && detail.reschedules.length" class="mb-3">
+          <p class="text-xs font-medium text-slate-500 mb-1">📅 Riwayat Reschedule</p>
+          <div v-for="r in detail.reschedules" :key="r.id" class="text-xs py-1.5 border-t">
+            <div class="flex justify-between text-slate-600">
+              <span>{{ fmtTime(r.created_at) }}</span>
+              <span v-if="r.by" class="text-slate-400">oleh {{ r.by }}</span>
+            </div>
+            <div class="text-slate-700">
+              <span class="line-through text-slate-400">{{ r.from_desc }}</span>
+              <span class="mx-1">→</span>
+              <span class="font-medium">{{ r.to_desc }}</span>
+            </div>
+            <div class="text-slate-500">{{ rupiah(r.from_price) }} → {{ rupiah(r.to_price) }}</div>
+          </div>
+        </div>
+
         <div class="mb-3">
           <p class="text-xs font-medium text-slate-500 mb-1">Pembayaran</p>
           <div v-if="!detail.payments.length" class="text-sm text-slate-400">Belum ada pembayaran.</div>

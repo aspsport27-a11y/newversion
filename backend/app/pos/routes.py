@@ -715,7 +715,7 @@ def order_reschedule(order_id):
             return jsonify(error="bad_request", message=f"{f} wajib diisi"), 400
     order, info = reschedule_booking(
         order, d.get("order_item_id"), d["facility_id"],
-        d["booking_date"], d["start_time"], d["end_time"],
+        d["booking_date"], d["start_time"], d["end_time"], uid=int(get_jwt_identity()),
     )
     return jsonify(order=order.to_dict(), reschedule=info), 200
 

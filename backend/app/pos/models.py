@@ -399,6 +399,31 @@ class OrderItem(db.Model):
         }
 
 
+class BookingReschedule(db.Model):
+    """Jejak reschedule booking: slot lama → baru (audit, tampil di portal)."""
+    __tablename__ = "booking_reschedules"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    order_item_id = db.Column(db.Integer)
+    from_desc = db.Column(db.String(120))
+    to_desc = db.Column(db.String(120))
+    from_price = db.Column(db.Numeric(15, 2))
+    to_price = db.Column(db.Numeric(15, 2))
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "from_desc": self.from_desc,
+            "to_desc": self.to_desc,
+            "from_price": float(self.from_price or 0),
+            "to_price": float(self.to_price or 0),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Payment(db.Model):
     __tablename__ = "payments"
 

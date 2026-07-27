@@ -2177,6 +2177,16 @@ def order_detail(order_id):
         item_dict["category_name"] = cat_map.get(it.product_id)
     cashier = db.session.get(User, order.cashier_id) if order.cashier_id else None
     d["cashier"] = cashier.username if cashier else None
+    # riwayat reschedule (slot lama → baru), terbaru dulu
+    from ..pos.models import BookingReschedule
+    rs = (BookingReschedule.query.filter_by(order_id=order.id)
+          .order_by(BookingReschedule.created_at.desc()).all())
+    by = {}
+    for r in rs:
+        if r.created_by and r.created_by not in by:
+            u = db.session.get(User, r.created_by)
+            by[r.created_by] = u.username if u else None
+    d["reschedules"] = [{**r.to_dict(), "by": by.get(r.created_by)} for r in rs]
     return jsonify(order=d), 200
 
 

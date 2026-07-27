@@ -10,6 +10,7 @@ from . import briapi
 
 log = logging.getLogger(__name__)
 from .models import (
+    BookingReschedule,
     CashMovement,
     Facility,
     FacilityBooking,
@@ -321,7 +322,7 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
     return order
 
 
-def reschedule_booking(order, item_id, facility_id, booking_date, start_time, end_time):
+def reschedule_booking(order, item_id, facility_id, booking_date, start_time, end_time, uid=None):
     """Pindah jadwal 1 slot booking ke slot baru (boleh beda court, dalam venue
     yg sama). DP TIDAK hangus — tetap tercatat; harga dihitung ulang sesuai tarif
     slot baru (sadar hari/jam) & total order diperbarui. Return (order, info)
@@ -392,6 +393,10 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
     order.updated_at = datetime.utcnow()
 
     diff = (_D(order.total_amount) - paid).quantize(Decimal("0.01"))  # >0 = kurang bayar, <0 = kelebihan
+    db.session.add(BookingReschedule(
+        order_id=order.id, order_item_id=item.id, from_desc=old_desc,
+        to_desc=item.name_snapshot, from_price=old_line, to_price=new_total, created_by=uid,
+    ))
     log.info("Reschedule order %s item %s: '%s' → '%s' (total %s→%s, sisa %s)",
              order.order_number, item.id, old_desc, item.name_snapshot, old_line, new_total, diff)
     db.session.commit()
