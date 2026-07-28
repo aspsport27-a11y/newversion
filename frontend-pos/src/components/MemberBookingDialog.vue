@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { usePosStore } from '../stores/pos'
+import { dayTypeFor as dayTypeForIso, bookingPrice } from '../utils/bookingPrice'
 
 const pos = usePosStore()
 const emit = defineEmits(['close', 'created'])
@@ -52,42 +53,18 @@ function toggleDay(v) {
   else days.value.push(v)
 }
 
-// tarif per jam SADAR-HARI (mirror facility_rate_for_hour backend): hanya rule
-// day_type yg cocok, carry-forward utk jam celah, fallback bila hari tak diatur.
+// tarif per jam SADAR-HARI dari util bersama (utils/bookingPrice.js) — cermin
+// facility_rate_for_hour backend, termasuk override khusus Kamis.
 function isoLocal(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 function dayTypeFor(d) {
-  if ((pos.holidays || []).includes(isoLocal(d))) return 'holiday'
-  const wd = d.getDay() // 0=Minggu, 6=Sabtu
-  if (wd === 6) return 'saturday'
-  if (wd === 0) return 'sunday'
-  return 'weekday'
-}
-function rateForHour(f, h, dt) {
-  const rules = (f.rate_rules || []).filter((r) => (r.day_type || 'weekday') === dt)
-  if (!rules.length) {
-    const fb = { holiday: 'sunday', saturday: 'weekday', sunday: 'weekday' }[dt]
-    if (fb) return rateForHour(f, h, fb)
-  }
-  let carry = null
-  for (const r of rules) {
-    let sh = parseInt(r.start_time.slice(0, 2))
-    let eh = parseInt(r.end_time.slice(0, 2))
-    if (r.end_time === '00:00' || eh <= sh) eh += 24
-    const hh = h >= sh ? h : h + 24
-    if (hh >= sh && hh < eh) return Number(r.hourly_rate)
-    if (h >= sh && (carry === null || sh > carry[0])) carry = [sh, Number(r.hourly_rate)]
-  }
-  if (carry !== null) return carry[1]
-  return Number(f.hourly_rate || 0)
+  return dayTypeForIso(isoLocal(d), pos.holidays)
 }
 function sessionPrice(dt) {
   const f = facility.value
   if (!f || startH.value == null || endH.value == null || endH.value <= startH.value) return 0
-  let t = 0
-  for (let h = startH.value; h < endH.value; h++) t += rateForHour(f, h % 24, dt)
-  return t
+  return bookingPrice(f, startH.value, endH.value, dt)
 }
 // daftar tanggal yang akan dibooking (preview lokal, sama pola dgn backend:
 // JS getDay Min=0..Sab=6 → py weekday Sen=0..Min=6). Ditampilkan sbg chip biar

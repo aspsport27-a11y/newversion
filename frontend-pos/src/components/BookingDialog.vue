@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { usePosStore } from '../stores/pos'
+import { dayTypeFor, bookingPrice } from '../utils/bookingPrice'
 
 const pos = usePosStore()
 const emit = defineEmits(['close', 'added'])
@@ -51,53 +52,13 @@ const durationHours = computed(() => {
   return endH.value - startH.value
 })
 
-// Kategori hari tanggal terpilih: holiday > sabtu/minggu > weekday. Cermin
-// day_type_for_date() di backend (app/pos/models.py) supaya preview konsisten.
-const dayType = computed(() => {
-  const iso = date.value
-  if (!iso) return 'weekday'
-  if ((pos.holidays || []).includes(iso)) return 'holiday'
-  // parse lokal (hindari pergeseran zona waktu dari Date(iso))
-  const [y, m, d] = iso.split('-').map(Number)
-  const wd = new Date(y, m - 1, d).getDay() // 0=Minggu, 6=Sabtu
-  if (wd === 6) return 'saturday'
-  if (wd === 0) return 'sunday'
-  return 'weekday'
-})
-
-// tarif bisa beda per rentang jam & per HARI (facility.rate_rules). Hanya rule
-// dgn day_type sama yg dipakai; jam di celah antar-band memakai tarif band
-// sebelumnya (carry-forward). Sama persis dgn facility_rate_for_hour di backend.
-function expandRange(startStr, endStr) {
-  const sh = parseInt(startStr.slice(0, 2))
-  let eh = parseInt(endStr.slice(0, 2))
-  if (endStr === '00:00' || eh <= sh) eh += 24
-  return [sh, eh]
-}
-function rateForHour(f, h, dt) {
-  const rules = (f.rate_rules || []).filter((r) => (r.day_type || 'weekday') === dt)
-  if (!rules.length) {
-    // fallback bila tarif hari ini belum diatur — cermin backend
-    const fb = { holiday: 'sunday', saturday: 'weekday', sunday: 'weekday' }[dt]
-    if (fb) return rateForHour(f, h, fb)
-  }
-  let carry = null // [startJam, tarif] band terdekat sebelum h pd hari ini
-  for (const r of rules) {
-    const [sh, eh] = expandRange(r.start_time, r.end_time)
-    const hh = h >= sh ? h : h + 24
-    if (hh >= sh && hh < eh) return Number(r.hourly_rate)
-    // carry-forward pakai jam mentah (h), bukan hh — lihat backend
-    if (h >= sh && (carry === null || sh > carry[0])) carry = [sh, Number(r.hourly_rate)]
-  }
-  if (carry !== null) return carry[1]
-  return Number(f.hourly_rate || 0)
-}
+// Kategori hari + hitung tarif dari util bersama (utils/bookingPrice.js) —
+// cermin facility_rate_for_hour() backend. Termasuk override khusus Kamis.
+const dayType = computed(() => dayTypeFor(date.value, pos.holidays))
 const price = computed(() => {
   const f = facility.value
   if (!f || durationHours.value <= 0) return 0
-  let total = 0
-  for (let h = startH.value; h < endH.value; h++) total += rateForHour(f, h % 24, dayType.value)
-  return total
+  return bookingPrice(f, startH.value, endH.value, dayType.value)
 })
 
 function overlaps(sH, eH) {
