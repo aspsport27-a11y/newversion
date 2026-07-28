@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { parseUTC } from '../utils/datetime'
+import WaIcon from '../components/WaIcon.vue'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
@@ -395,7 +396,7 @@ onMounted(async () => { await loadVenues(); await run() })
                 <td class="px-4 py-3 font-medium text-slate-700">{{ c.name }}</td>
                 <td class="px-4 py-3 text-slate-500 font-mono text-xs">
                   {{ c.phone || '—' }}
-                  <a v-if="waLink(c.phone)" :href="waLink(c.phone)" target="_blank" rel="noopener" @click.stop class="ml-1">💬</a>
+                  <a v-if="waLink(c.phone)" :href="waLink(c.phone)" target="_blank" rel="noopener" @click.stop class="ml-1" title="Chat WhatsApp"><WaIcon /></a>
                 </td>
                 <td class="px-4 py-3 text-center">
                   <span v-if="c.is_member" class="text-[10px] bg-purple-100 text-purple-700 rounded-full px-2 py-0.5">Member</span>
@@ -423,7 +424,7 @@ onMounted(async () => { await loadVenues(); await run() })
               <span v-if="custDetail.customer.is_member" class="text-[10px] bg-purple-100 text-purple-700 rounded-full px-2 py-0.5 align-middle">Member</span>
             </h3>
             <p class="text-sm text-slate-500 font-mono">{{ custDetail.customer.phone || 'tanpa HP' }}
-              <a v-if="waLink(custDetail.customer.phone)" :href="waLink(custDetail.customer.phone)" target="_blank" rel="noopener" class="ml-1">💬 WA</a>
+              <a v-if="waLink(custDetail.customer.phone)" :href="waLink(custDetail.customer.phone)" target="_blank" rel="noopener" class="ml-1 inline-flex items-center gap-1 text-emerald-600"><WaIcon /> WA</a>
             </p>
           </div>
           <button @click="custDetail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
@@ -576,7 +577,7 @@ onMounted(async () => { await loadVenues(); await run() })
                 <td class="px-4 py-3 text-slate-700">{{ it.b.facility_name }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ it.b.customer_name || '—' }}</td>
                 <td class="px-4 py-3">
-                  <a v-if="waLink(it.b.customer_phone)" :href="waLink(it.b.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap">💬 {{ it.b.customer_phone }}</a>
+                  <a v-if="waLink(it.b.customer_phone)" :href="waLink(it.b.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap inline-flex items-center gap-1"><WaIcon /> {{ it.b.customer_phone }}</a>
                   <span v-else class="text-slate-400">—</span>
                 </td>
                 <td class="px-4 py-3 text-right">{{ it.b.order_total != null ? rupiah(it.b.order_total) : '—' }}</td>
@@ -599,7 +600,7 @@ onMounted(async () => { await loadVenues(); await run() })
                 <td class="px-4 py-3 text-slate-700">{{ it.parent.facility_name }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ it.parent.customer_name || '—' }}</td>
                 <td class="px-4 py-3">
-                  <a v-if="waLink(it.parent.customer_phone)" :href="waLink(it.parent.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap">💬 {{ it.parent.customer_phone }}</a>
+                  <a v-if="waLink(it.parent.customer_phone)" :href="waLink(it.parent.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap inline-flex items-center gap-1"><WaIcon /> {{ it.parent.customer_phone }}</a>
                   <span v-else class="text-slate-400">—</span>
                 </td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(it.parent.order_total) }}</td>
