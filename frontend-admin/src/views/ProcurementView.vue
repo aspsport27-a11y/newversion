@@ -65,6 +65,16 @@ const filteredPos = computed(() => {
     p.code.toLowerCase().includes(q) || (p.supplier_name || '').toLowerCase().includes(q)
   )
 })
+// ringkasan nilai PO per status (kartu)
+const poSummary = computed(() => {
+  const acc = { submitted: { count: 0, total: 0 }, approved: { count: 0, total: 0 },
+    received: { count: 0, total: 0 }, paid: { count: 0, total: 0 }, rejected: { count: 0, total: 0 } }
+  for (const p of pos.value) {
+    const s = acc[p.status]; if (!s) continue
+    s.count += 1; s.total += Number(p.total_amount) || 0
+  }
+  return acc
+})
 const filteredReorder = computed(() => {
   const q = searchReorder.value.trim().toLowerCase()
   if (!q) return reorder.value
@@ -365,6 +375,31 @@ watch(tab, reloadTab)
           class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
         <button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Buat PO</button>
       </div>
+
+      <!-- Ringkasan nilai PO per status -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Menunggu ({{ poSummary.submitted.count }})</p>
+          <p class="text-lg font-bold text-amber-600">{{ rupiah(poSummary.submitted.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Disetujui ({{ poSummary.approved.count }})</p>
+          <p class="text-lg font-bold text-blue-600">{{ rupiah(poSummary.approved.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Diterima ({{ poSummary.received.count }})</p>
+          <p class="text-lg font-bold text-violet-600">{{ rupiah(poSummary.received.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Lunas ({{ poSummary.paid.count }})</p>
+          <p class="text-lg font-bold text-emerald-600">{{ rupiah(poSummary.paid.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Ditolak ({{ poSummary.rejected.count }})</p>
+          <p class="text-lg font-bold text-red-500">{{ rupiah(poSummary.rejected.total) }}</p>
+        </div>
+      </div>
+
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-sm">

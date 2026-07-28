@@ -21,6 +21,17 @@ const toast = ref('')
 function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 
+// ringkasan nilai pembelian ops per status (kartu)
+const poSummary = computed(() => {
+  const acc = { submitted: { count: 0, total: 0 }, approved: { count: 0, total: 0 },
+    received: { count: 0, total: 0 }, paid: { count: 0, total: 0 }, rejected: { count: 0, total: 0 } }
+  for (const p of pos.value) {
+    const s = acc[p.status]; if (!s) continue
+    s.count += 1; s.total += Number(p.total_amount) || 0
+  }
+  return acc
+})
+
 const statusMap = {
   submitted: ['Menunggu', 'bg-amber-100 text-amber-700'],
   approved: ['Disetujui', 'bg-blue-100 text-blue-700'],
@@ -149,6 +160,30 @@ onMounted(async () => { await loadBase(); await loadPo() })
           <option value="submitted">Menunggu</option><option value="approved">Disetujui</option>
           <option value="received">Diterima</option><option value="paid">Dibayar</option><option value="rejected">Ditolak</option>
         </select></div>
+    </div>
+
+    <!-- Ringkasan nilai pembelian ops per status -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Menunggu ({{ poSummary.submitted.count }})</p>
+        <p class="text-lg font-bold text-amber-600">{{ rupiah(poSummary.submitted.total) }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Disetujui ({{ poSummary.approved.count }})</p>
+        <p class="text-lg font-bold text-blue-600">{{ rupiah(poSummary.approved.total) }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Diterima ({{ poSummary.received.count }})</p>
+        <p class="text-lg font-bold text-violet-600">{{ rupiah(poSummary.received.total) }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Dibayar ({{ poSummary.paid.count }})</p>
+        <p class="text-lg font-bold text-emerald-600">{{ rupiah(poSummary.paid.total) }}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border p-4">
+        <p class="text-xs text-slate-400 mb-1">Ditolak ({{ poSummary.rejected.count }})</p>
+        <p class="text-lg font-bold text-red-500">{{ rupiah(poSummary.rejected.total) }}</p>
+      </div>
     </div>
 
     <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
