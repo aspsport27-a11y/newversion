@@ -25,6 +25,13 @@ const saving = ref(false)
 function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
 function venueName(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
 
+// filter venue (menyaring tabel Terminal & Kasir sekaligus)
+const filterVenue = ref('')
+const shownTerminals = computed(() => filterVenue.value
+  ? terminals.value.filter((t) => t.venue_id === filterVenue.value) : terminals.value)
+const shownCashiers = computed(() => filterVenue.value
+  ? cashiers.value.filter((c) => c.venue_id === filterVenue.value) : cashiers.value)
+
 async function loadAll() {
   const [v, t, c] = await Promise.all([
     client.get('/admin/venues'),
@@ -94,7 +101,15 @@ async function resetPin(u) {
 <template>
   <div>
     <h1 class="text-2xl font-bold text-slate-800 mb-1">Setup Kasir</h1>
-    <p class="text-slate-500 mb-6">Kelola terminal POS dan akun kasir per venue.</p>
+    <p class="text-slate-500 mb-4">Kelola terminal POS dan akun kasir per venue.</p>
+    <div class="flex items-center gap-2 mb-6">
+      <label class="text-sm text-slate-500">Filter venue</label>
+      <select v-model="filterVenue" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+        <option value="">Semua venue</option>
+        <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+      </select>
+      <span v-if="filterVenue" class="text-xs text-slate-400">{{ shownTerminals.length }} terminal · {{ shownCashiers.length }} kasir</span>
+    </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <!-- Terminals -->
@@ -109,8 +124,8 @@ async function resetPin(u) {
             <th class="px-4 py-2 font-medium">Venue</th><th class="px-4 py-2 font-medium">Status</th><th class="px-4 py-2"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="!terminals.length"><td colspan="5" class="px-4 py-6 text-center text-slate-400">Belum ada terminal.</td></tr>
-            <tr v-for="t in terminals" :key="t.id" class="border-t">
+            <tr v-if="!shownTerminals.length"><td colspan="5" class="px-4 py-6 text-center text-slate-400">{{ filterVenue ? "Tidak ada terminal di venue ini." : "Belum ada terminal." }}</td></tr>
+            <tr v-for="t in shownTerminals" :key="t.id" class="border-t">
               <td class="px-4 py-2 font-mono text-slate-500">{{ t.code }}</td>
               <td class="px-4 py-2 text-slate-700">{{ t.name }}</td>
               <td class="px-4 py-2 text-slate-500">{{ venueName(t.venue_id) }}</td>
@@ -138,8 +153,8 @@ async function resetPin(u) {
             <th class="px-4 py-2 font-medium">Status</th><th class="px-4 py-2"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="!cashiers.length"><td colspan="4" class="px-4 py-6 text-center text-slate-400">Belum ada kasir.</td></tr>
-            <tr v-for="c in cashiers" :key="c.id" class="border-t">
+            <tr v-if="!shownCashiers.length"><td colspan="4" class="px-4 py-6 text-center text-slate-400">{{ filterVenue ? "Tidak ada kasir di venue ini." : "Belum ada kasir." }}</td></tr>
+            <tr v-for="c in shownCashiers" :key="c.id" class="border-t">
               <td class="px-4 py-2 text-slate-700">{{ c.username }}</td>
               <td class="px-4 py-2 text-slate-500">{{ c.venue_id ? venueName(c.venue_id) : 'semua' }}</td>
               <td class="px-4 py-2">
