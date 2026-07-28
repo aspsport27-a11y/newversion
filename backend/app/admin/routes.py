@@ -1956,6 +1956,37 @@ def report_shifts():
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), shifts=rows), 200
 
 
+@admin_bp.delete("/shifts/<int:shift_id>")
+@jwt_required()
+@ORDER_CANCEL
+def shift_delete(shift_id):
+    """Hapus shift — HANYA yang sudah ditutup & TANPA transaksi (tak ada order
+    dibuat, tak ada pembayaran masuk, tak ada gerakan kas). Utk membersihkan
+    shift kosong/uji. Shift yang ada transaksi TAK BOLEH dihapus (jejak keuangan)."""
+    from ..pos.models import CashMovement, Order, Payment
+
+    shift = db.session.get(Shift, shift_id)
+    if not shift:
+        return _err("Shift tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and shift.venue_id != forced:
+        return _err("Bukan shift venue Anda", "forbidden", 403)
+    if shift.status != "closed":
+        return _err("Shift masih terbuka — tutup dulu sebelum bisa dihapus.", "shift_open", 409)
+    n_ord = Order.query.filter_by(shift_id=shift_id).count()
+    n_pay = Payment.query.filter_by(shift_id=shift_id).count()
+    n_cm = CashMovement.query.filter_by(shift_id=shift_id).count()
+    if n_ord or n_pay or n_cm:
+        return _err(
+            f"Shift punya transaksi ({n_ord} order, {n_pay} pembayaran, {n_cm} kas) — "
+            "tak bisa dihapus. Batalkan/koreksi transaksinya dulu.",
+            "has_transactions", 409,
+        )
+    db.session.delete(shift)
+    db.session.commit()
+    return jsonify(message="Shift dihapus"), 200
+
+
 @admin_bp.get("/bookings")
 @jwt_required()
 @VIEW
