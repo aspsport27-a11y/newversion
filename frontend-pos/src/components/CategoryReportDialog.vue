@@ -7,9 +7,15 @@ const emit = defineEmits(['close'])
 const loading = ref(true)
 const err = ref('')
 const report = ref(null)
+const open = ref(new Set()) // kategori yg sedang di-expand
 
 function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
+}
+function toggle(cat) {
+  const s = new Set(open.value)
+  s.has(cat) ? s.delete(cat) : s.add(cat)
+  open.value = s
 }
 function print() {
   window.print()
@@ -57,12 +63,31 @@ onMounted(load)
         </div>
         <div v-else class="space-y-1.5">
           <div v-for="c in report.by_category" :key="c.category"
-            class="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2.5 print:bg-transparent print:px-0 print:py-1 print:border-b print:border-dashed print:rounded-none">
-            <div>
-              <p class="text-sm font-medium text-slate-700">{{ c.category }}</p>
-              <p class="text-[11px] text-slate-400">{{ c.qty }} item</p>
+            class="bg-slate-50 rounded-lg print:bg-transparent print:rounded-none print:border-b print:border-dashed">
+            <!-- baris kategori (klik utk buka rincian) -->
+            <div class="flex items-center justify-between px-3 py-2.5 print:px-0 print:py-1"
+              :class="c.items && c.items.length ? 'cursor-pointer' : ''"
+              @click="c.items && c.items.length && toggle(c.category)">
+              <div class="flex items-center gap-1.5">
+                <span v-if="c.items && c.items.length" class="text-slate-400 text-xs transition-transform no-print"
+                  :class="open.has(c.category) ? 'rotate-90' : ''">▸</span>
+                <div>
+                  <p class="text-sm font-medium text-slate-700">{{ c.category }}</p>
+                  <p class="text-[11px] text-slate-400">{{ c.qty }} item</p>
+                </div>
+              </div>
+              <span class="font-bold text-brand-700 text-sm">{{ rupiah(c.amount) }}</span>
             </div>
-            <span class="font-bold text-brand-700 text-sm">{{ rupiah(c.amount) }}</span>
+            <!-- rincian item (accordion; di cetak selalu tampil) -->
+            <div v-if="c.items && c.items.length"
+              :class="[open.has(c.category) ? 'block' : 'hidden', 'print:block']"
+              class="px-3 pb-2 pt-0.5 print:px-0 print:pb-1">
+              <div v-for="it in c.items" :key="it.name"
+                class="flex items-center justify-between py-1 pl-4 border-t border-slate-200/70 print:border-slate-300">
+                <span class="text-xs text-slate-500 truncate mr-2">{{ it.name }}<span class="text-slate-400"> · {{ it.qty }}×</span></span>
+                <span class="text-xs font-medium text-slate-600 whitespace-nowrap">{{ rupiah(it.amount) }}</span>
+              </div>
+            </div>
           </div>
         </div>
 

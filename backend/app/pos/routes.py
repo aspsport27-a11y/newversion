@@ -384,16 +384,17 @@ def report_category_daily():
             venue_id=terminal.venue_id, is_active=True, is_ticket=False
         ).with_entities(Product.category_id).distinct()
     }
-    groups = {cat_names.get(cid, "Tanpa Kategori"): {"category": cat_names.get(cid, "Tanpa Kategori"), "qty": 0.0, "amount": 0.0} for cid in prod_cat_ids}
+    # tiap grup simpan rincian item (dict nama→{qty,amount}) utk accordion
+    groups = {cat_names.get(cid, "Tanpa Kategori"): {"category": cat_names.get(cid, "Tanpa Kategori"), "qty": 0.0, "amount": 0.0, "items": {}} for cid in prod_cat_ids}
     if Facility.query.filter_by(venue_id=terminal.venue_id, is_active=True).first():
         label = _REPORT_LABELS["booking"]
-        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0}
+        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0, "items": {}}
     if Product.query.filter_by(venue_id=terminal.venue_id, is_active=True, is_ticket=True).first():
         label = _REPORT_LABELS["ticket"]
-        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0}
+        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0, "items": {}}
     if GameStation.query.filter_by(venue_id=terminal.venue_id, is_active=True).first():
         label = _REPORT_LABELS["rental"]
-        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0}
+        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0, "items": {}}
 
     # POS kenal 3 metode bayar (cash/qris/transfer) — selalu tampilkan semua
     # walau ada yg 0, biar kasir gampang cocokkan fisik uang di laci
@@ -420,13 +421,27 @@ def report_category_daily():
                 label = cat_names.get(product_cat.get(item.product_id), "Tanpa Kategori")
             else:
                 label = _REPORT_LABELS.get(item.item_type, item.item_type)
-            g = groups.setdefault(label, {"category": label, "qty": 0.0, "amount": 0.0})
+            g = groups.setdefault(label, {"category": label, "qty": 0.0, "amount": 0.0, "items": {}})
             g["qty"] += float(item.quantity or 0) * share
             g["amount"] += pay_amount * share
             total += pay_amount * share
+            # rincian per nama item (digabung kalau nama sama)
+            nm = item.name_snapshot or "—"
+            det = g["items"].setdefault(nm, {"name": nm, "qty": 0.0, "amount": 0.0})
+            det["qty"] += float(item.quantity or 0) * share
+            det["amount"] += pay_amount * share
 
     by_category = sorted(
-        [{**g, "qty": round(g["qty"], 2), "amount": round(g["amount"], 2)} for g in groups.values()],
+        [{
+            "category": g["category"],
+            "qty": round(g["qty"], 2),
+            "amount": round(g["amount"], 2),
+            "items": sorted(
+                [{"name": d["name"], "qty": round(d["qty"], 2), "amount": round(d["amount"], 2)}
+                 for d in g["items"].values()],
+                key=lambda x: -x["amount"],
+            ),
+        } for g in groups.values()],
         key=lambda x: -x["amount"],
     )
     by_method = [
