@@ -8,18 +8,30 @@ export function expandRange(startStr, endStr) {
   return [sh, eh]
 }
 
-// kategori hari dari tanggal ISO (holiday > sabtu/minggu > weekday)
+// kategori hari dari tanggal ISO (holiday > kamis > sabtu/minggu > weekday)
 export function dayTypeFor(iso, holidays = []) {
   if (!iso) return 'weekday'
   if ((holidays || []).includes(iso)) return 'holiday'
   const [y, m, d] = iso.split('-').map(Number)
-  const wd = new Date(y, m - 1, d).getDay() // 0=Minggu, 6=Sabtu
+  const wd = new Date(y, m - 1, d).getDay() // 0=Minggu, 4=Kamis, 6=Sabtu
+  if (wd === 4) return 'thursday'
   if (wd === 6) return 'saturday'
   if (wd === 0) return 'sunday'
   return 'weekday'
 }
 
 export function rateForHour(f, h, dt) {
+  // 'thursday' = override khusus Kamis: hanya jam yg TEPAT tercakup band Kamis;
+  // jam lain pakai tarif weekday (tanpa carry-forward antar-band Kamis).
+  if (dt === 'thursday') {
+    for (const r of f.rate_rules || []) {
+      if ((r.day_type || 'weekday') !== 'thursday') continue
+      const [sh, eh] = expandRange(r.start_time, r.end_time)
+      const hh = h >= sh ? h : h + 24
+      if (hh >= sh && hh < eh) return Number(r.hourly_rate)
+    }
+    return rateForHour(f, h, 'weekday')
+  }
   const rules = (f.rate_rules || []).filter((r) => (r.day_type || 'weekday') === dt)
   if (!rules.length) {
     const fb = { holiday: 'sunday', saturday: 'weekday', sunday: 'weekday' }[dt]

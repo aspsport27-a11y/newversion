@@ -195,17 +195,20 @@ class FacilityRateRule(db.Model):
         }
 
 
-DAY_TYPES = ("weekday", "saturday", "sunday", "holiday")
+DAY_TYPES = ("weekday", "saturday", "sunday", "holiday", "thursday")
 
 
 def day_type_for_date(d):
     """Kategori hari utk tarif: 'holiday' bila tanggal ada di tabel Holiday,
-    lalu 'saturday'/'sunday' utk akhir pekan, selain itu 'weekday'."""
+    'thursday' utk Kamis (tarif khusus, override weekday), lalu
+    'saturday'/'sunday' utk akhir pekan, selain itu 'weekday'."""
     if d is None:
         return "weekday"
     if Holiday.query.filter_by(date=d).first() is not None:
         return "holiday"
-    wd = d.weekday()  # 5=Sabtu, 6=Minggu
+    wd = d.weekday()  # 3=Kamis, 5=Sabtu, 6=Minggu
+    if wd == 3:
+        return "thursday"
     if wd == 5:
         return "saturday"
     if wd == 6:
@@ -232,6 +235,19 @@ def facility_rate_for_hour(facility, hour, day_type="weekday"):
     saat band siang 07-15 dan band sore mulai 16:00) memakai tarif band
     sebelumnya (carry-forward), sesuai intuisi 'harga berubah saat band
     berikutnya mulai'. Kalau tak ada band sama sekali → tarif dasar facility."""
+    # 'thursday' = tarif OVERRIDE khusus hari Kamis: hanya berlaku utk jam yg
+    # TEPAT tercakup band Kamis; jam lain jatuh ke tarif weekday biasa (tanpa
+    # carry-forward, supaya band tunggal spt 'Kamis Malam' 20-23 tak menodai jam
+    # pagi/siang yg mestinya ikut weekday).
+    if day_type == "thursday":
+        for r in facility.rate_rules:
+            if (r.day_type or "weekday") != "thursday":
+                continue
+            sh, eh = _expand_range(r.start_time, r.end_time)
+            hh = hour if hour >= sh else hour + 24
+            if sh <= hh < eh:
+                return float(r.hourly_rate)
+        return facility_rate_for_hour(facility, hour, "weekday")
     rules = [r for r in facility.rate_rules if (r.day_type or "weekday") == day_type]
     if not rules:
         # belum ada tarif utk hari ini → fallback: libur→minggu→weekday,
