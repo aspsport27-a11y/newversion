@@ -155,13 +155,7 @@ function add() {
             {{ f.name }}<span v-if="!isPadel"> — {{ facilityRateLabel(f) }}</span>
           </option>
         </select>
-        <div v-if="!isPadel && facility?.rate_rules?.length" class="text-xs text-slate-500 mb-3 space-y-0.5">
-          <div v-for="r in facility.rate_rules" :key="r.id">
-            {{ r.start_time }}–{{ r.end_time }}<span v-if="r.label"> ({{ r.label }})</span>: {{ rupiah(r.hourly_rate) }}/jam
-          </div>
-          <div v-if="facility.hourly_rate">jam lain: {{ rupiah(facility.hourly_rate) }}/jam</div>
-        </div>
-        <div v-else class="mb-3"></div>
+        <div class="mb-3"></div>
 
         <label class="block text-sm text-slate-600 mb-1">Tanggal</label>
         <input v-model="date" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2.5 mb-3 outline-none focus:border-brand-500" />
