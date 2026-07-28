@@ -336,11 +336,18 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
     return order
 
 
-def reschedule_booking(order, item_id, facility_id, booking_date, start_time, end_time, uid=None):
+def reschedule_booking(order, item_id, facility_id, booking_date, start_time, end_time,
+                       uid=None, refund_shift_id=None, record_refund=False):
     """Pindah jadwal 1 slot booking ke slot baru (boleh beda court, dalam venue
     yg sama). DP TIDAK hangus — tetap tercatat; harga dihitung ulang sesuai tarif
     slot baru (sadar hari/jam) & total order diperbarui. Return (order, info)
-    dgn selisih harga. Jejak lama→baru dicatat di log."""
+    dgn selisih harga. Jejak lama→baru dicatat di log.
+
+    `record_refund` (dipakai flow admin/manajer): kalau slot baru lebih murah dr
+    yg SUDAH dibayar, kelebihannya dicatat otomatis sbg kas keluar di shift
+    `refund_shift_id` (harus shift terbuka di venue ini) & amount_paid dikurangi
+    supaya order pas lunas. Kalau tak ada shift terbuka → PosError (gagal bersih,
+    tanpa mengubah slot). POS (default) tak memakai ini — perilakunya tetap."""
     booking_items = [i for i in order.items if i.item_type == "booking"]
     if not booking_items:
         raise PosError("Order ini bukan booking", "not_booking", 400)
@@ -382,6 +389,23 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
     new_total = _D(facility_booking_price(facility, start.hour, end_hour, dtype)).quantize(Decimal("0.01"))
     breakdown = _booking_rate_breakdown(facility, start.hour, end_hour, dtype)
 
+    # Pre-cek refund SEBELUM mengubah slot/harga (biar gagal tanpa efek samping):
+    # kalau slot baru lebih murah dari yg sudah dibayar & diminta catat refund,
+    # wajib ada shift kasir terbuka di venue utk mencatat kas keluar.
+    new_order_total = (
+        _D(order.subtotal) - old_line + new_total - _D(order.discount_amount)
+    ).quantize(Decimal("0.01"))
+    refund = _D(0)
+    refund_shift = None
+    if record_refund and _D(order.amount_paid) > new_order_total:
+        refund = (_D(order.amount_paid) - new_order_total).quantize(Decimal("0.01"))
+        refund_shift = db.session.get(Shift, refund_shift_id) if refund_shift_id else None
+        if refund_shift is None or refund_shift.status != "open" or refund_shift.venue_id != order.venue_id:
+            raise PosError(
+                "Reschedule ini menimbulkan kelebihan bayar yang harus direfund tunai, "
+                "tapi tak ada shift kasir terbuka di venue ini untuk mencatat kas keluar. "
+                "Minta kasir buka shift dulu.", "no_open_shift", 409)
+
     # update item
     item.name_snapshot = f"{facility.name} {bdate:%d/%m} {start_time}-{end_time}"[:120]
     item.quantity = _D(hours)
@@ -397,6 +421,14 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
     # hitung ulang total order; DP (amount_paid) dipertahankan
     order.subtotal = _D(order.subtotal) - old_line + new_total
     order.total_amount = _D(order.subtotal) - _D(order.discount_amount)
+    # refund kelebihan → kas keluar di shift terbuka (sudah divalidasi di pre-cek)
+    if refund > 0:
+        db.session.add(CashMovement(
+            shift_id=refund_shift.id, type="out", amount=refund, created_by=uid,
+            reason=f"Refund reschedule {order.order_number}: {old_desc} → {item.name_snapshot}"[:200],
+        ))
+        refund_shift.cash_out = _D(refund_shift.cash_out) + refund
+        order.amount_paid = _D(order.total_amount)  # kelebihan sudah dikembalikan
     paid = _D(order.amount_paid)
     if paid > 0 and paid >= _D(order.total_amount):
         order.status = "paid"
@@ -418,6 +450,7 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
         "old_line_total": float(old_line),
         "new_line_total": float(new_total),
         "amount_due": float(diff),  # >0 tagih ke customer; <0 kembalikan
+        "refunded": float(refund),  # kelebihan yg dicatat sbg kas keluar (flow admin)
         "total_amount": float(order.total_amount),
         "amount_paid": float(paid),
     }

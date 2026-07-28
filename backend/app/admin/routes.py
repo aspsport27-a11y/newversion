@@ -2019,6 +2019,7 @@ def bookings_list():
         row = fb.to_dict()
         row["facility_name"] = fac.name
         row["venue_id"] = fb.venue_id
+        row["order_item_id"] = fb.order_item_id
         row["order_id"] = order.id if order else None
         row["order_number"] = order.order_number if order else None
         row["customer_name"] = order.customer_name if order else None
@@ -2357,6 +2358,47 @@ def order_cancel_admin(order_id):
     except PosError as e:
         return _err(e.message, e.code, e.status)
     return jsonify(order=order.to_dict(), message="Transaksi dibatalkan"), 200
+
+
+@admin_bp.post("/orders/<int:order_id>/reschedule")
+@jwt_required()
+@ORDER_CANCEL
+def order_reschedule_admin(order_id):
+    """Reschedule booking oleh manajer dari portal (menu Booking). Termasuk
+    order yg SUDAH lunas: kalau slot baru lebih murah, kelebihannya dicatat
+    otomatis sbg kas keluar di shift terbuka venue (butuh shift terbuka).
+    Kalau lebih mahal → order jadi 'partial' (sisa ditagih saat customer bayar
+    di POS)."""
+    from ..pos.models import Shift
+    from ..pos.services import PosError, reschedule_booking
+
+    order = db.session.get(Order, order_id)
+    if not order:
+        return _err("Order tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and order.venue_id != forced:
+        return _err("Bukan order venue Anda", "forbidden", 403)
+    d = request.get_json(silent=True) or {}
+    for f in ("facility_id", "booking_date", "start_time", "end_time"):
+        if not d.get(f):
+            return _err(f"{f} wajib diisi")
+    # shift terbuka di venue ini utk mencatat refund (kalau ada kelebihan)
+    open_shift = (
+        Shift.query.filter_by(venue_id=order.venue_id, status="open")
+        .order_by(Shift.opened_at.desc())
+        .first()
+    )
+    try:
+        order, info = reschedule_booking(
+            order, d.get("order_item_id"), d["facility_id"],
+            d["booking_date"], d["start_time"], d["end_time"],
+            uid=_current_user().id,
+            refund_shift_id=open_shift.id if open_shift else None,
+            record_refund=True,
+        )
+    except PosError as e:
+        return _err(e.message, e.code, e.status)
+    return jsonify(order=order.to_dict(), reschedule=info), 200
 
 
 @admin_bp.delete("/orders/<int:order_id>")

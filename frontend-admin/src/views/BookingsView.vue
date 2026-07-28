@@ -4,9 +4,13 @@ import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { parseUTC } from '../utils/datetime'
 import WaIcon from '../components/WaIcon.vue'
+import RescheduleDialog from '../components/RescheduleDialog.vue'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
+const canReschedule = computed(() => auth.hasPerm('order.cancel'))
+const rescheduleOrder = ref(null)
+const detailVenueId = ref(null)
 
 const venues = ref([])
 const venueId = ref('')
@@ -291,12 +295,30 @@ function fmtDatesShort(arr) {
 }
 async function openDetail(b) {
   if (!b.order_id) return
+  detailVenueId.value = b.venue_id
   detailLoading.value = true
   detail.value = { loading: true }
   try {
     const { data } = await client.get(`/admin/orders/${b.order_id}`)
     detail.value = data.order
   } finally { detailLoading.value = false }
+}
+async function onRescheduled(res) {
+  const info = res.reschedule || {}
+  rescheduleOrder.value = null
+  // muat ulang detail order supaya status/harga terbaru tampil
+  if (detail.value?.id) {
+    try {
+      const { data } = await client.get(`/admin/orders/${detail.value.id}`)
+      detail.value = data.order
+    } catch { /* biarkan */ }
+  }
+  await run()
+  const refunded = Number(info.refunded || 0)
+  const due = Number(info.amount_due || 0)
+  if (refunded > 0) alert(`Reschedule berhasil. Kelebihan ${rupiah(refunded)} dicatat sebagai kas keluar (refund).`)
+  else if (due > 0) alert(`Reschedule berhasil. Sisa tagih ke customer ${rupiah(due)}.`)
+  else alert('Reschedule berhasil.')
 }
 async function deleteBooking(b) {
   try {
@@ -664,12 +686,20 @@ onMounted(async () => { await loadVenues(); await run() })
             <span class="font-medium">{{ rupiah(p.amount) }}</span>
           </div>
 
+          <button v-if="canReschedule && detail.status !== 'void'" @click="rescheduleOrder = detail"
+            class="mt-5 w-full py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium">
+            📅 Reschedule Booking
+          </button>
           <button v-if="detail.status === 'open' || detail.status === 'partial'" @click="cancelBooking"
-            class="mt-5 w-full py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium">
+            class="mt-2 w-full py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium">
             Batalkan Booking (No-show) — DP hangus
           </button>
         </template>
       </div>
     </div>
+
+    <!-- Reschedule booking (manajer) -->
+    <RescheduleDialog v-if="rescheduleOrder" :order="rescheduleOrder" :venue-id="detailVenueId"
+      @close="rescheduleOrder = null" @done="onRescheduled" />
   </div>
 </template>
