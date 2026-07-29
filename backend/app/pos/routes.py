@@ -402,6 +402,7 @@ def report_category_daily():
 
     total = 0.0
     order_ids_seen = set()
+    qty_counted = set()  # item.id yg qty-nya sudah dihitung (biar tak dobel per pembayaran)
     for p in payments:
         method_totals[p.method] = method_totals.get(p.method, 0.0) + float(p.amount or 0)
 
@@ -422,14 +423,19 @@ def report_category_daily():
             else:
                 label = _REPORT_LABELS.get(item.item_type, item.item_type)
             g = groups.setdefault(label, {"category": label, "qty": 0.0, "amount": 0.0, "items": {}})
-            g["qty"] += float(item.quantity or 0) * share
             g["amount"] += pay_amount * share
             total += pay_amount * share
             # rincian per nama item (digabung kalau nama sama)
             nm = item.name_snapshot or "—"
             det = g["items"].setdefault(nm, {"name": nm, "qty": 0.0, "amount": 0.0})
-            det["qty"] += float(item.quantity or 0) * share
             det["amount"] += pay_amount * share
+            # qty = jumlah item UTUH, dihitung sekali saja (jangan ikut porsi
+            # nilai/pembayaran — itu bikin jumlah item jadi pecahan)
+            if item.id not in qty_counted:
+                qty_counted.add(item.id)
+                q = float(item.quantity or 0)
+                g["qty"] += q
+                det["qty"] += q
 
     by_category = sorted(
         [{
