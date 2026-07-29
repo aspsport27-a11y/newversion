@@ -255,11 +255,13 @@ const custShown = computed(() => {
   const arr = [...list]
   if (custSort.value === 'count') arr.sort((a, b) => b.booking_count - a.booking_count)
   else if (custSort.value === 'spend') arr.sort((a, b) => b.total_spend - a.total_spend)
+  else if (custSort.value === 'hours') arr.sort((a, b) => (b.total_hours || 0) - (a.total_hours || 0))
   else if (custSort.value === 'idle') arr.sort((a, b) => (a.last_visit || '').localeCompare(b.last_visit || '')) // lama tak datang dulu
   else arr.sort((a, b) => (b.last_visit || '').localeCompare(a.last_visit || ''))
   return arr
 })
 function fmtVisit(iso) { return iso ? parseUTC(iso).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
+function fmtHours(n) { const h = Number(n) || 0; return `${Number.isInteger(h) ? h : h.toFixed(1)} jam` }
 async function openCustomer(c) {
   custDetail.value = { customer: c, history: null }
   try {
@@ -268,9 +270,9 @@ async function openCustomer(c) {
   } catch { custDetail.value = { customer: c, history: [] } }
 }
 function exportCustomersCsv() {
-  const head = ['Nama', 'No HP', 'Jumlah Booking', 'Total Belanja', 'Terakhir Booking', 'Venue Favorit', 'Status']
+  const head = ['Nama', 'No HP', 'Jumlah Booking', 'Total Jam Main', 'Total Belanja', 'Terakhir Booking', 'Venue Favorit', 'Status']
   const rows = custShown.value.map((c) => [
-    c.name, c.phone || '', c.booking_count, c.total_spend,
+    c.name, c.phone || '', c.booking_count, c.total_hours || 0, c.total_spend,
     c.last_visit ? c.last_visit.slice(0, 10) : '', c.favorite_venue || '',
     c.is_member ? 'Member' : 'Reguler',
   ])
@@ -391,6 +393,7 @@ onMounted(async () => { await loadVenues(); await run() })
           <option value="last">Terbaru booking</option>
           <option value="idle">Lama tak datang</option>
           <option value="count">Paling sering</option>
+          <option value="hours">Jam main terbanyak</option>
           <option value="spend">Belanja terbesar</option>
         </select>
         <span class="text-xs text-slate-400">{{ custShown.length }} customer</span>
@@ -405,15 +408,16 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-3 font-medium">No HP</th>
               <th class="px-4 py-3 font-medium text-center">Status</th>
               <th class="px-4 py-3 font-medium text-right">Booking</th>
+              <th class="px-4 py-3 font-medium text-right">Total Jam Main</th>
               <th class="px-4 py-3 font-medium text-right">Total Belanja</th>
               <th class="px-4 py-3 font-medium">Terakhir</th>
               <th class="px-4 py-3 font-medium">Venue Fav.</th>
               <th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="custLoading"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!custRows.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada data customer booking.</td></tr>
-              <tr v-else-if="!custShown.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Tidak ada yang cocok.</td></tr>
+              <tr v-if="custLoading"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!custRows.length"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Belum ada data customer booking.</td></tr>
+              <tr v-else-if="!custShown.length"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Tidak ada yang cocok.</td></tr>
               <tr v-for="c in custShown" :key="c.key" class="border-t hover:bg-slate-50 cursor-pointer" @click="openCustomer(c)">
                 <td class="px-4 py-3 font-medium text-slate-700">{{ c.name }}</td>
                 <td class="px-4 py-3 text-slate-500 font-mono text-xs">
@@ -425,6 +429,7 @@ onMounted(async () => { await loadVenues(); await run() })
                   <span v-else class="text-[10px] text-slate-400">Reguler</span>
                 </td>
                 <td class="px-4 py-3 text-right">{{ c.booking_count }}</td>
+                <td class="px-4 py-3 text-right text-slate-600 whitespace-nowrap">{{ fmtHours(c.total_hours) }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(c.total_spend) }}</td>
                 <td class="px-4 py-3 text-slate-500 whitespace-nowrap">{{ fmtVisit(c.last_visit) }}</td>
                 <td class="px-4 py-3 text-slate-500">{{ c.favorite_venue || '—' }}</td>
@@ -451,8 +456,9 @@ onMounted(async () => { await loadVenues(); await run() })
           </div>
           <button @click="custDetail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
         </div>
-        <div class="grid grid-cols-3 gap-2 mb-3 text-center">
+        <div class="grid grid-cols-4 gap-2 mb-3 text-center">
           <div class="bg-slate-50 rounded-lg p-2"><p class="text-[11px] text-slate-500">Booking</p><p class="font-bold text-slate-700">{{ custDetail.customer.booking_count }}</p></div>
+          <div class="bg-slate-50 rounded-lg p-2"><p class="text-[11px] text-slate-500">Jam Main</p><p class="font-bold text-slate-700 text-sm">{{ fmtHours(custDetail.customer.total_hours) }}</p></div>
           <div class="bg-slate-50 rounded-lg p-2"><p class="text-[11px] text-slate-500">Total Belanja</p><p class="font-bold text-slate-700 text-sm">{{ rupiah(custDetail.customer.total_spend) }}</p></div>
           <div class="bg-slate-50 rounded-lg p-2"><p class="text-[11px] text-slate-500">Terakhir</p><p class="font-bold text-slate-700 text-sm">{{ fmtVisit(custDetail.customer.last_visit) }}</p></div>
         </div>
@@ -641,7 +647,7 @@ onMounted(async () => { await loadVenues(); await run() })
                   <td class="px-4 py-2 pl-10 text-slate-600">{{ fmtDate(c.booking_date) }}</td>
                   <td class="px-4 py-2 text-slate-600">{{ c.start_time }}–{{ c.end_time }}</td>
                   <td class="px-4 py-2 text-slate-500">{{ c.facility_name }}</td>
-                  <td colspan="8" class="px-4 py-2"></td>
+                  <td colspan="9" class="px-4 py-2"></td>
                 </tr>
               </template>
             </template>

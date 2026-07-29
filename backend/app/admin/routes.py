@@ -2187,11 +2187,13 @@ def customers_list():
             c = cust[key] = {
                 "key": key, "name": o.customer_name or "—",
                 "phone": o.customer_phone or None, "booking_count": 0,
-                "total_spend": 0.0, "last_visit": None, "first_seen": None,
+                "total_spend": 0.0, "total_hours": 0.0, "last_visit": None, "first_seen": None,
                 "is_member": False, "_venues": {},
             }
         c["booking_count"] += 1
         c["total_spend"] += float(o.amount_paid or 0)
+        # total jam bermain: jumlah durasi (quantity=jam) semua item booking
+        c["total_hours"] += float(sum(float(i.quantity or 0) for i in o.items if i.item_type == "booking"))
         if o.is_member:
             c["is_member"] = True
         vc = vmap.get(o.venue_id)
@@ -2213,6 +2215,7 @@ def customers_list():
         venues = sorted(c.pop("_venues").items(), key=lambda x: -x[1])
         c["favorite_venue"] = venues[0][0] if venues else None
         c["total_spend"] = round(c["total_spend"], 2)
+        c["total_hours"] = round(c["total_hours"], 2)
         out.append(c)
     out.sort(key=lambda x: x["last_visit"] or "", reverse=True)
     return jsonify(count=len(out), customers=out), 200
