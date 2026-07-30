@@ -2264,6 +2264,86 @@ def bookings_forfeited_dp():
     ), 200
 
 
+@admin_bp.get("/reports/coaching")
+@jwt_required()
+@VIEW
+def report_coaching():
+    """Rekap coaching per coach: jam mengajar & nilai coaching per periode.
+
+    Basis **TANGGAL MAIN** (booking_date), bukan tanggal bayar — karena yg
+    ditanya "berapa jam coach mengajar di periode ini". Beda dgn laporan
+    penjualan yg basis kas; ditegaskan di UI supaya tak dikira selisih.
+    Sesi batal (booking cancelled / order void) tidak dihitung."""
+    today = date.today()
+    d_from = request.args.get("from") or today.replace(day=1).isoformat()
+    d_to = request.args.get("to") or today.isoformat()
+    forced = _forced_venue()
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
+
+    q = (
+        db.session.query(FacilityBooking, Facility, Coach, OrderItem, Order)
+        .join(Facility, FacilityBooking.facility_id == Facility.id)
+        .join(Coach, FacilityBooking.coach_id == Coach.id)
+        .outerjoin(OrderItem, FacilityBooking.coaching_item_id == OrderItem.id)
+        .outerjoin(Order, OrderItem.order_id == Order.id)
+        .filter(
+            FacilityBooking.booking_date.between(d_from, d_to),
+            FacilityBooking.coach_id.isnot(None),
+            FacilityBooking.status == "booked",
+        )
+    )
+    if vid:
+        q = q.filter(FacilityBooking.venue_id == vid)
+    vids = _scope_vids(_current_user())
+    if not vid and vids is not None:
+        q = q.filter(FacilityBooking.venue_id.in_(vids)) if vids else q.filter(db.false())
+    q = q.order_by(FacilityBooking.booking_date, FacilityBooking.start_time)
+
+    venue_codes = {v.id: v.code for v in Venue.query.all()}
+    rows, per_coach = [], {}
+    for fb, fac, coach, item, order in q.all():
+        if order is not None and order.status == "void":
+            continue  # sesi dibatalkan — tak dihitung sbg jam mengajar
+        hours = float(item.quantity) if item is not None else 0.0
+        revenue = float(item.line_total) if item is not None else 0.0
+        persons = fb.coaching_persons or 0
+        rows.append({
+            "booking_id": fb.id,
+            "booking_date": fb.booking_date.isoformat(),
+            "start_time": fb.start_time.strftime("%H:%M"),
+            "end_time": fb.end_time.strftime("%H:%M"),
+            "facility_name": fac.name,
+            "venue_code": venue_codes.get(fb.venue_id, f"#{fb.venue_id}"),
+            "coach_id": coach.id, "coach_name": coach.name,
+            "persons": persons, "hours": hours, "revenue": revenue,
+            "customer_name": order.customer_name if order is not None else None,
+            "order_number": order.order_number if order is not None else None,
+        })
+        pc = per_coach.setdefault(coach.id, {
+            "coach_id": coach.id, "coach_name": coach.name,
+            "sessions": 0, "hours": 0.0, "revenue": 0.0, "persons_total": 0,
+        })
+        pc["sessions"] += 1
+        pc["hours"] += hours
+        pc["revenue"] += revenue
+        pc["persons_total"] += persons
+
+    for pc in per_coach.values():
+        pc["hours"] = round(pc["hours"], 2)
+        pc["revenue"] = round(pc["revenue"], 2)
+
+    return jsonify(
+        range={"from": d_from, "to": d_to},
+        coaches=sorted(per_coach.values(), key=lambda x: -x["revenue"]),
+        rows=rows,
+        total={
+            "sessions": len(rows),
+            "hours": round(sum(r["hours"] for r in rows), 2),
+            "revenue": round(sum(r["revenue"] for r in rows), 2),
+        },
+    ), 200
+
+
 @admin_bp.delete("/bookings/<int:bid>")
 @jwt_required()
 @ORDER_CANCEL

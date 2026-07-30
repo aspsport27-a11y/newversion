@@ -242,6 +242,7 @@ async function run() {
     bookings.value = data.bookings
   } finally { loading.value = false }
   if (tab.value === 'forfeited') loadForfeited()
+  if (tab.value === 'coaching') loadCoachingReport()
 }
 async function loadForfeited() {
   fdLoading.value = true
@@ -304,10 +305,48 @@ function exportCustomersCsv() {
   a.click()
 }
 
+// ---------- Rekap Coaching (per coach) ----------
+const chRows = ref([])
+const chCoaches = ref([])
+const chTotal = ref({ sessions: 0, hours: 0, revenue: 0 })
+const chLoading = ref(false)
+const chDetailCoach = ref(null) // coach_id yg rincian sesinya sedang dibuka
+async function loadCoachingReport() {
+  chLoading.value = true
+  try {
+    const { data } = await client.get('/admin/reports/coaching', { params: params() })
+    chRows.value = data.rows
+    chCoaches.value = data.coaches
+    chTotal.value = data.total
+  } catch (_) {
+    chRows.value = []; chCoaches.value = []; chTotal.value = { sessions: 0, hours: 0, revenue: 0 }
+  } finally { chLoading.value = false }
+}
+const chDetailRows = computed(() =>
+  chDetailCoach.value == null ? [] : chRows.value.filter((r) => r.coach_id === chDetailCoach.value),
+)
+const chDetailName = computed(() =>
+  chCoaches.value.find((c) => c.coach_id === chDetailCoach.value)?.coach_name || '',
+)
+function fmtJam(n) { const h = Number(n) || 0; return `${Number.isInteger(h) ? h : h.toFixed(1)} jam` }
+function exportCoachingCsv() {
+  const head = ['Tanggal Main', 'Jam', 'Venue', 'Lapangan', 'Coach', 'Peserta', 'Durasi (jam)', 'Nilai Coaching', 'Customer', 'No. Order']
+  const rows = chRows.value.map((r) => [
+    r.booking_date, `${r.start_time}-${r.end_time}`, r.venue_code, r.facility_name,
+    r.coach_name, r.persons, r.hours, r.revenue, r.customer_name || '', r.order_number || '',
+  ])
+  const csv = [head, ...rows].map((a) => a.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' }))
+  const a = document.createElement('a')
+  a.href = url; a.download = `rekap-coaching_${from.value}_${to.value}.csv`; a.click()
+  URL.revokeObjectURL(url)
+}
+
 function switchTab(t) {
   tab.value = t
   if (t === 'forfeited' && !fdRows.value.length) loadForfeited()
   if (t === 'customers' && !custRows.value.length) loadCustomers()
+  if (t === 'coaching') loadCoachingReport()
 }
 function fmtDatesShort(arr) {
   return (arr || []).map((d) => {
@@ -406,6 +445,7 @@ onMounted(async () => { await loadVenues(); await run() })
       <button @click="switchTab('list')" :class="tab === 'list' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Booking</button>
       <button @click="switchTab('forfeited')" :class="tab === 'forfeited' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">DP Hangus</button>
       <button @click="switchTab('customers')" :class="tab === 'customers' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Data Customer</button>
+      <button @click="switchTab('coaching')" :class="tab === 'coaching' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Rekap Coaching</button>
     </div>
 
     <!-- ================= TAB DATA CUSTOMER (CRM) ================= -->
@@ -505,6 +545,93 @@ onMounted(async () => { await loadVenues(); await run() })
               <span>{{ rupiah(h.total_amount) }}</span>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= TAB REKAP COACHING ================= -->
+    <div v-if="tab === 'coaching'">
+      <div class="bg-teal-50 border border-teal-200 rounded-lg px-4 py-2.5 mb-4 text-sm text-teal-800">
+        Dihitung berdasarkan <b>tanggal main</b> (kapan coach mengajar), bukan tanggal pembayaran —
+        jadi angkanya bisa beda dengan laporan penjualan yang berbasis kas. Sesi yang dibatalkan tidak dihitung.
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+        <div class="bg-white rounded-xl shadow-sm border p-5">
+          <p class="text-sm text-slate-500">Jumlah Sesi</p>
+          <p class="text-2xl font-bold text-slate-800 mt-1">{{ chTotal.sessions }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-5">
+          <p class="text-sm text-slate-500">Total Jam Mengajar</p>
+          <p class="text-2xl font-bold text-slate-800 mt-1">{{ fmtJam(chTotal.hours) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-5">
+          <p class="text-sm text-slate-500">Nilai Coaching</p>
+          <p class="text-2xl font-bold text-teal-700 mt-1">{{ rupiah(chTotal.revenue) }}</p>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-sm text-slate-500">Klik baris untuk melihat rincian sesi tiap coach.</p>
+        <button v-if="chRows.length" @click="exportCoachingCsv" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium">📥 Export CSV</button>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-3 font-medium">Coach</th>
+              <th class="px-4 py-3 font-medium text-right">Sesi</th>
+              <th class="px-4 py-3 font-medium text-right">Jam Mengajar</th>
+              <th class="px-4 py-3 font-medium text-right">Total Peserta</th>
+              <th class="px-4 py-3 font-medium text-right">Nilai Coaching</th>
+              <th class="px-4 py-3"></th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="chLoading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!chCoaches.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada sesi coaching pada periode ini.</td></tr>
+              <tr v-for="c in chCoaches" :key="c.coach_id" class="border-t hover:bg-slate-50 cursor-pointer" @click="chDetailCoach = c.coach_id">
+                <td class="px-4 py-3 font-medium text-slate-700">🎾 {{ c.coach_name }}</td>
+                <td class="px-4 py-3 text-right">{{ c.sessions }}</td>
+                <td class="px-4 py-3 text-right font-medium">{{ fmtJam(c.hours) }}</td>
+                <td class="px-4 py-3 text-right text-slate-500">{{ c.persons_total }}</td>
+                <td class="px-4 py-3 text-right font-medium text-teal-700">{{ rupiah(c.revenue) }}</td>
+                <td class="px-4 py-3 text-right text-brand-600 text-xs">Rincian ›</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal rincian sesi per coach -->
+    <div v-if="chDetailCoach != null" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="chDetailCoach = null">
+      <div class="bg-white w-full max-w-2xl rounded-2xl p-5 max-h-[90vh] overflow-auto">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-bold text-slate-800">🎾 {{ chDetailName }} — rincian sesi</h3>
+          <button @click="chDetailCoach = null" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-3 py-2 font-medium">Tanggal</th>
+              <th class="px-3 py-2 font-medium">Jam</th>
+              <th class="px-3 py-2 font-medium">Lapangan</th>
+              <th class="px-3 py-2 font-medium">Customer</th>
+              <th class="px-3 py-2 font-medium text-right">Peserta</th>
+              <th class="px-3 py-2 font-medium text-right">Nilai</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="r in chDetailRows" :key="r.booking_id" class="border-t">
+                <td class="px-3 py-2 text-slate-600 whitespace-nowrap">{{ fmtDate(r.booking_date) }}</td>
+                <td class="px-3 py-2 text-slate-700 whitespace-nowrap">{{ r.start_time }}–{{ r.end_time }}</td>
+                <td class="px-3 py-2 text-slate-600">{{ r.venue_code }} · {{ r.facility_name }}</td>
+                <td class="px-3 py-2 text-slate-600">{{ r.customer_name || '—' }}</td>
+                <td class="px-3 py-2 text-right">{{ r.persons }}</td>
+                <td class="px-3 py-2 text-right font-medium">{{ rupiah(r.revenue) }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
