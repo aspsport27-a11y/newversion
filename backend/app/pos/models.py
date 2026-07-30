@@ -1,4 +1,5 @@
 """Model SQLAlchemy untuk POS M0 — memetakan tabel migration 002_pos_m0.sql."""
+import secrets
 from datetime import datetime
 
 from ..extensions import db
@@ -534,15 +535,29 @@ class Coach(db.Model):
     phone = db.Column(db.String(20))
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # kunci halaman jadwal pribadi coach (dibuka tanpa login) — RAHASIA
+    schedule_token = db.Column(db.String(64), unique=True)
 
-    def to_dict(self):
-        return {
+    def to_dict(self, with_token=False):
+        """`with_token` hanya utk endpoint ADMIN. Jangan pernah aktifkan di
+        endpoint POS/publik — token = kunci akses ke data customer."""
+        d = {
             "id": self.id,
             "venue_id": self.venue_id,
             "name": self.name,
             "phone": self.phone,
             "is_active": self.is_active,
         }
+        if with_token:
+            d["schedule_token"] = self.schedule_token
+        return d
+
+    def ensure_token(self):
+        """Buat token kalau belum ada (coach lama). Dipanggil saat admin
+        membuka daftar coach, jadi tautannya selalu siap."""
+        if not self.schedule_token:
+            self.schedule_token = secrets.token_urlsafe(24)
+        return self.schedule_token
 
 
 class CoachingRate(db.Model):

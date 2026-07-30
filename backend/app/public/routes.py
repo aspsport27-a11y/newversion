@@ -1,8 +1,13 @@
 """Endpoint publik (tanpa login) utk halaman jadwal.aspsports.id.
 
-Cuma expose ketersediaan slot (available/booked) — TIDAK PERNAH kirim
-customer_name/phone/email, harga transaksi, atau data staf. Dibatasi
-rate-limit per-IP krn tanpa auth. Prefix: /api/public
+Endpoint jadwal umum cuma expose ketersediaan slot (available/booked) —
+TIDAK PERNAH kirim customer_name/phone/email, harga transaksi, atau data staf.
+Dibatasi rate-limit per-IP krn tanpa auth. Prefix: /api/public
+
+PENGECUALIAN SATU-SATUNYA: `/coach-schedule` memang mengirim nama & no HP
+customer, tapi HANYA kalau pemanggil memegang token rahasia coach (keputusan
+user: coach perlu bisa menghubungi muridnya langsung). Karena itu endpoint
+tsb dijaga khusus — lihat komentar di sana.
 """
 from datetime import date, datetime, timedelta
 
@@ -10,7 +15,15 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db, limiter
 from ..models import Area, Venue
-from ..pos.models import Facility, FacilityBooking, day_type_for_date, facility_rate_for_hour
+from ..pos.models import (
+    Coach,
+    Facility,
+    FacilityBooking,
+    Order,
+    OrderItem,
+    day_type_for_date,
+    facility_rate_for_hour,
+)
 
 public_bp = Blueprint("public", __name__)
 
@@ -147,3 +160,65 @@ def public_schedule():
         cur = slot_end
 
     return jsonify(facility_id=fid, date=d.isoformat(), slots=slots), 200
+
+
+@public_bp.get("/coach-schedule")
+@limiter.limit("10 per minute")
+def public_coach_schedule():
+    """Jadwal pribadi coach — dibuka dgn TOKEN RAHASIA, tanpa login.
+
+    Ini satu-satunya endpoint publik yg mengirim data pribadi customer (nama
+    & no HP), atas keputusan user supaya coach bisa menghubungi muridnya.
+    Pengamanannya berlapis:
+      - kunci = token acak 24 byte (secrets), BUKAN id yg bisa di-enumerasi;
+      - rate limit lebih ketat dr endpoint publik lain (10/menit) — bikin
+        tebak-tebakan token tak praktis;
+      - hanya sesi YANG AKAN DATANG (hari ini s.d. 60 hari) — riwayat lama
+        tak pernah ikut terekspos;
+      - token bisa di-reset dr portal kalau bocor (token lama langsung mati).
+    Coach nonaktif → 404 (aksesnya otomatis putus).
+    """
+    token = (request.args.get("token") or "").strip()
+    if not token:
+        return _err("Token wajib diisi")
+    coach = Coach.query.filter_by(schedule_token=token, is_active=True).first()
+    if coach is None:
+        return _err("Tautan tidak berlaku", "not_found", 404)
+
+    today = date.today()
+    until = today + timedelta(days=60)
+    rows = (
+        db.session.query(FacilityBooking, Facility, OrderItem, Order)
+        .join(Facility, FacilityBooking.facility_id == Facility.id)
+        .outerjoin(OrderItem, FacilityBooking.coaching_item_id == OrderItem.id)
+        .outerjoin(Order, OrderItem.order_id == Order.id)
+        .filter(
+            FacilityBooking.coach_id == coach.id,
+            FacilityBooking.status == "booked",
+            FacilityBooking.booking_date.between(today, until),
+        )
+        .order_by(FacilityBooking.booking_date, FacilityBooking.start_time)
+        .all()
+    )
+    venue = db.session.get(Venue, coach.venue_id)
+    hm = lambda t: t.strftime("%H:%M") if t else None
+    sessions = []
+    for fb, fac, item, order in rows:
+        if order is not None and order.status == "void":
+            continue  # sesi dibatalkan jangan tampil di jadwal coach
+        sessions.append({
+            "date": fb.booking_date.isoformat(),
+            "start_time": hm(fb.start_time),
+            "end_time": hm(fb.end_time),
+            "facility_name": fac.name,
+            "persons": fb.coaching_persons,
+            "hours": float(item.quantity) if item is not None else None,
+            "customer_name": order.customer_name if order is not None else None,
+            "customer_phone": order.customer_phone if order is not None else None,
+        })
+    return jsonify(
+        coach={"name": coach.name},
+        venue={"name": venue.name if venue else None, "address": venue.address if venue else None},
+        count=len(sessions),
+        sessions=sessions,
+    ), 200

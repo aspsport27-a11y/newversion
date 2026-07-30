@@ -1267,7 +1267,31 @@ def coaches_list():
     elif vids is not None:
         q = q.filter(Coach.venue_id.in_(vids)) if vids else q.filter(db.false())
     items = q.order_by(Coach.venue_id, Coach.name).all()
-    return jsonify(count=len(items), coaches=[c.to_dict() for c in items]), 200
+    # coach lama belum punya token — dibuatkan sekarang supaya tautannya siap
+    if any(not c.schedule_token for c in items):
+        for c in items:
+            c.ensure_token()
+        db.session.commit()
+    return jsonify(count=len(items), coaches=[c.to_dict(with_token=True) for c in items]), 200
+
+
+@admin_bp.post("/coaches/<int:cid>/reset-token")
+@jwt_required()
+@FACILITY_MANAGE
+def coaches_reset_token(cid):
+    """Ganti tautan jadwal coach — dipakai kalau tautan lama bocor.
+    Tautan lama langsung tak berlaku."""
+    import secrets
+
+    c = db.session.get(Coach, cid)
+    if not c:
+        return _err("Coach tidak ditemukan", "not_found", 404)
+    err = _venue_in_scope(c.venue_id, _current_user())
+    if err:
+        return err
+    c.schedule_token = secrets.token_urlsafe(24)
+    db.session.commit()
+    return jsonify(coach=c.to_dict(with_token=True)), 200
 
 
 @admin_bp.post("/coaches")
@@ -1287,9 +1311,10 @@ def coaches_create():
         venue_id=d["venue_id"], name=d["name"][:100],
         phone=(d.get("phone") or None), is_active=bool(d.get("is_active", True)),
     )
+    c.ensure_token()  # tautan jadwal pribadi langsung siap
     db.session.add(c)
     db.session.commit()
-    return jsonify(coach=c.to_dict()), 201
+    return jsonify(coach=c.to_dict(with_token=True)), 201
 
 
 @admin_bp.put("/coaches/<int:cid>")
@@ -1310,7 +1335,7 @@ def coaches_update(cid):
     if "is_active" in d:
         c.is_active = bool(d["is_active"])
     db.session.commit()
-    return jsonify(coach=c.to_dict()), 200
+    return jsonify(coach=c.to_dict(with_token=True)), 200
 
 
 @admin_bp.delete("/coaches/<int:cid>")

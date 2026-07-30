@@ -210,6 +210,37 @@ async function delCoach(c) {
   try { await client.delete(`/admin/coaches/${c.id}`); await loadCoaching() }
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
 }
+// --- tautan jadwal pribadi coach ---
+function coachLink(c) {
+  return c.schedule_token ? `https://jadwal.aspsports.id/?coach=${c.schedule_token}` : null
+}
+async function copyCoachLink(c) {
+  const url = coachLink(c)
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+    flash('Tautan disalin')
+  } catch {
+    window.prompt('Salin tautan ini:', url) // fallback browser tanpa izin clipboard
+  }
+}
+function waCoachLink(c) {
+  const url = coachLink(c)
+  if (!url || !c.phone) return null
+  let digits = String(c.phone).replace(/\D/g, '')
+  if (!digits) return null
+  if (digits.startsWith('0')) digits = '62' + digits.slice(1)
+  else if (!digits.startsWith('62')) digits = '62' + digits
+  const text =
+    `Halo Coach ${c.name}, ini tautan jadwal coaching Anda di ${currentVenue.value?.name || 'venue kami'}:\n${url}\n\n` +
+    `Silakan disimpan — jadwalnya selalu terbarui otomatis. Mohon jangan dibagikan ke orang lain karena berisi kontak murid.`
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
+}
+async function resetCoachToken(c) {
+  if (!confirm(`Ganti tautan jadwal ${c.name}?\nTautan LAMA langsung tidak berlaku dan harus dikirim ulang.`)) return
+  try { await client.post(`/admin/coaches/${c.id}/reset-token`); await loadCoaching(); flash('Tautan diganti') }
+  catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
+}
 
 function reload() {
   // set tab default sesuai tipe venue
@@ -329,16 +360,22 @@ watch(venueId, reload)
         <p class="text-sm text-slate-500">Coach yang bisa dipilih kasir saat booking.</p>
         <button @click="openCoach()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Coach</button>
       </div>
+      <p class="text-xs text-slate-500 mb-2">
+        🔒 <b>Tautan Jadwal</b> = halaman pribadi coach (tanpa login) berisi sesi 60 hari ke depan
+        <b>lengkap dengan nama &amp; no HP murid</b>, supaya coach bisa menghubungi muridnya.
+        Kirim hanya ke coach yang bersangkutan. Kalau tautan bocor, klik <b>Ganti</b> — tautan lama langsung mati.
+      </p>
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
             <th class="px-4 py-3 font-medium">Nama</th>
             <th class="px-4 py-3 font-medium">No HP</th>
             <th class="px-4 py-3 font-medium text-center">Status</th>
+            <th class="px-4 py-3 font-medium">Tautan Jadwal</th>
             <th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="!coaches.length"><td colspan="4" class="px-4 py-8 text-center text-slate-400">Belum ada coach. Tambahkan dulu supaya coaching muncul di POS.</td></tr>
+            <tr v-if="!coaches.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Belum ada coach. Tambahkan dulu supaya coaching muncul di POS.</td></tr>
             <tr v-for="c in coaches" :key="c.id" class="border-t">
               <td class="px-4 py-3 font-medium text-slate-700">{{ c.name }}</td>
               <td class="px-4 py-3 text-slate-500 font-mono text-xs">{{ c.phone || '—' }}</td>
@@ -346,6 +383,13 @@ watch(venueId, reload)
                 <span :class="c.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5">
                   {{ c.is_active ? 'Aktif' : 'Nonaktif' }}
                 </span>
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <button @click="copyCoachLink(c)" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded px-2 py-1 mr-1">🔗 Salin</button>
+                <a v-if="waCoachLink(c)" :href="waCoachLink(c)" target="_blank" rel="noopener"
+                  class="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded px-2 py-1 mr-1 inline-block">Kirim WA</a>
+                <span v-else class="text-[11px] text-slate-400 mr-1">(isi no HP dulu)</span>
+                <button @click="resetCoachToken(c)" class="text-xs text-amber-600 hover:underline">Ganti</button>
               </td>
               <td class="px-4 py-3 text-right whitespace-nowrap">
                 <button @click="openCoach(c)" class="text-brand-600 text-xs hover:underline mr-3">Ubah</button>
