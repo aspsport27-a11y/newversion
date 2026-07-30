@@ -92,7 +92,7 @@ function fmtJam(n) {
       <template v-else>
         <div class="bg-white rounded-xl border p-4 mb-4 flex justify-between items-center">
           <div>
-            <p class="text-xs text-slate-400">Sesi mendatang (60 hari)</p>
+            <p class="text-xs text-slate-400">Sesi mendatang</p>
             <p class="text-xl font-bold text-slate-800">{{ sessions.length }} sesi</p>
           </div>
           <div class="text-right">
