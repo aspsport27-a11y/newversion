@@ -285,6 +285,13 @@ watch(venueId, reload)
 
     <!-- ===== COACHING ===== -->
     <div v-else-if="tab === 'coaching'">
+      <!-- penegasan venue: coach & tarif SELALU milik venue yang dipilih di atas -->
+      <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 mb-4 text-sm text-amber-800">
+        Coach &amp; tarif di bawah ini berlaku untuk venue
+        <b>{{ currentVenue ? currentVenue.code + ' — ' + currentVenue.name : '—' }}</b>.
+        <span v-if="!isManager">Ganti venue di pemilih kanan atas kalau bukan venue ini.</span>
+      </div>
+
       <!-- Tarif coaching -->
       <div class="bg-white rounded-xl shadow-sm border p-5 mb-5">
         <h3 class="font-semibold text-slate-700 mb-1">Tarif Coaching</h3>
