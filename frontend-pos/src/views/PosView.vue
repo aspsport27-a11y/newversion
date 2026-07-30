@@ -496,6 +496,7 @@ function logout() {
                 <template v-if="it.item_type === 'booking'">{{ it.quantity }} jam × {{ rupiah(it.unit_price) }}</template>
                 <template v-else>{{ rupiah(it.unit_price) }}</template>
               </p>
+              <p v-if="it.coaching_label" class="text-[10px] text-teal-600">🎾 {{ it.coaching_label }} · {{ rupiah(it.coaching_preview) }}</p>
               <p v-if="it.promo" class="text-[10px] text-amber-600">🎉 {{ it.promo.label }}</p>
             </div>
             <div v-if="it.item_type === 'product' || it.item_type === 'ticket'" class="flex items-center gap-1.5">

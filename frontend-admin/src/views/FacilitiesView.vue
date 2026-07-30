@@ -151,10 +151,70 @@ async function delHoliday(h) {
   try { await client.delete(`/admin/holidays/${h.id}`); await loadHolidays() } catch { alert('Gagal.') }
 }
 
+// ---------------- COACHING (padel) ----------------
+const coaches = ref([])
+const coachRate = ref(null)
+const rateFormC = ref({ base_price: 0, extra_person_price: 0, max_persons: 4 })
+const savingRateC = ref(false)
+const coachForm = ref({ name: '', phone: '', is_active: true })
+const editingCoach = ref(null)
+const showCoach = ref(false)
+const coachErr = ref('')
+const savingCoach = ref(false)
+
+async function loadCoaching() {
+  if (!venueId.value) return
+  try {
+    const [c, r] = await Promise.all([
+      client.get('/admin/coaches', { params: { venue_id: venueId.value } }),
+      client.get('/admin/coaching-rate', { params: { venue_id: venueId.value } }),
+    ])
+    coaches.value = c.data.coaches
+    coachRate.value = r.data.rate
+    rateFormC.value = r.data.rate
+      ? { base_price: r.data.rate.base_price, extra_person_price: r.data.rate.extra_person_price, max_persons: r.data.rate.max_persons }
+      : { base_price: 0, extra_person_price: 0, max_persons: 4 }
+  } catch (_) {
+    coaches.value = []; coachRate.value = null
+  }
+}
+async function saveCoachRate() {
+  savingRateC.value = true
+  try {
+    await client.put('/admin/coaching-rate', { ...rateFormC.value, venue_id: venueId.value })
+    await loadCoaching(); flash('Tarif coaching disimpan')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { savingRateC.value = false }
+}
+// contoh harga per jumlah peserta — biar manajer lihat efek tarif sebelum simpan
+const coachPricePreview = computed(() => {
+  const b = Number(rateFormC.value.base_price) || 0
+  const e = Number(rateFormC.value.extra_person_price) || 0
+  const max = Math.min(Number(rateFormC.value.max_persons) || 4, 10)
+  return Array.from({ length: max }, (_, i) => ({ n: i + 1, price: b + i * e }))
+})
+function openCoach(c = null) {
+  editingCoach.value = c
+  coachForm.value = c ? { name: c.name, phone: c.phone || '', is_active: c.is_active } : { name: '', phone: '', is_active: true }
+  coachErr.value = ''; showCoach.value = true
+}
+async function saveCoach() {
+  savingCoach.value = true; coachErr.value = ''
+  try {
+    if (editingCoach.value) await client.put(`/admin/coaches/${editingCoach.value.id}`, coachForm.value)
+    else await client.post('/admin/coaches', { ...coachForm.value, venue_id: venueId.value })
+    showCoach.value = false; await loadCoaching(); flash('Coach disimpan')
+  } catch (e) { coachErr.value = e?.response?.data?.message || 'Gagal.' } finally { savingCoach.value = false }
+}
+async function delCoach(c) {
+  if (!confirm(`Hapus coach ${c.name}?`)) return
+  try { await client.delete(`/admin/coaches/${c.id}`); await loadCoaching() }
+  catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
+}
+
 function reload() {
   // set tab default sesuai tipe venue
   tab.value = isTicketVenue.value ? 'tiket' : 'lapangan'
-  if (isTicketVenue.value) { loadTickets(); loadHolidays() } else { loadFacilities() }
+  if (isTicketVenue.value) { loadTickets(); loadHolidays() } else { loadFacilities(); loadCoaching() }
 }
 onMounted(async () => { loading.value = true; await loadVenues(); reload(); loading.value = false })
 watch(venueId, reload)
@@ -178,7 +238,10 @@ watch(venueId, reload)
         <button @click="tab = 'tiket'" :class="tab === 'tiket' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Tiket</button>
         <button @click="tab = 'libur'" :class="tab === 'libur' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Hari Libur</button>
       </template>
-      <button v-else disabled class="px-4 py-2 border-b-2 border-brand-600 text-brand-700 font-medium text-sm">Lapangan</button>
+      <template v-else>
+        <button @click="tab = 'lapangan'" :class="tab === 'lapangan' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Lapangan</button>
+        <button @click="tab = 'coaching'" :class="tab === 'coaching' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Coaching</button>
+      </template>
     </div>
 
     <div v-if="loading" class="text-slate-400">Memuat…</div>
@@ -213,6 +276,73 @@ watch(venueId, reload)
               <td class="px-4 py-3 text-right whitespace-nowrap">
                 <button @click="openRates(f)" class="text-amber-600 text-sm hover:underline mr-3">Tarif</button>
                 <button @click="openFac(f)" class="text-brand-600 text-sm hover:underline">Edit</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ===== COACHING ===== -->
+    <div v-else-if="tab === 'coaching'">
+      <!-- Tarif coaching -->
+      <div class="bg-white rounded-xl shadow-sm border p-5 mb-5">
+        <h3 class="font-semibold text-slate-700 mb-1">Tarif Coaching</h3>
+        <p class="text-xs text-slate-500 mb-4">Harga <b>per jam</b>, di luar sewa lapangan (sewa lapangan ditagih terpisah).</p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Harga 1 peserta / jam</label>
+            <input v-model.number="rateFormC.base_price" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Tambahan per peserta / jam</label>
+            <input v-model.number="rateFormC.extra_person_price" type="number" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Maksimal peserta</label>
+            <input v-model.number="rateFormC.max_persons" type="number" min="1" max="20" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+        </div>
+        <div class="bg-slate-50 rounded-lg p-3 mb-4">
+          <p class="text-xs text-slate-500 mb-1.5">Harga jadi seperti ini:</p>
+          <div class="flex flex-wrap gap-x-4 gap-y-1">
+            <span v-for="p in coachPricePreview" :key="p.n" class="text-xs text-slate-600">
+              {{ p.n }} org: <b>{{ rupiah(p.price) }}</b>/jam
+            </span>
+          </div>
+        </div>
+        <button @click="saveCoachRate" :disabled="savingRateC" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium disabled:opacity-40">
+          {{ savingRateC ? 'Menyimpan…' : 'Simpan Tarif' }}
+        </button>
+        <p v-if="!coachRate" class="text-xs text-amber-600 mt-2">Tarif belum diatur — coaching belum bisa dipakai di POS.</p>
+      </div>
+
+      <!-- Daftar coach -->
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-sm text-slate-500">Coach yang bisa dipilih kasir saat booking.</p>
+        <button @click="openCoach()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Coach</button>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+            <th class="px-4 py-3 font-medium">Nama</th>
+            <th class="px-4 py-3 font-medium">No HP</th>
+            <th class="px-4 py-3 font-medium text-center">Status</th>
+            <th class="px-4 py-3"></th>
+          </tr></thead>
+          <tbody>
+            <tr v-if="!coaches.length"><td colspan="4" class="px-4 py-8 text-center text-slate-400">Belum ada coach. Tambahkan dulu supaya coaching muncul di POS.</td></tr>
+            <tr v-for="c in coaches" :key="c.id" class="border-t">
+              <td class="px-4 py-3 font-medium text-slate-700">{{ c.name }}</td>
+              <td class="px-4 py-3 text-slate-500 font-mono text-xs">{{ c.phone || '—' }}</td>
+              <td class="px-4 py-3 text-center">
+                <span :class="c.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5">
+                  {{ c.is_active ? 'Aktif' : 'Nonaktif' }}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-right whitespace-nowrap">
+                <button @click="openCoach(c)" class="text-brand-600 text-xs hover:underline mr-3">Ubah</button>
+                <button @click="delCoach(c)" class="text-red-500 text-xs hover:underline">Hapus</button>
               </td>
             </tr>
           </tbody>
@@ -360,6 +490,29 @@ watch(venueId, reload)
           <label v-if="editingTk" class="flex items-center gap-2 text-sm text-slate-600"><input v-model="tkForm.is_active" type="checkbox" /> Aktif</label>
           <p v-if="tkErr" class="text-sm text-red-600">{{ tkErr }}</p>
           <button @click="saveTk" :disabled="savingTk" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ savingTk ? 'Menyimpan…' : 'Simpan' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal coach -->
+    <div v-if="showCoach" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
+      <div class="bg-white w-full max-w-sm rounded-2xl p-5">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-bold text-slate-800">{{ editingCoach ? 'Edit Coach' : 'Coach Baru' }}</h3>
+          <button @click="showCoach = false" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">Nama coach</label>
+            <input v-model="coachForm.name" placeholder="mis. Coach Budi" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">No HP (opsional)</label>
+            <input v-model="coachForm.phone" placeholder="08…" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          </div>
+          <label class="flex items-center gap-2 text-sm text-slate-600"><input v-model="coachForm.is_active" type="checkbox" /> Aktif (muncul di POS)</label>
+          <p v-if="coachErr" class="text-sm text-red-600">{{ coachErr }}</p>
+          <button @click="saveCoach" :disabled="savingCoach" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ savingCoach ? 'Menyimpan…' : 'Simpan' }}</button>
         </div>
       </div>
     </div>

@@ -23,6 +23,8 @@ from ..security import (
 from ..pos.models import (
     DAY_TYPES,
     Attendance,
+    Coach,
+    CoachingRate,
     Facility,
     FacilityBooking,
     FacilityRateRule,
@@ -1237,6 +1239,149 @@ def facility_rate_rule_delete(rid):
     db.session.delete(rule)
     db.session.commit()
     return jsonify(message="Aturan tarif dihapus"), 200
+
+
+# ==================================================================
+# COACHING (padel) — master coach & tarif per venue
+# ==================================================================
+def _venue_in_scope(vid, user):
+    """None kalau boleh, atau response error kalau venue di luar cakupan user."""
+    vids = _scope_vids(user)
+    if vids is not None and int(vid) not in vids:
+        return _err("Venue di luar cakupan Anda", "forbidden", 403)
+    return None
+
+
+@admin_bp.get("/coaches")
+@jwt_required()
+@VIEW
+def coaches_list():
+    q = Coach.query
+    vid = request.args.get("venue_id", type=int)
+    vids = _scope_vids(_current_user())
+    if vid:
+        err = _venue_in_scope(vid, _current_user())
+        if err:
+            return err
+        q = q.filter_by(venue_id=vid)
+    elif vids is not None:
+        q = q.filter(Coach.venue_id.in_(vids)) if vids else q.filter(db.false())
+    items = q.order_by(Coach.venue_id, Coach.name).all()
+    return jsonify(count=len(items), coaches=[c.to_dict() for c in items]), 200
+
+
+@admin_bp.post("/coaches")
+@jwt_required()
+@FACILITY_MANAGE
+def coaches_create():
+    d = request.get_json(silent=True) or {}
+    for f in ("name", "venue_id"):
+        if not d.get(f):
+            return _err(f"{f} wajib diisi")
+    if not _venue_or_404(d["venue_id"]):
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    err = _venue_in_scope(d["venue_id"], _current_user())
+    if err:
+        return err
+    c = Coach(
+        venue_id=d["venue_id"], name=d["name"][:100],
+        phone=(d.get("phone") or None), is_active=bool(d.get("is_active", True)),
+    )
+    db.session.add(c)
+    db.session.commit()
+    return jsonify(coach=c.to_dict()), 201
+
+
+@admin_bp.put("/coaches/<int:cid>")
+@jwt_required()
+@FACILITY_MANAGE
+def coaches_update(cid):
+    c = db.session.get(Coach, cid)
+    if not c:
+        return _err("Coach tidak ditemukan", "not_found", 404)
+    err = _venue_in_scope(c.venue_id, _current_user())
+    if err:
+        return err
+    d = request.get_json(silent=True) or {}
+    if d.get("name"):
+        c.name = d["name"][:100]
+    if "phone" in d:
+        c.phone = d.get("phone") or None
+    if "is_active" in d:
+        c.is_active = bool(d["is_active"])
+    db.session.commit()
+    return jsonify(coach=c.to_dict()), 200
+
+
+@admin_bp.delete("/coaches/<int:cid>")
+@jwt_required()
+@FACILITY_MANAGE
+def coaches_delete(cid):
+    """Hapus permanen hanya kalau coach belum pernah dipakai booking — kalau
+    sudah, jejak siapa yg mengajar harus tetap ada; nonaktifkan saja."""
+    c = db.session.get(Coach, cid)
+    if not c:
+        return _err("Coach tidak ditemukan", "not_found", 404)
+    err = _venue_in_scope(c.venue_id, _current_user())
+    if err:
+        return err
+    used = FacilityBooking.query.filter_by(coach_id=cid).first()
+    if used:
+        return _err(
+            "Coach ini sudah punya riwayat mengajar — tak bisa dihapus. "
+            "Nonaktifkan saja supaya tak muncul lagi di POS.",
+            "has_history", 409,
+        )
+    db.session.delete(c)
+    db.session.commit()
+    return jsonify(message="Coach dihapus"), 200
+
+
+@admin_bp.get("/coaching-rate")
+@jwt_required()
+@VIEW
+def coaching_rate_get():
+    vid = request.args.get("venue_id", type=int)
+    if not vid:
+        return _err("venue_id wajib diisi")
+    err = _venue_in_scope(vid, _current_user())
+    if err:
+        return err
+    rate = db.session.get(CoachingRate, vid)
+    return jsonify(rate=rate.to_dict() if rate else None), 200
+
+
+@admin_bp.put("/coaching-rate")
+@jwt_required()
+@FACILITY_MANAGE
+def coaching_rate_set():
+    """Simpan/ubah tarif coaching venue (upsert). base_price = harga 1 peserta
+    per jam; extra_person_price = tambahan tiap peserta berikutnya per jam."""
+    d = request.get_json(silent=True) or {}
+    vid = d.get("venue_id")
+    if not vid:
+        return _err("venue_id wajib diisi")
+    if not _venue_or_404(vid):
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    err = _venue_in_scope(vid, _current_user())
+    if err:
+        return err
+    try:
+        max_p = int(d.get("max_persons") or 4)
+    except (TypeError, ValueError):
+        return _err("max_persons harus angka")
+    if max_p < 1 or max_p > 20:
+        return _err("max_persons harus 1–20")
+    rate = db.session.get(CoachingRate, vid)
+    if rate is None:
+        rate = CoachingRate(venue_id=vid)
+        db.session.add(rate)
+    rate.base_price = _D(d.get("base_price"))
+    rate.extra_person_price = _D(d.get("extra_person_price"))
+    rate.max_persons = max_p
+    rate.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(rate=rate.to_dict()), 200
 
 
 # ==================================================================

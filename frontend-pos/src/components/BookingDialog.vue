@@ -61,6 +61,54 @@ const price = computed(() => {
   return bookingPrice(f, startH.value, endH.value, dayType.value)
 })
 
+// ---------- coaching (padel) ----------
+// UI coaching cuma muncul kalau venue ini punya coach terdaftar & tarifnya
+// sudah diatur — venue lain (futsal/waterpark/dll) sama sekali tak berubah.
+const coaches = ref([])
+const coachingRate = ref(null)
+const useCoaching = ref(false)
+const coachId = ref(null)
+const persons = ref(1)
+const hasCoaching = computed(() => coaches.value.length > 0 && coachingRate.value != null)
+const maxPersons = computed(() => coachingRate.value?.max_persons || 4)
+
+async function loadCoaching() {
+  const params = {}
+  // kirim slot terpilih supaya server tandai coach yang sudah mengajar di jam itu
+  if (date.value && startH.value != null && endH.value != null && durationHours.value > 0) {
+    params.date = date.value
+    params.start_time = hhmm(startH.value)
+    params.end_time = hhmm(endH.value)
+  }
+  try {
+    const d = await pos.fetchCoaching(params)
+    coaches.value = d.coaches || []
+    coachingRate.value = d.rate || null
+    // coach yang dipilih ternyata sudah tak tersedia di slot baru → lepas
+    if (coachId.value && !coaches.value.some((c) => c.id === coachId.value && c.available)) {
+      coachId.value = null
+    }
+  } catch (_) {
+    coaches.value = []
+    coachingRate.value = null
+  }
+}
+onMounted(loadCoaching)
+watch([date, startH, endH], loadCoaching)
+
+const availableCoaches = computed(() => coaches.value.filter((c) => c.available))
+const coachingPerHour = computed(() => {
+  const r = coachingRate.value
+  if (!r) return 0
+  return Number(r.base_price) + (Math.max(1, persons.value) - 1) * Number(r.extra_person_price)
+})
+const coachingTotal = computed(() =>
+  useCoaching.value && coachId.value && durationHours.value > 0
+    ? coachingPerHour.value * durationHours.value
+    : 0,
+)
+const grandTotal = computed(() => price.value + coachingTotal.value)
+
 function overlaps(sH, eH) {
   const sMin = sH * 60
   const eMin = eH * 60
@@ -107,8 +155,10 @@ function add() {
   if (startH.value == null || endH.value == null) return (error.value = 'Pilih jam mulai & selesai.')
   if (durationHours.value <= 0) return (error.value = 'Jam selesai harus setelah jam mulai.')
   if (overlaps(startH.value, endH.value)) return (error.value = 'Jadwal bentrok dengan booking lain.')
+  if (useCoaching.value && !coachId.value) return (error.value = 'Pilih coach untuk coaching.')
   const startStr = hhmm(startH.value)
   const endStr = hhmm(endH.value)
+  const withCoach = useCoaching.value && coachId.value
   pos.addBooking({
     facility_id: facility.value.id,
     name: `${facility.value.name} ${date.value} ${startStr}-${endStr}`,
@@ -119,6 +169,12 @@ function add() {
     booking_date: date.value,
     start_time: startStr,
     end_time: endStr,
+    // coaching: server yg bikin baris uang & harga finalnya
+    ...(withCoach ? { coach_id: coachId.value, coaching_persons: persons.value } : {}),
+    coaching_label: withCoach
+      ? `Coaching ${persons.value} org (${coaches.value.find((c) => c.id === coachId.value)?.name || ''})`
+      : null,
+    coaching_preview: withCoach ? coachingTotal.value : 0,
   })
   emit('added')
   emit('close')
@@ -189,9 +245,55 @@ function add() {
           </div>
         </div>
 
-        <div class="flex justify-between items-center mb-3">
-          <span class="text-sm text-slate-500">{{ durationHours > 0 ? durationHours + ' jam' : '—' }}</span>
-          <span class="text-xl font-bold text-brand-700">{{ rupiah(price) }}</span>
+        <!-- Coaching (hanya venue yg punya coach & tarifnya sudah diatur) -->
+        <div v-if="hasCoaching" class="border border-teal-200 bg-teal-50/50 rounded-lg p-3 mb-3">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" v-model="useCoaching" class="w-4 h-4 accent-teal-600" />
+            <span class="text-sm font-medium text-slate-700">Pakai Coach (coaching)</span>
+          </label>
+
+          <div v-if="useCoaching" class="mt-3 space-y-2">
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">Coach</label>
+              <select v-model.number="coachId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500">
+                <option :value="null">-- pilih coach --</option>
+                <option v-for="c in availableCoaches" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select>
+              <p v-if="durationHours > 0 && !availableCoaches.length" class="text-xs text-amber-600 mt-1">
+                Semua coach sudah mengajar di jam ini.
+              </p>
+              <p v-else-if="durationHours <= 0" class="text-xs text-slate-400 mt-1">
+                Pilih jam dulu untuk melihat coach yang tersedia.
+              </p>
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">Jumlah peserta (maks {{ maxPersons }})</label>
+              <select v-model.number="persons" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500">
+                <option v-for="n in maxPersons" :key="n" :value="n">{{ n }} orang</option>
+              </select>
+            </div>
+            <p class="text-xs text-slate-500">
+              Tarif coaching {{ rupiah(coachingPerHour) }}/jam · di luar sewa {{ unitTerm.toLowerCase() }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Ringkasan harga -->
+        <div class="border-t pt-3 mb-3">
+          <div v-if="coachingTotal > 0" class="space-y-1 mb-2">
+            <div class="flex justify-between text-sm">
+              <span class="text-slate-500">Sewa {{ unitTerm.toLowerCase() }} {{ durationHours }} jam</span>
+              <span class="text-slate-700">{{ rupiah(price) }}</span>
+            </div>
+            <div class="flex justify-between text-sm">
+              <span class="text-slate-500">Coaching {{ persons }} org × {{ durationHours }} jam</span>
+              <span class="text-slate-700">{{ rupiah(coachingTotal) }}</span>
+            </div>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-sm text-slate-500">{{ durationHours > 0 ? durationHours + ' jam' : '—' }}</span>
+            <span class="text-xl font-bold text-brand-700">{{ rupiah(grandTotal) }}</span>
+          </div>
         </div>
 
         <p v-if="error" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">{{ error }}</p>

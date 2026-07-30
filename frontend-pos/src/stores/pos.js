@@ -36,7 +36,10 @@ export const usePosStore = defineStore('pos', {
         const free = Math.floor(i.quantity / group) * promo.get_qty
         paid = i.quantity - free
       }
-      return i.unit_price * paid
+      // coaching_preview = biaya coaching yg menempel pd booking ini; baris
+      // uangnya dibuat server, tapi harus ikut dihitung di preview keranjang
+      // supaya total di POS sama dgn yang ditagih saat bayar
+      return i.unit_price * paid + (i.coaching_preview || 0)
     },
     subtotal() {
       return this.cart.reduce((s, i) => s + this.lineTotal(i), 0)
@@ -90,6 +93,12 @@ export const usePosStore = defineStore('pos', {
         params: { date },
       })
       return data.bookings
+    },
+    // coaching (padel): tarif + daftar coach. Kalau slot dikirim, tiap coach
+    // dapat flag `available` (coach yg sedang mengajar di jam itu = false).
+    async fetchCoaching(params = {}) {
+      const { data } = await client.get('/coaching', { params })
+      return data // { rate, price_per_hour, coaches }
     },
     // --- station gaming (arena esport) ---
     async fetchStations() {
@@ -232,6 +241,8 @@ export const usePosStore = defineStore('pos', {
           return {
             item_type: 'booking', facility_id: i.facility_id,
             booking_date: i.booking_date, start_time: i.start_time, end_time: i.end_time,
+            // coaching (padel) — server yg bikin baris uangnya & validasi coach
+            ...(i.coach_id ? { coach_id: i.coach_id, coaching_persons: i.coaching_persons } : {}),
           }
         if (i.item_type === 'ticket')
           return { item_type: 'ticket', product_id: i.product_id, quantity: i.quantity }

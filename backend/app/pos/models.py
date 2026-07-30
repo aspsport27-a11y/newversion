@@ -499,6 +499,14 @@ class FacilityBooking(db.Model):
     end_time = db.Column(db.Time, nullable=False)
     status = db.Column(db.String(10), nullable=False, default="booked")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # coaching (padel): coach & jumlah peserta utk slot ini. coach_id NULL =
+    # booking court biasa tanpa coaching. coaching_item_id menunjuk baris uang
+    # coaching-nya di order (lihat migrasi 047).
+    coach_id = db.Column(db.Integer, db.ForeignKey("coaches.id", ondelete="SET NULL"))
+    coaching_persons = db.Column(db.Integer)
+    coaching_item_id = db.Column(
+        db.Integer, db.ForeignKey("order_items.id", ondelete="SET NULL")
+    )
 
     def to_dict(self):
         hm = lambda t: t.strftime("%H:%M") if t else None
@@ -509,7 +517,63 @@ class FacilityBooking(db.Model):
             "start_time": hm(self.start_time),
             "end_time": hm(self.end_time),
             "status": self.status,
+            "coach_id": self.coach_id,
+            "coaching_persons": self.coaching_persons,
         }
+
+
+class Coach(db.Model):
+    """Pelatih (coaching padel). Mitra/freelance — sengaja TIDAK dipakai tabel
+    employees yg isinya pegawai payroll."""
+
+    __tablename__ = "coaches"
+
+    id = db.Column(db.Integer, primary_key=True)
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id"), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    phone = db.Column(db.String(20))
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "venue_id": self.venue_id,
+            "name": self.name,
+            "phone": self.phone,
+            "is_active": self.is_active,
+        }
+
+
+class CoachingRate(db.Model):
+    """Tarif coaching per venue: harga utk 1 peserta + tambahan per peserta
+    berikutnya, PER JAM. Sewa court ditagih terpisah (exclude lapangan)."""
+
+    __tablename__ = "coaching_rates"
+
+    venue_id = db.Column(
+        db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), primary_key=True
+    )
+    base_price = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    extra_person_price = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    max_persons = db.Column(db.Integer, nullable=False, default=4)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "venue_id": self.venue_id,
+            "base_price": float(self.base_price or 0),
+            "extra_person_price": float(self.extra_person_price or 0),
+            "max_persons": self.max_persons or 4,
+        }
+
+
+def coaching_price_per_hour(rate: "CoachingRate", persons: int) -> float:
+    """Tarif coaching per jam utk `persons` peserta:
+    base + (peserta-1) * tambahan. Mis. 250rb + (3-1)*50rb = 350rb/jam."""
+    if rate is None or not persons or persons < 1:
+        return 0.0
+    return float(rate.base_price or 0) + (persons - 1) * float(rate.extra_person_price or 0)
 
 
 class StockMovement(db.Model):

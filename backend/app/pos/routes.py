@@ -19,7 +19,7 @@ from ..perms import has_perm
 from ..security import verify_password
 from ..stations.models import GameStation
 from . import briapi
-from .models import Attendance, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift
+from .models import Attendance, Coach, CoachingRate, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift, coaching_price_per_hour
 from .services import (
     PosError,
     add_cash_movement,
@@ -29,6 +29,7 @@ from .services import (
     confirm_qris_payment,
     create_order,
     expire_stale_qris,
+    is_coach_available,
     open_shift,
     pay_order,
     reschedule_booking,
@@ -347,7 +348,10 @@ def pos_products():
 # ------------------------------------------------------------------
 # Laporan penjualan hari ini per kategori (untuk kasir, tanpa detail item)
 # ------------------------------------------------------------------
-_REPORT_LABELS = {"ticket": "Tiket Masuk", "booking": "Booking Lapangan", "rental": "Station Gaming"}
+_REPORT_LABELS = {
+    "ticket": "Tiket Masuk", "booking": "Booking Lapangan",
+    "rental": "Station Gaming", "coaching": "Coaching",
+}
 
 
 @pos_bp.get("/reports/category-daily")
@@ -394,6 +398,9 @@ def report_category_daily():
         groups[label] = {"category": label, "qty": 0.0, "amount": 0.0, "items": {}}
     if GameStation.query.filter_by(venue_id=terminal.venue_id, is_active=True).first():
         label = _REPORT_LABELS["rental"]
+        groups[label] = {"category": label, "qty": 0.0, "amount": 0.0, "items": {}}
+    if Coach.query.filter_by(venue_id=terminal.venue_id, is_active=True).first():
+        label = _REPORT_LABELS["coaching"]
         groups[label] = {"category": label, "qty": 0.0, "amount": 0.0, "items": {}}
 
     # POS kenal 3 metode bayar (cash/qris/transfer) — selalu tampilkan semua
@@ -461,6 +468,57 @@ def report_category_daily():
         total=round(total, 2),
         by_category=by_category,
         by_method=by_method,
+    ), 200
+
+
+# ------------------------------------------------------------------
+# Coaching (padel) — tarif + daftar coach & ketersediaannya
+# ------------------------------------------------------------------
+@pos_bp.get("/coaching")
+@jwt_required()
+def pos_coaching():
+    """Tarif coaching + daftar coach venue ini. Kalau diberi date/start_time/
+    end_time, tiap coach ditandai `available` — POS memakainya utk menyaring
+    coach yg sudah mengajar di jam itu (termasuk di court lain).
+
+    Venue tanpa coach → coaches kosong; POS otomatis menyembunyikan UI coaching."""
+    terminal = _current_terminal()
+    rate = db.session.get(CoachingRate, terminal.venue_id)
+    coaches = (
+        Coach.query.filter_by(venue_id=terminal.venue_id, is_active=True)
+        .order_by(Coach.name)
+        .all()
+    )
+
+    d_str = request.args.get("date")
+    s_str = request.args.get("start_time")
+    e_str = request.args.get("end_time")
+    bdate = start = end = None
+    if d_str and s_str and e_str:
+        try:
+            bdate = date.fromisoformat(d_str)
+            start = datetime.strptime(s_str, "%H:%M").time()
+            end = datetime.strptime(e_str, "%H:%M").time()
+        except (ValueError, TypeError):
+            bdate = start = end = None  # abaikan filter kalau formatnya salah
+
+    out = []
+    for c in coaches:
+        row = c.to_dict()
+        row["available"] = (
+            is_coach_available(c.id, bdate, start, end) if bdate else True
+        )
+        out.append(row)
+
+    max_p = (rate.max_persons if rate else 4) or 4
+    return jsonify(
+        rate=rate.to_dict() if rate else None,
+        # harga per jam utk tiap jumlah peserta — biar POS tak perlu hitung sendiri
+        price_per_hour={
+            str(n): coaching_price_per_hour(rate, n) for n in range(1, max_p + 1)
+        } if rate else {},
+        count=len(out),
+        coaches=out,
     ), 200
 
 

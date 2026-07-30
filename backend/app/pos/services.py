@@ -12,6 +12,8 @@ log = logging.getLogger(__name__)
 from .models import (
     BookingReschedule,
     CashMovement,
+    Coach,
+    CoachingRate,
     Facility,
     FacilityBooking,
     Holiday,
@@ -21,6 +23,7 @@ from .models import (
     Product,
     Shift,
     StockMovement,
+    coaching_price_per_hour,
     day_type_for_date,
     facility_booking_price,
     facility_rate_for_hour,
@@ -96,6 +99,32 @@ def is_slot_available(facility_id, booking_date, start, end, exclude_id=None) ->
             return False
     return True
 
+def is_coach_available(coach_id, booking_date, start, end, exclude_id=None) -> bool:
+    """True jika coach belum mengajar di slot [start,end) pd tanggal itu.
+    Dicek LINTAS COURT (bukan per facility spt is_slot_available): 1 coach tak
+    bisa mengajar di 2 court sekaligus, walau court-nya sendiri kosong."""
+    def _mins(t, as_end=False):
+        m = t.hour * 60 + t.minute
+        return 24 * 60 if (as_end and m == 0) else m
+
+    s_min = _mins(start)
+    e_min = _mins(end, as_end=True)
+
+    q = FacilityBooking.query.filter(
+        FacilityBooking.coach_id == coach_id,
+        FacilityBooking.booking_date == booking_date,
+        FacilityBooking.status == "booked",
+    )
+    if exclude_id:
+        q = q.filter(FacilityBooking.id != exclude_id)
+    for b in q.all():
+        if _mins(b.start_time) < e_min and _mins(b.end_time, as_end=True) > s_min:
+            return False
+    return True
+
+
+# 'coaching' tak boleh dikirim langsung dr klien — baris uangnya dibuat otomatis
+# oleh sistem dari item 'booking' yg memakai coach (lihat _build_order_items).
 VALID_ITEM_TYPES = {"product", "ticket", "rental", "booking"}
 VALID_METHODS = {"cash", "qris", "transfer"}
 
@@ -219,7 +248,8 @@ def _build_order_items(order, items_in, venue_id):
                     f"Jadwal {facility.name} {row['start_time']}-{row['end_time']} sudah dibooking",
                     "slot_taken", 409,
                 )
-            for _, fid2, d2, s2, e2 in booking_specs:  # bentrok dalam 1 keranjang
+            for spec in booking_specs:  # bentrok dalam 1 keranjang
+                _, fid2, d2, s2, e2 = spec[:5]
                 if fid2 == facility.id and d2 == bdate and s2 < end and e2 > start:
                     raise PosError("Slot bentrok dengan item lain di keranjang", "slot_taken", 409)
             qty = _D(hours)
@@ -238,7 +268,55 @@ def _build_order_items(order, items_in, venue_id):
                 unit_price=unit_price, quantity=qty,
                 line_total=total_price, notes=breakdown,
             )
-            booking_specs.append((oi, facility.id, bdate, start, end))
+
+            # --- coaching (padel): opsional, selalu menempel pd booking ini ---
+            coach_id = row.get("coach_id")
+            coaching_oi = None
+            if coach_id:
+                coach = db.session.get(Coach, coach_id)
+                if coach is None or not coach.is_active or coach.venue_id != venue_id:
+                    raise PosError("Coach tidak ditemukan/nonaktif", "coach_not_found", 404)
+                rate = db.session.get(CoachingRate, venue_id)
+                if rate is None:
+                    raise PosError(
+                        "Tarif coaching belum diatur utk venue ini", "no_coaching_rate", 409
+                    )
+                persons = int(row.get("coaching_persons") or 1)
+                if persons < 1 or persons > (rate.max_persons or 4):
+                    raise PosError(
+                        f"Jumlah peserta coaching harus 1–{rate.max_persons or 4}", "bad_persons"
+                    )
+                if not is_coach_available(coach.id, bdate, start, end):
+                    raise PosError(
+                        f"{coach.name} sudah mengajar di jam {row['start_time']}-{row['end_time']}",
+                        "coach_taken", 409,
+                    )
+                for spec in booking_specs:  # coach bentrok dalam 1 keranjang
+                    _, _, d2, s2, e2 = spec[:5]
+                    if spec[5] == coach.id and d2 == bdate and s2 < end and e2 > start:
+                        raise PosError(
+                            f"{coach.name} bentrok dengan item lain di keranjang",
+                            "coach_taken", 409,
+                        )
+                per_hour = _D(coaching_price_per_hour(rate, persons))
+                c_total = (per_hour * qty).quantize(Decimal("0.01"))
+                c_name = f"Coaching {persons} orang — {facility.name} {bdate:%d/%m} {row['start_time']}-{row['end_time']}"
+                extra = persons - 1
+                c_note = f"{per_hour:,.0f}/jam × {hours:g} jam".replace(",", ".")
+                if extra:
+                    c_note = (
+                        f"{float(rate.base_price):,.0f} + {extra}×{float(rate.extra_person_price):,.0f} "
+                        f"= {c_note}"
+                    ).replace(",", ".")
+                coaching_oi = OrderItem(
+                    item_type="coaching", product_id=None, name_snapshot=c_name[:120],
+                    unit_price=per_hour, quantity=qty, line_total=c_total, notes=c_note,
+                )
+
+            booking_specs.append(
+                (oi, facility.id, bdate, start, end, coach_id, coaching_oi,
+                 int(row.get("coaching_persons") or 1) if coach_id else None)
+            )
 
         else:  # rental: nama & harga dari input
             qty = _D(row.get("quantity", 1))
@@ -254,16 +332,26 @@ def _build_order_items(order, items_in, venue_id):
 
         subtotal += oi.line_total
         order.items.append(oi)
+        # baris uang coaching (kalau booking ini pakai coach) — item terpisah
+        # supaya terpisah juga di laporan
+        c_oi = booking_specs[-1][6] if (item_type == "booking" and booking_specs) else None
+        if c_oi is not None:
+            subtotal += c_oi.line_total
+            order.items.append(c_oi)
     return subtotal, booking_specs
 
 
 def _create_facility_bookings(order, booking_specs):
     """Reservasi slot (FacilityBooking) utk item booking — setelah order_item punya id."""
-    for oi, fid, bdate, start, end in booking_specs:
+    for spec in booking_specs:
+        oi, fid, bdate, start, end = spec[:5]
+        coach_id, c_oi, persons = spec[5], spec[6], spec[7]
         db.session.add(
             FacilityBooking(
                 facility_id=fid, venue_id=order.venue_id, order_item_id=oi.id,
                 booking_date=bdate, start_time=start, end_time=end, status="booked",
+                coach_id=coach_id, coaching_persons=persons,
+                coaching_item_id=c_oi.id if c_oi is not None else None,
             )
         )
 
@@ -379,6 +467,13 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
     # slot baru harus kosong (kecuali slot ini sendiri)
     if not is_slot_available(facility.id, bdate, start, end, exclude_id=fb.id):
         raise PosError(f"Slot {facility.name} {start_time}-{end_time} sudah dibooking", "slot_taken", 409)
+    # booking ber-coaching: coach-nya juga harus bebas di slot baru
+    if fb.coach_id and not is_coach_available(fb.coach_id, bdate, start, end, exclude_id=fb.id):
+        coach = db.session.get(Coach, fb.coach_id)
+        raise PosError(
+            f"{coach.name if coach else 'Coach'} sudah mengajar di jam {start_time}-{end_time}",
+            "coach_taken", 409,
+        )
 
     old_desc = f"{item.name_snapshot}"
     old_line = _D(item.line_total)
@@ -389,11 +484,19 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
     new_total = _D(facility_booking_price(facility, start.hour, end_hour, dtype)).quantize(Decimal("0.01"))
     breakdown = _booking_rate_breakdown(facility, start.hour, end_hour, dtype)
 
+    # biaya coaching ikut durasi baru (tarif/jam & jumlah peserta tak berubah)
+    c_item = db.session.get(OrderItem, fb.coaching_item_id) if fb.coaching_item_id else None
+    c_old_line = _D(c_item.line_total) if c_item is not None else _D(0)
+    c_new_line = c_old_line
+    if c_item is not None:
+        c_new_line = (_D(c_item.unit_price) * _D(hours)).quantize(Decimal("0.01"))
+
     # Pre-cek refund SEBELUM mengubah slot/harga (biar gagal tanpa efek samping):
     # kalau slot baru lebih murah dari yg sudah dibayar & diminta catat refund,
     # wajib ada shift kasir terbuka di venue utk mencatat kas keluar.
     new_order_total = (
-        _D(order.subtotal) - old_line + new_total - _D(order.discount_amount)
+        _D(order.subtotal) - old_line + new_total
+        - c_old_line + c_new_line - _D(order.discount_amount)
     ).quantize(Decimal("0.01"))
     refund = _D(0)
     refund_shift = None
@@ -417,9 +520,17 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
     fb.booking_date = bdate
     fb.start_time = start
     fb.end_time = end
+    # ikutkan baris coaching-nya (nama & durasi mengikuti slot baru)
+    if c_item is not None:
+        persons = fb.coaching_persons or 1
+        c_item.name_snapshot = (
+            f"Coaching {persons} orang — {facility.name} {bdate:%d/%m} {start_time}-{end_time}"
+        )[:120]
+        c_item.quantity = _D(hours)
+        c_item.line_total = c_new_line
 
     # hitung ulang total order; DP (amount_paid) dipertahankan
-    order.subtotal = _D(order.subtotal) - old_line + new_total
+    order.subtotal = _D(order.subtotal) - old_line + new_total - c_old_line + c_new_line
     order.total_amount = _D(order.subtotal) - _D(order.discount_amount)
     # refund kelebihan → kas keluar di shift terbuka (sudah divalidasi di pre-cek)
     if refund > 0:
