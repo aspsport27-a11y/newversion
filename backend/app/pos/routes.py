@@ -19,7 +19,7 @@ from ..perms import has_perm
 from ..security import verify_password
 from ..stations.models import GameStation
 from . import briapi
-from .models import Attendance, Coach, CoachingRate, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift, coaching_price_per_hour
+from .models import Attendance, Coach, CoachingRate, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift, coach_declared_available, coaching_price_per_hour
 from .services import (
     PosError,
     add_cash_movement,
@@ -505,8 +505,14 @@ def pos_coaching():
     out = []
     for c in coaches:
         row = c.to_dict()
+        # `available` = tak bentrok (belum mengajar) → kalau False, coach memang
+        # tak bisa dipakai. `declared` = coach menyatakan dirinya bisa jam itu →
+        # kalau False, masih boleh dipilih tapi kasir wajib konfirmasi.
         row["available"] = (
             is_coach_available(c.id, bdate, start, end) if bdate else True
+        )
+        row["declared"] = (
+            coach_declared_available(c.id, bdate, start, end) if bdate else True
         )
         out.append(row)
 

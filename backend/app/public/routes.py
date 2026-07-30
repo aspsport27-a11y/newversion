@@ -17,10 +17,13 @@ from ..extensions import db, limiter
 from ..models import Area, Venue
 from ..pos.models import (
     Coach,
+    CoachAvailability,
+    CoachAvailabilityException,
     Facility,
     FacilityBooking,
     Order,
     OrderItem,
+    coach_declared_available,
     day_type_for_date,
     facility_rate_for_hour,
 )
@@ -32,6 +35,13 @@ RATE = "30 per minute"
 
 def _err(msg, code="bad_request", status=400):
     return jsonify(error=code, message=msg), status
+
+
+def _t_mins_pub(t, as_end=False):
+    """Jam → menit; 00:00 sbg akhir rentang = jam ke-24 (konvensi yg sama dgn
+    jam tutup lapangan — lihat HANDOVER §9)."""
+    m = t.hour * 60 + t.minute
+    return 24 * 60 if (as_end and m == 0) else m
 
 
 @public_bp.get("/venues")
@@ -222,3 +232,171 @@ def public_coach_schedule():
         count=len(sessions),
         sessions=sessions,
     ), 200
+
+
+# ------------------------------------------------------------------
+# Ketersediaan coach — diisi SENDIRI oleh coach lewat tautan rahasianya.
+# Coach = pihak ke-3 (mitra), sengaja TANPA akun/login supaya nol friksi;
+# token yg sama dipakai utk lihat jadwal & mengatur ketersediaan.
+# ------------------------------------------------------------------
+def _coach_by_token():
+    token = (request.args.get("token") or "").strip()
+    if not token:
+        return None, _err("Token wajib diisi")
+    coach = Coach.query.filter_by(schedule_token=token, is_active=True).first()
+    if coach is None:
+        return None, _err("Tautan tidak berlaku", "not_found", 404)
+    return coach, None
+
+
+def _parse_hm(s):
+    try:
+        return datetime.strptime(s, "%H:%M").time()
+    except (TypeError, ValueError):
+        return None
+
+
+def _conflicting_sessions(coach):
+    """Sesi MENDATANG yg kini jatuh di luar ketersediaan coach. Dipakai utk
+    memperingatkan (bukan membatalkan) — booking berbayar tak boleh hilang
+    otomatis gara-gara coach mengubah ketersediaan."""
+    today = date.today()
+    rows = (
+        db.session.query(FacilityBooking, Facility)
+        .join(Facility, FacilityBooking.facility_id == Facility.id)
+        .filter(
+            FacilityBooking.coach_id == coach.id,
+            FacilityBooking.status == "booked",
+            FacilityBooking.booking_date >= today,
+        )
+        .order_by(FacilityBooking.booking_date, FacilityBooking.start_time)
+        .all()
+    )
+    out = []
+    for fb, fac in rows:
+        if coach_declared_available(coach.id, fb.booking_date, fb.start_time, fb.end_time):
+            continue
+        out.append({
+            "date": fb.booking_date.isoformat(),
+            "start_time": fb.start_time.strftime("%H:%M"),
+            "end_time": fb.end_time.strftime("%H:%M"),
+            "facility_name": fac.name,
+        })
+    return out
+
+
+@public_bp.get("/coach-availability")
+@limiter.limit("20 per minute")
+def coach_availability_get():
+    coach, err = _coach_by_token()
+    if err:
+        return err
+    pattern = CoachAvailability.query.filter_by(coach_id=coach.id).order_by(
+        CoachAvailability.weekday, CoachAvailability.start_time
+    ).all()
+    excs = CoachAvailabilityException.query.filter_by(coach_id=coach.id).filter(
+        CoachAvailabilityException.date >= date.today()
+    ).order_by(CoachAvailabilityException.date).all()
+    return jsonify(
+        coach={"name": coach.name},
+        pattern=[p.to_dict() for p in pattern],
+        exceptions=[e.to_dict() for e in excs],
+        conflicts=_conflicting_sessions(coach),
+        updated_at=coach.availability_updated_at.isoformat() if coach.availability_updated_at else None,
+    ), 200
+
+
+@public_bp.put("/coach-availability")
+@limiter.limit("20 per minute")
+def coach_availability_set():
+    """Simpan ULANG seluruh pola mingguan (ganti total, bukan tambah)."""
+    coach, err = _coach_by_token()
+    if err:
+        return err
+    d = request.get_json(silent=True) or {}
+    rows = d.get("pattern")
+    if not isinstance(rows, list):
+        return _err("Format pola tidak valid")
+    if len(rows) > 50:
+        return _err("Terlalu banyak rentang jam")
+
+    parsed = []
+    for r in rows:
+        try:
+            wd = int(r.get("weekday"))
+        except (TypeError, ValueError):
+            return _err("Hari tidak valid")
+        if wd < 0 or wd > 6:
+            return _err("Hari tidak valid")
+        st, en = _parse_hm(r.get("start_time")), _parse_hm(r.get("end_time"))
+        if st is None or en is None:
+            return _err("Jam tidak valid")
+        # 00:00 sbg jam SELESAI = tengah malam (akhir hari), bukan awal hari
+        if _t_mins_pub(en, as_end=True) <= _t_mins_pub(st):
+            return _err("Jam selesai harus setelah jam mulai")
+        parsed.append((wd, st, en))
+
+    CoachAvailability.query.filter_by(coach_id=coach.id).delete()
+    for wd, st, en in parsed:
+        db.session.add(CoachAvailability(coach_id=coach.id, weekday=wd, start_time=st, end_time=en))
+    coach.availability_updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(
+        pattern=[p.to_dict() for p in CoachAvailability.query.filter_by(coach_id=coach.id)
+                 .order_by(CoachAvailability.weekday, CoachAvailability.start_time).all()],
+        conflicts=_conflicting_sessions(coach),
+    ), 200
+
+
+@public_bp.post("/coach-availability/exception")
+@limiter.limit("20 per minute")
+def coach_availability_exception_add():
+    coach, err = _coach_by_token()
+    if err:
+        return err
+    d = request.get_json(silent=True) or {}
+    try:
+        dt = date.fromisoformat(d.get("date"))
+    except (TypeError, ValueError):
+        return _err("Tanggal tidak valid")
+    if dt < date.today():
+        return _err("Tanggal sudah lewat")
+    available = bool(d.get("available"))
+    st = en = None
+    if available:
+        st, en = _parse_hm(d.get("start_time")), _parse_hm(d.get("end_time"))
+        if st is None or en is None:
+            return _err("Isi jam mulai & selesai")
+        if _t_mins_pub(en, as_end=True) <= _t_mins_pub(st):
+            return _err("Jam selesai harus setelah jam mulai")
+    else:
+        # libur seharian menggantikan pengecualian lain di tanggal itu
+        CoachAvailabilityException.query.filter_by(coach_id=coach.id, date=dt).delete()
+    db.session.add(CoachAvailabilityException(
+        coach_id=coach.id, date=dt, available=available,
+        start_time=st, end_time=en, note=(d.get("note") or None),
+    ))
+    coach.availability_updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(
+        exceptions=[e.to_dict() for e in CoachAvailabilityException.query
+                    .filter_by(coach_id=coach.id)
+                    .filter(CoachAvailabilityException.date >= date.today())
+                    .order_by(CoachAvailabilityException.date).all()],
+        conflicts=_conflicting_sessions(coach),
+    ), 200
+
+
+@public_bp.delete("/coach-availability/exception/<int:eid>")
+@limiter.limit("20 per minute")
+def coach_availability_exception_del(eid):
+    coach, err = _coach_by_token()
+    if err:
+        return err
+    e = db.session.get(CoachAvailabilityException, eid)
+    if e is None or e.coach_id != coach.id:
+        return _err("Data tidak ditemukan", "not_found", 404)
+    db.session.delete(e)
+    coach.availability_updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(message="Dihapus"), 200

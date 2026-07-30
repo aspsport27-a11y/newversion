@@ -23,6 +23,7 @@ from .models import (
     Product,
     Shift,
     StockMovement,
+    coach_declared_available,
     coaching_price_per_hour,
     day_type_for_date,
     facility_booking_price,
@@ -272,6 +273,7 @@ def _build_order_items(order, items_in, venue_id):
             # --- coaching (padel): opsional, selalu menempel pd booking ini ---
             coach_id = row.get("coach_id")
             coaching_oi = None
+            coach_override = False
             if coach_id:
                 coach = db.session.get(Coach, coach_id)
                 if coach is None or not coach.is_active or coach.venue_id != venue_id:
@@ -291,6 +293,20 @@ def _build_order_items(order, items_in, venue_id):
                         f"{coach.name} sudah mengajar di jam {row['start_time']}-{row['end_time']}",
                         "coach_taken", 409,
                     )
+                # di luar jam ketersediaan yg coach nyatakan → boleh, TAPI kasir
+                # harus konfirmasi dulu (coach_override). Jejaknya disimpan di
+                # slot booking utk kalau nanti ada sengketa dgn coach.
+                coach_override = bool(row.get("coach_override"))
+                if not coach_declared_available(coach.id, bdate, start, end):
+                    if not coach_override:
+                        raise PosError(
+                            f"{coach.name} tidak menyatakan diri tersedia pada "
+                            f"{bdate:%d/%m} {row['start_time']}-{row['end_time']}. "
+                            "Pastikan coach sudah setuju, lalu centang konfirmasi.",
+                            "coach_unavailable", 409,
+                        )
+                else:
+                    coach_override = False  # tak perlu ditandai kalau memang tersedia
                 for spec in booking_specs:  # coach bentrok dalam 1 keranjang
                     _, _, d2, s2, e2 = spec[:5]
                     if spec[5] == coach.id and d2 == bdate and s2 < end and e2 > start:
@@ -315,7 +331,8 @@ def _build_order_items(order, items_in, venue_id):
 
             booking_specs.append(
                 (oi, facility.id, bdate, start, end, coach_id, coaching_oi,
-                 int(row.get("coaching_persons") or 1) if coach_id else None)
+                 int(row.get("coaching_persons") or 1) if coach_id else None,
+                 coach_override)
             )
 
         else:  # rental: nama & harga dari input
@@ -345,13 +362,14 @@ def _create_facility_bookings(order, booking_specs):
     """Reservasi slot (FacilityBooking) utk item booking — setelah order_item punya id."""
     for spec in booking_specs:
         oi, fid, bdate, start, end = spec[:5]
-        coach_id, c_oi, persons = spec[5], spec[6], spec[7]
+        coach_id, c_oi, persons, override = spec[5], spec[6], spec[7], spec[8]
         db.session.add(
             FacilityBooking(
                 facility_id=fid, venue_id=order.venue_id, order_item_id=oi.id,
                 booking_date=bdate, start_time=start, end_time=end, status="booked",
                 coach_id=coach_id, coaching_persons=persons,
                 coaching_item_id=c_oi.id if c_oi is not None else None,
+                coaching_override=bool(override),
             )
         )
 

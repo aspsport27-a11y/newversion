@@ -242,7 +242,13 @@ export const usePosStore = defineStore('pos', {
             item_type: 'booking', facility_id: i.facility_id,
             booking_date: i.booking_date, start_time: i.start_time, end_time: i.end_time,
             // coaching (padel) — server yg bikin baris uangnya & validasi coach
-            ...(i.coach_id ? { coach_id: i.coach_id, coaching_persons: i.coaching_persons } : {}),
+            ...(i.coach_id
+              ? {
+                  coach_id: i.coach_id,
+                  coaching_persons: i.coaching_persons,
+                  ...(i.coach_override ? { coach_override: true } : {}),
+                }
+              : {}),
           }
         if (i.item_type === 'ticket')
           return { item_type: 'ticket', product_id: i.product_id, quantity: i.quantity }

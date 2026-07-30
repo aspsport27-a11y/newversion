@@ -96,7 +96,14 @@ async function loadCoaching() {
 onMounted(loadCoaching)
 watch([date, startH, endH], loadCoaching)
 
+// coach yg sedang mengajar (available=false) benar-benar bentrok → disembunyikan.
+// coach di luar jam ketersediaannya (declared=false) TETAP muncul, ditandai,
+// tapi kasir harus konfirmasi dulu.
 const availableCoaches = computed(() => coaches.value.filter((c) => c.available))
+const selectedCoach = computed(() => coaches.value.find((c) => c.id === coachId.value))
+const needsOverride = computed(() => !!selectedCoach.value && selectedCoach.value.declared === false)
+const coachOverride = ref(false)
+watch([coachId, startH, endH, date], () => { coachOverride.value = false })
 const coachingPerHour = computed(() => {
   const r = coachingRate.value
   if (!r) return 0
@@ -156,6 +163,8 @@ function add() {
   if (durationHours.value <= 0) return (error.value = 'Jam selesai harus setelah jam mulai.')
   if (overlaps(startH.value, endH.value)) return (error.value = 'Jadwal bentrok dengan booking lain.')
   if (useCoaching.value && !coachId.value) return (error.value = 'Pilih coach untuk coaching.')
+  if (useCoaching.value && needsOverride.value && !coachOverride.value)
+    return (error.value = 'Coach ini di luar jam ketersediaannya — centang konfirmasi dulu.')
   const startStr = hhmm(startH.value)
   const endStr = hhmm(endH.value)
   const withCoach = useCoaching.value && coachId.value
@@ -170,7 +179,13 @@ function add() {
     start_time: startStr,
     end_time: endStr,
     // coaching: server yg bikin baris uang & harga finalnya
-    ...(withCoach ? { coach_id: coachId.value, coaching_persons: persons.value } : {}),
+    ...(withCoach
+      ? {
+          coach_id: coachId.value,
+          coaching_persons: persons.value,
+          ...(needsOverride.value ? { coach_override: true } : {}),
+        }
+      : {}),
     coaching_label: withCoach
       ? `Coaching ${persons.value} org (${coaches.value.find((c) => c.id === coachId.value)?.name || ''})`
       : null,
@@ -257,8 +272,18 @@ function add() {
               <label class="block text-xs text-slate-500 mb-1">Coach</label>
               <select v-model.number="coachId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500">
                 <option :value="null">-- pilih coach --</option>
-                <option v-for="c in availableCoaches" :key="c.id" :value="c.id">{{ c.name }}</option>
+                <option v-for="c in availableCoaches" :key="c.id" :value="c.id">
+                  {{ c.name }}{{ c.declared === false ? ' — di luar jam tersedia' : '' }}
+                </option>
               </select>
+              <!-- coach boleh dipakai di luar jamnya, tapi harus dikonfirmasi -->
+              <label v-if="needsOverride" class="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-lg p-2.5 cursor-pointer">
+                <input type="checkbox" v-model="coachOverride" class="w-4 h-4 mt-0.5 accent-amber-600 shrink-0" />
+                <span class="text-xs text-amber-800">
+                  <b>{{ selectedCoach?.name }}</b> tidak menyatakan diri tersedia di jam ini.
+                  Saya sudah memastikan coach bersedia.
+                </span>
+              </label>
               <p v-if="durationHours > 0 && !availableCoaches.length" class="text-xs text-amber-600 mt-1">
                 Semua coach sudah mengajar di jam ini.
               </p>

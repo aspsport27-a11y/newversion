@@ -508,6 +508,8 @@ class FacilityBooking(db.Model):
     coaching_item_id = db.Column(
         db.Integer, db.ForeignKey("order_items.id", ondelete="SET NULL")
     )
+    # dipaksakan di luar jam ketersediaan coach (kasir centang konfirmasi)
+    coaching_override = db.Column(db.Boolean, nullable=False, default=False)
 
     def to_dict(self):
         hm = lambda t: t.strftime("%H:%M") if t else None
@@ -537,6 +539,8 @@ class Coach(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     # kunci halaman jadwal pribadi coach (dibuka tanpa login) — RAHASIA
     schedule_token = db.Column(db.String(64), unique=True)
+    # kapan coach terakhir memperbarui ketersediaannya (utk manajer)
+    availability_updated_at = db.Column(db.DateTime)
 
     def to_dict(self, with_token=False):
         """`with_token` hanya utk endpoint ADMIN. Jangan pernah aktifkan di
@@ -581,6 +585,89 @@ class CoachingRate(db.Model):
             "extra_person_price": float(self.extra_person_price or 0),
             "max_persons": self.max_persons or 4,
         }
+
+
+class CoachAvailability(db.Model):
+    """Pola mingguan ketersediaan coach (bisa >1 rentang per hari)."""
+
+    __tablename__ = "coach_availability"
+
+    id = db.Column(db.Integer, primary_key=True)
+    coach_id = db.Column(
+        db.Integer, db.ForeignKey("coaches.id", ondelete="CASCADE"), nullable=False
+    )
+    weekday = db.Column(db.SmallInteger, nullable=False)  # 0=Senin..6=Minggu
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        hm = lambda t: t.strftime("%H:%M") if t else None
+        return {
+            "id": self.id, "weekday": self.weekday,
+            "start_time": hm(self.start_time), "end_time": hm(self.end_time),
+        }
+
+
+class CoachAvailabilityException(db.Model):
+    """Pengecualian per tanggal — SELALU menang atas pola mingguan.
+    available=False (jam kosong) = libur seharian;
+    available=True + jam = hanya jam itu, menimpa pola hari tsb."""
+
+    __tablename__ = "coach_availability_exceptions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    coach_id = db.Column(
+        db.Integer, db.ForeignKey("coaches.id", ondelete="CASCADE"), nullable=False
+    )
+    date = db.Column(db.Date, nullable=False)
+    available = db.Column(db.Boolean, nullable=False, default=False)
+    start_time = db.Column(db.Time)
+    end_time = db.Column(db.Time)
+    note = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        hm = lambda t: t.strftime("%H:%M") if t else None
+        return {
+            "id": self.id, "date": self.date.isoformat() if self.date else None,
+            "available": self.available, "note": self.note,
+            "start_time": hm(self.start_time), "end_time": hm(self.end_time),
+        }
+
+
+def _t_mins(t, as_end=False):
+    """Jam → menit. 00:00 sbg AKHIR rentang = jam ke-24, bukan jam ke-0 —
+    konvensi yg sama dgn jam buka/tutup lapangan (lihat is_slot_available)."""
+    m = t.hour * 60 + t.minute
+    return 24 * 60 if (as_end and m == 0) else m
+
+
+def coach_declared_available(coach_id, bdate, start, end):
+    """Apakah coach MENYATAKAN dirinya bisa di slot [start,end) tanggal itu.
+
+    Beda dgn is_coach_available() (itu cek bentrok: sudah mengajar/belum).
+    Urutan: pengecualian tanggal menang atas pola mingguan. Coach yg BELUM
+    mengisi pola sama sekali dianggap 'selalu bisa' — supaya perilaku lama tak
+    berubah & tak semua booking minta konfirmasi sebelum coach sempat mengisi.
+    """
+    excs = CoachAvailabilityException.query.filter_by(coach_id=coach_id, date=bdate).all()
+    if excs:
+        if any(not e.available for e in excs):
+            return False  # ditandai libur seharian
+        ranges = [(e.start_time, e.end_time) for e in excs if e.start_time and e.end_time]
+    else:
+        rows = CoachAvailability.query.filter_by(coach_id=coach_id).all()
+        if not rows:
+            return True  # belum diatur sama sekali → jangan halangi
+        ranges = [
+            (a.start_time, a.end_time) for a in rows if a.weekday == bdate.weekday()
+        ]
+    if not ranges:
+        return False  # sudah punya pola, tapi hari ini memang tak ada jadwal
+    s, e = _t_mins(start), _t_mins(end, as_end=True)
+    # slot harus SEPENUHNYA masuk salah satu rentang (bukan sekadar bersinggungan)
+    return any(_t_mins(rs) <= s and _t_mins(re_, as_end=True) >= e for rs, re_ in ranges)
 
 
 def coaching_price_per_hour(rate: "CoachingRate", persons: int) -> float:
