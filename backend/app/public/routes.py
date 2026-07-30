@@ -23,9 +23,11 @@ from ..pos.models import (
     FacilityBooking,
     Order,
     OrderItem,
+    coach_available_ranges,
     coach_declared_available,
     day_type_for_date,
     facility_rate_for_hour,
+    ranges_cover,
 )
 
 public_bp = Blueprint("public", __name__)
@@ -150,6 +152,37 @@ def public_schedule():
         for b in booked
     ]
 
+    # --- coaching: apakah ADA coach yg bisa dipakai di slot ini? ---
+    # Sengaja TANPA nama coach (keputusan user): halaman publik cukup memberi
+    # tahu "coaching tersedia", penentuan orangnya saat customer menghubungi
+    # venue. Rentang & booking coach diambil SEKALI di sini, bukan per slot,
+    # supaya endpoint publik tak menembak DB puluhan kali.
+    coaches = Coach.query.filter_by(venue_id=fac.venue_id, is_active=True).all()
+    coach_ctx = []
+    if coaches:
+        cids = [c.id for c in coaches]
+        busy = {}
+        for b in FacilityBooking.query.filter(
+            FacilityBooking.coach_id.in_(cids),
+            FacilityBooking.booking_date == d,
+            FacilityBooking.status == "booked",
+        ).all():
+            busy.setdefault(b.coach_id, []).append(
+                (datetime.combine(d, b.start_time), _end_dt(b.end_time, b.start_time))
+            )
+        for c in coaches:
+            coach_ctx.append((coach_available_ranges(c.id, d), busy.get(c.id, [])))
+
+    def _coach_free(cur, slot_end):
+        """Ada coach yg menyatakan bisa DAN belum mengajar di rentang ini."""
+        for ranges, taken in coach_ctx:
+            if not ranges_cover(ranges, cur.time(), slot_end.time()):
+                continue
+            if any(bs < slot_end and be > cur for bs, be in taken):
+                continue
+            return True
+        return False
+
     slots = []
     dtype = day_type_for_date(d)  # tarif ikut kategori hari tanggal ini
     cur = datetime.combine(d, fac.open_time)
@@ -164,6 +197,8 @@ def public_schedule():
                 "end_time": slot_end.strftime("%H:%M"),
                 "status": "booked" if is_booked else "available",
                 "coaching": any(r[2] for r in overlap),
+                # cuma relevan utk slot yg court-nya masih kosong
+                "coach_available": (not is_booked) and _coach_free(cur, slot_end),
                 "rate": facility_rate_for_hour(fac, cur.hour, dtype),
             }
         )

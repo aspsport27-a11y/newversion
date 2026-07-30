@@ -110,10 +110,13 @@ function waLink(phone, text) {
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`
 }
 
-function bookLink(slot) {
+function bookLink(slot, withCoach = false) {
   const v = selectedVenue.value
   const f = selectedFacility.value
-  const text = `Halo, saya mau booking ${f.name} (${v.name}) tanggal ${selectedDate.value} jam ${slot.start_time}-${slot.end_time}.`
+  let text = `Halo, saya mau booking ${f.name} (${v.name}) tanggal ${selectedDate.value} jam ${slot.start_time}-${slot.end_time}.`
+  // sengaja tak menyebut nama coach — halaman publik cuma bilang "ada coach",
+  // venue yang menentukan siapa yang bertugas saat customer menghubungi
+  if (withCoach) text += ' Saya juga mau pakai coaching.'
   return waLink(v.phone, text)
 }
 
@@ -200,10 +203,17 @@ onMounted(loadVenues)
               Terisi
               <span v-if="s.coaching" class="ml-1 bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-[10px] font-medium">🎾 Coaching</span>
             </p>
-            <a
-              v-else :href="bookLink(s)" target="_blank" rel="noopener"
-              class="inline-block text-xs mt-1 text-emerald-700 font-medium hover:underline"
-            >Booking via WhatsApp &rarr;</a>
+            <template v-else>
+              <span v-if="s.coach_available" class="inline-block bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-[10px] font-medium mt-1">🎾 Coaching tersedia</span>
+              <a
+                :href="bookLink(s)" target="_blank" rel="noopener"
+                class="block text-xs mt-1 text-emerald-700 font-medium hover:underline"
+              >Booking via WhatsApp &rarr;</a>
+              <a
+                v-if="s.coach_available" :href="bookLink(s, true)" target="_blank" rel="noopener"
+                class="block text-xs mt-0.5 text-teal-700 font-medium hover:underline"
+              >Booking + Coaching &rarr;</a>
+            </template>
           </div>
         </div>
         <p v-if="!loading && !slots.length" class="text-slate-400 text-sm">Lapangan tutup / tidak ada jam operasional pada tanggal ini.</p>

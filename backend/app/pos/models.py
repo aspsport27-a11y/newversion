@@ -644,31 +644,43 @@ def _t_mins(t, as_end=False):
     return 24 * 60 if (as_end and m == 0) else m
 
 
-def coach_declared_available(coach_id, bdate, start, end):
-    """Apakah coach MENYATAKAN dirinya bisa di slot [start,end) tanggal itu.
+def coach_available_ranges(coach_id, bdate):
+    """Rentang jam yg DINYATAKAN coach utk tanggal itu.
 
-    Beda dgn is_coach_available() (itu cek bentrok: sudah mengajar/belum).
-    Urutan: pengecualian tanggal menang atas pola mingguan. Coach yg BELUM
-    mengisi pola sama sekali dianggap 'selalu bisa' — supaya perilaku lama tak
-    berubah & tak semua booking minta konfirmasi sebelum coach sempat mengisi.
+    Return None = coach belum mengatur apa pun (dianggap selalu bisa);
+    [] = hari itu memang tak tersedia; selain itu daftar (mulai, selesai).
+    Pengecualian tanggal SELALU menang atas pola mingguan.
+
+    Dipisah dr coach_declared_available() supaya pemanggil yg butuh MEMERIKSA
+    BANYAK SLOT (mis. jadwal publik) cukup mengambil rentangnya sekali, tak
+    query berulang tiap slot.
     """
     excs = CoachAvailabilityException.query.filter_by(coach_id=coach_id, date=bdate).all()
     if excs:
         if any(not e.available for e in excs):
-            return False  # ditandai libur seharian
-        ranges = [(e.start_time, e.end_time) for e in excs if e.start_time and e.end_time]
-    else:
-        rows = CoachAvailability.query.filter_by(coach_id=coach_id).all()
-        if not rows:
-            return True  # belum diatur sama sekali → jangan halangi
-        ranges = [
-            (a.start_time, a.end_time) for a in rows if a.weekday == bdate.weekday()
-        ]
+            return []  # ditandai libur seharian
+        return [(e.start_time, e.end_time) for e in excs if e.start_time and e.end_time]
+    rows = CoachAvailability.query.filter_by(coach_id=coach_id).all()
+    if not rows:
+        return None  # belum diatur sama sekali → jangan halangi
+    return [(a.start_time, a.end_time) for a in rows if a.weekday == bdate.weekday()]
+
+
+def ranges_cover(ranges, start, end):
+    """Slot [start,end) SEPENUHNYA masuk salah satu rentang (bukan sekadar
+    bersinggungan). `ranges` None = belum diatur → dianggap selalu bisa."""
+    if ranges is None:
+        return True
     if not ranges:
-        return False  # sudah punya pola, tapi hari ini memang tak ada jadwal
+        return False
     s, e = _t_mins(start), _t_mins(end, as_end=True)
-    # slot harus SEPENUHNYA masuk salah satu rentang (bukan sekadar bersinggungan)
     return any(_t_mins(rs) <= s and _t_mins(re_, as_end=True) >= e for rs, re_ in ranges)
+
+
+def coach_declared_available(coach_id, bdate, start, end):
+    """Apakah coach MENYATAKAN dirinya bisa di slot [start,end) tanggal itu.
+    Beda dgn is_coach_available() (itu cek bentrok: sudah mengajar/belum)."""
+    return ranges_cover(coach_available_ranges(coach_id, bdate), start, end)
 
 
 def coaching_price_per_hour(rate: "CoachingRate", persons: int) -> float:
