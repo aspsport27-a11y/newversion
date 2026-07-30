@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import client from '../api/client'
 import { bookingPrice, dayTypeFor } from '../utils/bookingPrice'
 
@@ -30,6 +30,8 @@ onMounted(async () => {
     facilities.value = f.data.facilities || []
     holidays.value = (h.data.holidays || []).map((x) => x.date)
     facilityId.value = facilities.value[0]?.id ?? null
+    coachId.value = bookingInfo.value?.coach_id ?? null
+    await loadCoaches()
   } catch (e) {
     err.value = 'Gagal memuat lapangan.'
   }
@@ -37,6 +39,44 @@ onMounted(async () => {
 
 const facility = computed(() => facilities.value.find((f) => f.id === facilityId.value))
 const selectedItem = computed(() => bookingItems.value.find((i) => i.id === itemId.value))
+
+// ---------- coaching: bisa sekalian GANTI COACH ----------
+// Coach menempel di SLOT (bukan order_item), jadi info-nya datang dari
+// order.bookings yg dikirim endpoint detail.
+const bookingInfo = computed(() =>
+  (props.order?.bookings || []).find((b) => b.order_item_id === itemId.value),
+)
+const hasCoaching = computed(() => !!bookingInfo.value?.coach_id)
+const coaches = ref([])
+const coachId = ref(null)
+const coachOverride = ref(false)
+
+// muat ulang status coach tiap slot tujuan berubah — 'available'/'declared'
+// dihitung server utk slot itu (slot ini sendiri dikecualikan dr cek bentrok)
+async function loadCoaches() {
+  if (!hasCoaching.value) { coaches.value = []; return }
+  const params = { venue_id: vid.value }
+  if (date.value && startH.value != null && endH.value != null && durationHours.value > 0) {
+    params.date = date.value
+    params.start_time = hhmm(startH.value)
+    params.end_time = hhmm(endH.value)
+    if (bookingInfo.value?.booking_id) params.exclude_booking_id = bookingInfo.value.booking_id
+  }
+  try {
+    const { data } = await client.get('/admin/coaches', { params })
+    coaches.value = (data.coaches || []).filter((c) => c.is_active)
+  } catch (_) { coaches.value = [] }
+}
+watch([itemId, date, startH, endH], async () => {
+  coachOverride.value = false
+  if (coachId.value == null) coachId.value = bookingInfo.value?.coach_id ?? null
+  await loadCoaches()
+})
+// coach yg sedang mengajar di slot tujuan disembunyikan (bentrok nyata)
+const pilihanCoach = computed(() => coaches.value.filter((c) => c.available !== false))
+const coachTerpilih = computed(() => coaches.value.find((c) => c.id === coachId.value))
+const perluKonfirmasi = computed(() => !!coachTerpilih.value && coachTerpilih.value.declared === false)
+const gantiCoach = computed(() => hasCoaching.value && coachId.value !== bookingInfo.value?.coach_id)
 
 const hours = computed(() => {
   const f = facility.value
@@ -68,11 +108,17 @@ async function submit() {
   if (!selectedItem.value) return (err.value = 'Pilih slot yang direschedule.')
   if (!facilityId.value) return (err.value = 'Pilih lapangan tujuan.')
   if (durationHours.value <= 0) return (err.value = 'Jam selesai harus setelah jam mulai.')
+  if (hasCoaching.value && !coachId.value) return (err.value = 'Pilih coach.')
+  if (perluKonfirmasi.value && !coachOverride.value)
+    return (err.value = 'Coach di luar jam ketersediaannya — centang konfirmasi dulu.')
   busy.value = true
   try {
     const { data } = await client.post(`/admin/orders/${props.order.id}/reschedule`, {
       order_item_id: itemId.value, facility_id: facilityId.value,
       booking_date: date.value, start_time: hhmm(startH.value), end_time: hhmm(endH.value),
+      ...(hasCoaching.value
+        ? { coach_id: coachId.value, ...(perluKonfirmasi.value ? { coach_override: true } : {}) }
+        : {}),
     })
     emit('done', data)
   } catch (e) {
@@ -120,6 +166,35 @@ async function submit() {
             <option v-for="h in hours" :key="h" :value="h">{{ hhmm(h) }}</option>
           </select>
         </div>
+      </div>
+
+      <!-- Coaching: bisa sekalian ganti coach -->
+      <div v-if="hasCoaching" class="border border-teal-200 bg-teal-50/50 rounded-lg p-3 mb-3">
+        <label class="block text-xs text-slate-500 mb-1">
+          Coach <span class="text-slate-400">(bisa diganti kalau coach lama berhalangan)</span>
+        </label>
+        <select v-model.number="coachId" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-teal-500">
+          <option :value="null">-- pilih coach --</option>
+          <option v-for="c in pilihanCoach" :key="c.id" :value="c.id">
+            {{ c.name }}{{ c.declared === false ? ' — di luar jam tersedia' : '' }}
+          </option>
+        </select>
+        <p v-if="gantiCoach" class="text-xs text-teal-700 mt-1">
+          Coach diganti dari <b>{{ bookingInfo?.coach_name || '—' }}</b> ke <b>{{ coachTerpilih?.name }}</b>.
+        </p>
+        <p v-if="durationHours > 0 && !pilihanCoach.length" class="text-xs text-amber-600 mt-1">
+          Semua coach sudah mengajar di jam tujuan.
+        </p>
+        <label v-if="perluKonfirmasi" class="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-lg p-2.5 cursor-pointer">
+          <input type="checkbox" v-model="coachOverride" class="w-4 h-4 mt-0.5 accent-amber-600 shrink-0" />
+          <span class="text-xs text-amber-800">
+            <b>{{ coachTerpilih?.name }}</b> tidak menyatakan diri tersedia di jam tujuan.
+            Saya sudah memastikan coach bersedia.
+          </span>
+        </label>
+        <p class="text-[11px] text-slate-400 mt-1.5">
+          Jumlah peserta tetap {{ bookingInfo?.coaching_persons || 1 }} orang — biaya coaching menyesuaikan durasi baru.
+        </p>
       </div>
 
       <div v-if="durationHours > 0" class="bg-slate-50 rounded-lg p-3 text-sm space-y-1 mb-3">

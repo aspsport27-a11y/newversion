@@ -478,7 +478,8 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
 
 
 def reschedule_booking(order, item_id, facility_id, booking_date, start_time, end_time,
-                       uid=None, refund_shift_id=None, record_refund=False):
+                       uid=None, refund_shift_id=None, record_refund=False,
+                       coach_id=None, coach_override=False):
     """Pindah jadwal 1 slot booking ke slot baru (boleh beda court, dalam venue
     yg sama). DP TIDAK hangus — tetap tercatat; harga dihitung ulang sesuai tarif
     slot baru (sadar hari/jam) & total order diperbarui. Return (order, info)
@@ -488,7 +489,13 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
     yg SUDAH dibayar, kelebihannya dicatat otomatis sbg kas keluar di shift
     `refund_shift_id` (harus shift terbuka di venue ini) & amount_paid dikurangi
     supaya order pas lunas. Kalau tak ada shift terbuka → PosError (gagal bersih,
-    tanpa mengubah slot). POS (default) tak memakai ini — perilakunya tetap."""
+    tanpa mengubah slot). POS (default) tak memakai ini — perilakunya tetap.
+
+    `coach_id` (opsional): GANTI coach pd booking ini — dipakai kalau coach lama
+    ternyata tak bisa. None = pertahankan coach lama. Coach baru/lama tetap
+    diperiksa: bentrok = ditolak keras; di luar jam ketersediaan = perlu
+    `coach_override` (aturan sama persis dgn POS, supaya jalur reschedule tak
+    jadi lubang)."""
     booking_items = [i for i in order.items if i.item_type == "booking"]
     if not booking_items:
         raise PosError("Order ini bukan booking", "not_booking", 400)
@@ -520,13 +527,38 @@ def reschedule_booking(order, item_id, facility_id, booking_date, start_time, en
     # slot baru harus kosong (kecuali slot ini sendiri)
     if not is_slot_available(facility.id, bdate, start, end, exclude_id=fb.id):
         raise PosError(f"Slot {facility.name} {start_time}-{end_time} sudah dibooking", "slot_taken", 409)
-    # booking ber-coaching: coach-nya juga harus bebas di slot baru
-    if fb.coach_id and not is_coach_available(fb.coach_id, bdate, start, end, exclude_id=fb.id):
-        coach = db.session.get(Coach, fb.coach_id)
-        raise PosError(
-            f"{coach.name if coach else 'Coach'} sudah mengajar di jam {start_time}-{end_time}",
-            "coach_taken", 409,
-        )
+    # --- coaching: boleh sekalian GANTI COACH di sini (solusi paling wajar
+    # kalau coach lama ternyata tak bisa). coach_id None = pertahankan yg lama.
+    # Menghapus coaching sama sekali tak didukung lewat jalur ini — batalkan
+    # ordernya kalau memang mau dibatalkan.
+    new_coach_id = fb.coach_id
+    if coach_id is not None and fb.coach_id:
+        cand = db.session.get(Coach, coach_id)
+        if cand is None or not cand.is_active or cand.venue_id != order.venue_id:
+            raise PosError("Coach tujuan tidak valid", "coach_not_found", 404)
+        new_coach_id = cand.id
+    if new_coach_id:
+        coach_obj = db.session.get(Coach, new_coach_id)
+        nama = coach_obj.name if coach_obj else "Coach"
+        # bentrok (sudah mengajar) = blokir keras, sama spt di POS
+        if not is_coach_available(new_coach_id, bdate, start, end, exclude_id=fb.id):
+            raise PosError(
+                f"{nama} sudah mengajar di jam {start_time}-{end_time}", "coach_taken", 409,
+            )
+        # di luar jam ketersediaan = boleh, tapi harus dikonfirmasi — aturan yg
+        # sama dgn POS supaya tak ada lubang lewat jalur reschedule
+        if not coach_declared_available(new_coach_id, bdate, start, end):
+            if not coach_override:
+                raise PosError(
+                    f"{nama} tidak menyatakan diri tersedia pada {bdate:%d/%m} "
+                    f"{start_time}-{end_time}. Pastikan coach sudah setuju, lalu "
+                    "centang konfirmasi.",
+                    "coach_unavailable", 409,
+                )
+            fb.coaching_override = True
+        else:
+            fb.coaching_override = False
+        fb.coach_id = new_coach_id
 
     old_desc = f"{item.name_snapshot}"
     old_line = _D(item.line_total)

@@ -1272,7 +1272,36 @@ def coaches_list():
         for c in items:
             c.ensure_token()
         db.session.commit()
-    return jsonify(count=len(items), coaches=[c.to_dict(with_token=True) for c in items]), 200
+
+    # Kalau diberi slot (date/start_time/end_time), tiap coach ditandai:
+    #   available = belum mengajar di jam itu (bentrok)
+    #   declared  = coach menyatakan dirinya bisa
+    # Dipakai dialog Reschedule utk memilih coach pengganti. exclude_booking_id
+    # = slot yg sedang diedit, biar tak dianggap bentrok dgn dirinya sendiri.
+    from ..pos.models import coach_declared_available
+    from ..pos.services import is_coach_available
+
+    d_str = request.args.get("date")
+    s_str = request.args.get("start_time")
+    e_str = request.args.get("end_time")
+    exclude_id = request.args.get("exclude_booking_id", type=int)
+    bdate = start = end = None
+    if d_str and s_str and e_str:
+        try:
+            bdate = date.fromisoformat(d_str)
+            start = datetime.strptime(s_str, "%H:%M").time()
+            end = datetime.strptime(e_str, "%H:%M").time()
+        except (ValueError, TypeError):
+            bdate = start = end = None
+
+    out = []
+    for c in items:
+        row = c.to_dict(with_token=True)
+        if bdate:
+            row["available"] = is_coach_available(c.id, bdate, start, end, exclude_id=exclude_id)
+            row["declared"] = coach_declared_available(c.id, bdate, start, end)
+        out.append(row)
+    return jsonify(count=len(out), coaches=out), 200
 
 
 @admin_bp.post("/coaches/<int:cid>/reset-token")
@@ -2653,6 +2682,23 @@ def order_detail(order_id):
             u = db.session.get(User, r.created_by)
             by[r.created_by] = u.username if u else None
     d["reschedules"] = [{**r.to_dict(), "by": by.get(r.created_by)} for r in rs]
+    # info coaching per item booking — dipakai dialog Reschedule utk tahu coach
+    # mana yg terpasang sekarang (coach ada di slot, bukan di order_item)
+    item_ids = [i.id for i in order.items if i.item_type == "booking"]
+    d["bookings"] = []
+    if item_ids:
+        coach_names = {c.id: c.name for c in Coach.query.all()}
+        for fb in FacilityBooking.query.filter(
+            FacilityBooking.order_item_id.in_(item_ids)
+        ).all():
+            d["bookings"].append({
+                "booking_id": fb.id,
+                "order_item_id": fb.order_item_id,
+                "coach_id": fb.coach_id,
+                "coach_name": coach_names.get(fb.coach_id),
+                "coaching_persons": fb.coaching_persons,
+                "coaching_override": bool(fb.coaching_override),
+            })
     return jsonify(order=d), 200
 
 
@@ -2712,6 +2758,8 @@ def order_reschedule_admin(order_id):
             uid=_current_user().id,
             refund_shift_id=open_shift.id if open_shift else None,
             record_refund=True,
+            coach_id=d.get("coach_id"),          # opsional: ganti coach
+            coach_override=bool(d.get("coach_override")),
         )
     except PosError as e:
         return _err(e.message, e.code, e.status)

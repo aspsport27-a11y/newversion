@@ -802,6 +802,8 @@ def order_reschedule(order_id):
     order, info = reschedule_booking(
         order, d.get("order_item_id"), d["facility_id"],
         d["booking_date"], d["start_time"], d["end_time"], uid=int(get_jwt_identity()),
+        coach_id=d.get("coach_id"),          # opsional: ganti coach
+        coach_override=bool(d.get("coach_override")),
     )
     return jsonify(order=order.to_dict(), reschedule=info), 200
 
