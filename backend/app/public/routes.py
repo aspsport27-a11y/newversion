@@ -120,7 +120,12 @@ def public_schedule():
             dt += timedelta(days=1)
         return dt
 
-    booked_ranges = [(datetime.combine(d, b.start_time), _end_dt(b.end_time, b.start_time)) for b in booked]
+    # flag ke-3 = slot ini sesi coaching (ada coach). Hanya BOOLEAN — nama
+    # customer maupun nama coach TIDAK pernah dikirim ke halaman publik.
+    booked_ranges = [
+        (datetime.combine(d, b.start_time), _end_dt(b.end_time, b.start_time), bool(b.coach_id))
+        for b in booked
+    ]
 
     slots = []
     dtype = day_type_for_date(d)  # tarif ikut kategori hari tanggal ini
@@ -128,12 +133,14 @@ def public_schedule():
     end_of_day = _end_dt(fac.close_time, fac.open_time)
     while cur < end_of_day:
         slot_end = cur + timedelta(minutes=slot_minutes)
-        is_booked = any(bs < slot_end and be > cur for bs, be in booked_ranges)
+        overlap = [r for r in booked_ranges if r[0] < slot_end and r[1] > cur]
+        is_booked = bool(overlap)
         slots.append(
             {
                 "start_time": cur.strftime("%H:%M"),
                 "end_time": slot_end.strftime("%H:%M"),
                 "status": "booked" if is_booked else "available",
+                "coaching": any(r[2] for r in overlap),
                 "rate": facility_rate_for_hour(fac, cur.hour, dtype),
             }
         )

@@ -20,6 +20,9 @@ const from = ref(today)
 const to = ref(in30)
 const onlyUnpaid = ref(false)
 const showVoid = ref(false) // sembunyikan booking Batal secara default
+// filter coach: '' = semua, 'any' = semua yg pakai coach, atau id coach tertentu
+const coachFilter = ref('')
+const coachList = ref([])
 const bookings = ref([])
 const loading = ref(false)
 const detail = ref(null)
@@ -163,6 +166,7 @@ function printBookings() {
     <td>${esc(fmtDate(b.booking_date))}</td>
     <td>${esc(b.start_time)}–${esc(b.end_time)}</td>
     <td>${esc(b.facility_name || '—')}</td>
+    <td>${b.coach_name ? esc(b.coach_name) + (b.coaching_persons ? ` (${b.coaching_persons} org)` : '') : '—'}</td>
     <td>${esc(b.customer_name || '—')}</td>
     <td>${esc(b.customer_phone || '—')}</td>
     <td class="r">${b.order_total != null ? esc(rupiah(b.order_total)) : '—'}</td>
@@ -188,10 +192,10 @@ function printBookings() {
       Jumlah: ${totalCount.value} booking · Total nilai: ${esc(rupiah(totalNilai.value))} · DP diterima: ${esc(rupiah(totalDp.value))} · Piutang: ${esc(rupiah(totalDue.value))}</div>
     <table>
       <thead><tr>
-        <th>Tanggal Main</th><th>Jam</th><th>Lapangan</th><th>Customer</th><th>No. HP</th>
+        <th>Tanggal Main</th><th>Jam</th><th>Lapangan</th><th>Coach</th><th>Customer</th><th>No. HP</th>
         <th class="r">Total</th><th class="r">Sisa</th><th>Tgl DP</th><th>Tgl Lunas</th><th>Status</th>
       </tr></thead>
-      <tbody>${body || '<tr><td colspan="10" style="text-align:center;color:#94a3b8">Tidak ada data.</td></tr>'}</tbody>
+      <tbody>${body || '<tr><td colspan="11" style="text-align:center;color:#94a3b8">Tidak ada data.</td></tr>'}</tbody>
     </table>
   </body></html>`
   const w = window.open('', '_blank')
@@ -213,11 +217,27 @@ async function loadVenues() {
 function params() {
   const p = { from: from.value, to: to.value }
   if (venueId.value) p.venue_id = venueId.value
+  if (coachFilter.value) p.coach_id = coachFilter.value
   return p
+}
+// daftar coach utk dropdown filter — kosong kalau venue tak punya coaching,
+// dan filternya otomatis disembunyikan
+async function loadCoachList() {
+  try {
+    const { data } = await client.get('/admin/coaches', {
+      params: venueId.value ? { venue_id: venueId.value } : {},
+    })
+    coachList.value = (data.coaches || []).filter((c) => c.is_active)
+  } catch (_) { coachList.value = [] }
+  if (coachFilter.value && coachFilter.value !== 'any' &&
+      !coachList.value.some((c) => String(c.id) === String(coachFilter.value))) {
+    coachFilter.value = '' // coach terpilih tak ada di venue ini lagi
+  }
 }
 async function run() {
   loading.value = true
   try {
+    await loadCoachList()
     const { data } = await client.get('/admin/bookings', { params: params() })
     bookings.value = data.bookings
   } finally { loading.value = false }
@@ -367,6 +387,14 @@ onMounted(async () => { await loadVenues(); await run() })
           <option value="">Semua venue</option>
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select></div>
+      <div v-if="tab === 'list' && coachList.length">
+        <label class="block text-xs text-slate-500 mb-1">Coach</label>
+        <select v-model="coachFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="">Semua booking</option>
+          <option value="any">Hanya yang pakai coach</option>
+          <option v-for="c in coachList" :key="c.id" :value="String(c.id)">{{ c.name }}</option>
+        </select>
+      </div>
       <button @click="run" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
       <label v-if="tab === 'list'" class="flex items-center gap-2 text-sm text-slate-600 ml-2"><input v-model="onlyUnpaid" type="checkbox" /> Hanya belum lunas</label>
       <label v-if="tab === 'list'" class="flex items-center gap-2 text-sm text-slate-600"><input v-model="showVoid" type="checkbox" /> Tampilkan yang batal</label>
@@ -584,6 +612,7 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-3 font-medium">Tanggal Main</th>
               <th class="px-4 py-3 font-medium">Jam</th>
               <th class="px-4 py-3 font-medium">Lapangan</th>
+              <th class="px-4 py-3 font-medium">Coach</th>
               <th class="px-4 py-3 font-medium">Customer</th>
               <th class="px-4 py-3 font-medium">No. HP</th>
               <th class="px-4 py-3 font-medium text-right">Total</th>
@@ -595,14 +624,20 @@ onMounted(async () => { await loadVenues(); await run() })
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="11" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!shown.length"><td colspan="11" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
+            <tr v-if="loading"><td colspan="12" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!shown.length"><td colspan="12" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
             <template v-for="it in grouped" :key="it.key">
               <!-- baris tunggal (order 1 tanggal / booking tanpa order) -->
               <tr v-if="it.type === 'single'" @click="openDetail(it.b)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 text-slate-700">{{ fmtDate(it.b.booking_date) }}</td>
                 <td class="px-4 py-3 font-medium text-slate-700">{{ it.b.start_time }}–{{ it.b.end_time }}</td>
                 <td class="px-4 py-3 text-slate-700">{{ it.b.facility_name }}</td>
+                <td class="px-4 py-3 whitespace-nowrap">
+                  <span v-if="it.b.coach_name" class="text-xs bg-teal-100 text-teal-700 rounded px-1.5 py-0.5">
+                    🎾 {{ it.b.coach_name }}<span v-if="it.b.coaching_persons" class="text-teal-600"> · {{ it.b.coaching_persons }} org</span>
+                  </span>
+                  <span v-else class="text-slate-300">—</span>
+                </td>
                 <td class="px-4 py-3 text-slate-600">{{ it.b.customer_name || '—' }}</td>
                 <td class="px-4 py-3">
                   <a v-if="waLink(it.b.customer_phone)" :href="waLink(it.b.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap inline-flex items-center gap-1"><WaIcon /> {{ it.b.customer_phone }}</a>
@@ -626,6 +661,7 @@ onMounted(async () => { await loadVenues(); await run() })
                 </td>
                 <td class="px-4 py-3 text-slate-500 text-sm">{{ grpJam(it.children) }}</td>
                 <td class="px-4 py-3 text-slate-700">{{ it.parent.facility_name }}</td>
+                <td class="px-4 py-3 text-slate-300">—</td>
                 <td class="px-4 py-3 text-slate-600">{{ it.parent.customer_name || '—' }}</td>
                 <td class="px-4 py-3">
                   <a v-if="waLink(it.parent.customer_phone)" :href="waLink(it.parent.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap inline-flex items-center gap-1"><WaIcon /> {{ it.parent.customer_phone }}</a>
@@ -647,7 +683,7 @@ onMounted(async () => { await loadVenues(); await run() })
                   <td class="px-4 py-2 pl-10 text-slate-600">{{ fmtDate(c.booking_date) }}</td>
                   <td class="px-4 py-2 text-slate-600">{{ c.start_time }}–{{ c.end_time }}</td>
                   <td class="px-4 py-2 text-slate-500">{{ c.facility_name }}</td>
-                  <td colspan="9" class="px-4 py-2"></td>
+                  <td colspan="10" class="px-4 py-2"></td>
                 </tr>
               </template>
             </template>

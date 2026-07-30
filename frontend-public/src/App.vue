@@ -196,7 +196,10 @@ onMounted(loadVenues)
             ]"
           >
             <p class="font-medium">{{ s.start_time }}–{{ s.end_time }}</p>
-            <p v-if="s.status === 'booked'" class="text-xs mt-1">Terisi</p>
+            <p v-if="s.status === 'booked'" class="text-xs mt-1">
+              Terisi
+              <span v-if="s.coaching" class="ml-1 bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-[10px] font-medium">🎾 Coaching</span>
+            </p>
             <a
               v-else :href="bookLink(s)" target="_blank" rel="noopener"
               class="inline-block text-xs mt-1 text-emerald-700 font-medium hover:underline"

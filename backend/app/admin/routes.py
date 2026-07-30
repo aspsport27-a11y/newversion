@@ -2157,12 +2157,24 @@ def bookings_list():
         q = q.filter(FacilityBooking.venue_id == vid)
     if fid:
         q = q.filter(FacilityBooking.facility_id == fid)
+    # filter coaching: coach_id tertentu, atau 'any' = semua yg pakai coach
+    coach_arg = request.args.get("coach_id")
+    if coach_arg == "any":
+        q = q.filter(FacilityBooking.coach_id.isnot(None))
+    elif coach_arg:
+        try:
+            q = q.filter(FacilityBooking.coach_id == int(coach_arg))
+        except ValueError:
+            pass
     q = q.order_by(FacilityBooking.booking_date, FacilityBooking.start_time)
+
+    coach_names = {c.id: c.name for c in Coach.query.all()}
 
     rows = []
     for fb, fac, order in q.all():
         row = fb.to_dict()
         row["facility_name"] = fac.name
+        row["coach_name"] = coach_names.get(fb.coach_id)
         row["venue_id"] = fb.venue_id
         row["order_item_id"] = fb.order_item_id
         row["order_id"] = order.id if order else None
