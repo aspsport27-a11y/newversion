@@ -124,6 +124,41 @@ def is_coach_available(coach_id, booking_date, start, end, exclude_id=None) -> b
     return True
 
 
+def coach_conflicting_sessions(coach_id):
+    """Sesi MENDATANG yg kini jatuh di luar ketersediaan coach — dipakai utk
+    memperingatkan (halaman coach) & menandai (portal manajer). Sengaja hanya
+    laporan: booking berbayar TAK PERNAH dibatalkan otomatis gara-gara coach
+    mengubah ketersediaannya.
+
+    Dipakai bersama blueprint public & admin — jangan disalin ulang; dua
+    salinan pasti menyimpang (spt kasus bookingPrice.js dulu)."""
+    today = date.today()
+    rows = (
+        db.session.query(FacilityBooking, Facility)
+        .join(Facility, FacilityBooking.facility_id == Facility.id)
+        .filter(
+            FacilityBooking.coach_id == coach_id,
+            FacilityBooking.status == "booked",
+            FacilityBooking.booking_date >= today,
+        )
+        .order_by(FacilityBooking.booking_date, FacilityBooking.start_time)
+        .all()
+    )
+    out = []
+    for fb, fac in rows:
+        if coach_declared_available(coach_id, fb.booking_date, fb.start_time, fb.end_time):
+            continue
+        out.append({
+            "booking_id": fb.id,
+            "date": fb.booking_date.isoformat(),
+            "start_time": fb.start_time.strftime("%H:%M"),
+            "end_time": fb.end_time.strftime("%H:%M"),
+            "facility_name": fac.name,
+            "override": bool(fb.coaching_override),
+        })
+    return out
+
+
 # 'coaching' tak boleh dikirim langsung dr klien — baris uangnya dibuat otomatis
 # oleh sistem dari item 'booking' yg memakai coach (lihat _build_order_items).
 VALID_ITEM_TYPES = {"product", "ticket", "rental", "booking"}

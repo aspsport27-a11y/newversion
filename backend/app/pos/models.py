@@ -522,6 +522,7 @@ class FacilityBooking(db.Model):
             "status": self.status,
             "coach_id": self.coach_id,
             "coaching_persons": self.coaching_persons,
+            "coaching_override": bool(self.coaching_override),
         }
 
 

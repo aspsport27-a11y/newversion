@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { parseUTC } from '../utils/datetime'
 
 const auth = useAuthStore()
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
@@ -210,6 +211,30 @@ async function delCoach(c) {
   try { await client.delete(`/admin/coaches/${c.id}`); await loadCoaching() }
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
 }
+// --- ketersediaan coach (diisi coach sendiri lewat tautannya) ---
+const HARI = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'] // 0..6 = weekday Python
+const avail = ref([])
+async function loadAvailability() {
+  if (!venueId.value) return
+  try {
+    const { data } = await client.get('/admin/coach-availability', { params: { venue_id: venueId.value } })
+    avail.value = data.coaches
+  } catch (_) { avail.value = [] }
+}
+const totalConflicts = computed(() => avail.value.reduce((n, c) => n + (c.conflicts?.length || 0), 0))
+function fmtUpdated(iso) {
+  if (!iso) return 'belum pernah'
+  const d = parseUTC(iso)
+  const hariLalu = Math.floor((Date.now() - d.getTime()) / 864e5)
+  const tgl = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+  if (hariLalu <= 0) return `hari ini`
+  return `${tgl} (${hariLalu} hari lalu)`
+}
+function fmtTgl(iso) {
+  const d = new Date(iso + 'T00:00:00')
+  return d.toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short' })
+}
+
 // --- tautan jadwal pribadi coach ---
 function coachLink(c) {
   return c.schedule_token ? `https://jadwal.aspsports.id/?coach=${c.schedule_token}` : null
@@ -245,7 +270,7 @@ async function resetCoachToken(c) {
 function reload() {
   // set tab default sesuai tipe venue
   tab.value = isTicketVenue.value ? 'tiket' : 'lapangan'
-  if (isTicketVenue.value) { loadTickets(); loadHolidays() } else { loadFacilities(); loadCoaching() }
+  if (isTicketVenue.value) { loadTickets(); loadHolidays() } else { loadFacilities(); loadCoaching(); loadAvailability() }
 }
 onMounted(async () => { loading.value = true; await loadVenues(); reload(); loading.value = false })
 watch(venueId, reload)
@@ -398,6 +423,69 @@ watch(venueId, reload)
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- ===== Ketersediaan coach (diisi coach sendiri) ===== -->
+      <div v-if="avail.length" class="mt-6">
+        <h3 class="font-semibold text-slate-700 mb-1">Ketersediaan Coach</h3>
+        <p class="text-xs text-slate-500 mb-3">
+          Diisi coach sendiri lewat tautan jadwalnya. Kasir melihat ini saat membuat booking —
+          coach di luar jamnya masih bisa dipilih, tapi harus dikonfirmasi dulu.
+        </p>
+
+        <div v-if="totalConflicts" class="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-3">
+          <p class="text-sm font-medium text-amber-800 mb-1">⚠️ Ada {{ totalConflicts }} sesi mendatang di luar ketersediaan coach</p>
+          <template v-for="c in avail" :key="'cf' + c.coach_id">
+            <p v-for="(x, i) in c.conflicts" :key="i" class="text-xs text-amber-700">
+              {{ c.coach_name }} · {{ fmtTgl(x.date) }} {{ x.start_time }}–{{ x.end_time }} · {{ x.facility_name }}
+              <span v-if="x.override" class="text-amber-900">(dikonfirmasi kasir)</span>
+            </p>
+          </template>
+          <p class="text-xs text-amber-700 mt-1.5">Booking tidak dibatalkan otomatis — koordinasikan dengan coach.</p>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+                <th class="px-3 py-2.5 font-medium">Coach</th>
+                <th v-for="(h, i) in HARI" :key="i" class="px-2 py-2.5 font-medium text-center">{{ h }}</th>
+                <th class="px-3 py-2.5 font-medium">Terakhir diperbarui</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="c in avail" :key="c.coach_id" class="border-t align-top">
+                  <td class="px-3 py-2.5 font-medium text-slate-700 whitespace-nowrap">
+                    {{ c.coach_name }}
+                    <span v-if="!c.configured" class="block text-[10px] text-slate-400">belum diatur — dianggap selalu bisa</span>
+                  </td>
+                  <td v-for="(h, wd) in HARI" :key="wd" class="px-2 py-2.5 text-center">
+                    <template v-if="c.pattern[String(wd)]">
+                      <span v-for="(r, i) in c.pattern[String(wd)]" :key="i" class="block text-[11px] bg-teal-50 text-teal-700 rounded px-1 py-0.5 mb-0.5 whitespace-nowrap">
+                        {{ r.start_time }}–{{ r.end_time }}
+                      </span>
+                    </template>
+                    <span v-else class="text-slate-300 text-xs">—</span>
+                  </td>
+                  <td class="px-3 py-2.5 text-xs whitespace-nowrap" :class="c.updated_at ? 'text-slate-500' : 'text-amber-600'">
+                    {{ fmtUpdated(c.updated_at) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- tanggal khusus -->
+        <div v-for="c in avail" :key="'exc' + c.coach_id">
+          <div v-if="c.exceptions.length" class="mt-3 bg-white rounded-xl shadow-sm border p-3">
+            <p class="text-xs font-medium text-slate-600 mb-1.5">Tanggal khusus — {{ c.coach_name }}</p>
+            <span v-for="e in c.exceptions" :key="e.id"
+              class="inline-block text-[11px] rounded px-2 py-0.5 mr-1.5 mb-1"
+              :class="e.available ? 'bg-teal-50 text-teal-700' : 'bg-red-50 text-red-600'">
+              {{ fmtTgl(e.date) }}<span v-if="e.available"> · {{ e.start_time }}–{{ e.end_time }}</span><span v-else> · libur</span>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
 

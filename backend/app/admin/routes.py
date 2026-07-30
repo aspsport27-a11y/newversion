@@ -1362,6 +1362,58 @@ def coaches_delete(cid):
     return jsonify(message="Coach dihapus"), 200
 
 
+@admin_bp.get("/coach-availability")
+@jwt_required()
+@VIEW
+def coach_availability_overview():
+    """Ketersediaan semua coach dlm 1 tampilan (utk manajer): pola mingguan,
+    tanggal khusus mendatang, kapan terakhir diperbarui, & sesi mendatang yg
+    jatuh DI LUAR ketersediaan (termasuk yg dipaksakan kasir/override).
+
+    Coach tanpa pola sama sekali = 'belum diatur' → dianggap selalu bisa;
+    ditandai supaya manajer tahu siapa yg belum pernah mengisi."""
+    from ..pos.models import CoachAvailability, CoachAvailabilityException
+    from ..pos.services import coach_conflicting_sessions
+
+    q = Coach.query.filter_by(is_active=True)
+    vid = request.args.get("venue_id", type=int)
+    vids = _scope_vids(_current_user())
+    if vid:
+        err = _venue_in_scope(vid, _current_user())
+        if err:
+            return err
+        q = q.filter_by(venue_id=vid)
+    elif vids is not None:
+        q = q.filter(Coach.venue_id.in_(vids)) if vids else q.filter(db.false())
+
+    today = date.today()
+    out = []
+    for c in q.order_by(Coach.name).all():
+        pattern = {}
+        for a in (
+            CoachAvailability.query.filter_by(coach_id=c.id)
+            .order_by(CoachAvailability.weekday, CoachAvailability.start_time)
+            .all()
+        ):
+            pattern.setdefault(str(a.weekday), []).append(a.to_dict())
+        excs = (
+            CoachAvailabilityException.query.filter_by(coach_id=c.id)
+            .filter(CoachAvailabilityException.date >= today)
+            .order_by(CoachAvailabilityException.date)
+            .all()
+        )
+        out.append({
+            "coach_id": c.id, "coach_name": c.name, "phone": c.phone,
+            "venue_id": c.venue_id,
+            "configured": bool(pattern),
+            "updated_at": c.availability_updated_at.isoformat() if c.availability_updated_at else None,
+            "pattern": pattern,
+            "exceptions": [e.to_dict() for e in excs],
+            "conflicts": coach_conflicting_sessions(c.id),
+        })
+    return jsonify(count=len(out), coaches=out), 200
+
+
 @admin_bp.get("/coaching-rate")
 @jwt_required()
 @VIEW

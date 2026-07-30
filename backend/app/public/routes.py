@@ -257,32 +257,11 @@ def _parse_hm(s):
 
 
 def _conflicting_sessions(coach):
-    """Sesi MENDATANG yg kini jatuh di luar ketersediaan coach. Dipakai utk
-    memperingatkan (bukan membatalkan) — booking berbayar tak boleh hilang
-    otomatis gara-gara coach mengubah ketersediaan."""
-    today = date.today()
-    rows = (
-        db.session.query(FacilityBooking, Facility)
-        .join(Facility, FacilityBooking.facility_id == Facility.id)
-        .filter(
-            FacilityBooking.coach_id == coach.id,
-            FacilityBooking.status == "booked",
-            FacilityBooking.booking_date >= today,
-        )
-        .order_by(FacilityBooking.booking_date, FacilityBooking.start_time)
-        .all()
-    )
-    out = []
-    for fb, fac in rows:
-        if coach_declared_available(coach.id, fb.booking_date, fb.start_time, fb.end_time):
-            continue
-        out.append({
-            "date": fb.booking_date.isoformat(),
-            "start_time": fb.start_time.strftime("%H:%M"),
-            "end_time": fb.end_time.strftime("%H:%M"),
-            "facility_name": fac.name,
-        })
-    return out
+    """Sesi mendatang di luar ketersediaan coach — logikanya dipakai bersama
+    dgn portal manajer, jadi tinggal di pos/services (jangan disalin)."""
+    from ..pos.services import coach_conflicting_sessions
+
+    return coach_conflicting_sessions(coach.id)
 
 
 @public_bp.get("/coach-availability")

@@ -763,6 +763,8 @@ onMounted(async () => { await loadVenues(); await run() })
                   <span v-if="it.b.coach_name" class="text-xs bg-teal-100 text-teal-700 rounded px-1.5 py-0.5">
                     🎾 {{ it.b.coach_name }}<span v-if="it.b.coaching_persons" class="text-teal-600"> · {{ it.b.coaching_persons }} org</span>
                   </span>
+                  <span v-if="it.b.coaching_override" class="ml-1 text-xs bg-amber-100 text-amber-700 rounded px-1.5 py-0.5"
+                    title="Dibuat di luar jam ketersediaan coach — kasir mengonfirmasi coach bersedia">⚠️ di luar jam</span>
                   <span v-else class="text-slate-300">—</span>
                 </td>
                 <td class="px-4 py-3 text-slate-600">{{ it.b.customer_name || '—' }}</td>
