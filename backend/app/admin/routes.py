@@ -2304,10 +2304,18 @@ def bookings_list():
             row["paid_off_at"] = (
                 paid_pays[-1].paid_at.isoformat() if (paid_pays and order.status == "paid") else None
             )
+            # cara bayar: metode yg BENAR-BENAR sudah masuk, urut waktu bayar &
+            # tanpa duplikat (DP cash lalu pelunasan QRIS → ["cash","qris"])
+            methods = []
+            for p in paid_pays:
+                if p.method and p.method not in methods:
+                    methods.append(p.method)
+            row["payment_methods"] = methods
         else:
             row["order_total"] = row["order_paid"] = row["order_due"] = None
             row["payment_status"] = None
             row["dp_at"] = row["paid_off_at"] = None
+            row["payment_methods"] = []
         rows.append(row)
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), bookings=rows), 200
 

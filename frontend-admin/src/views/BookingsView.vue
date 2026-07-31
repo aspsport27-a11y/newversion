@@ -56,6 +56,19 @@ function fmtPay(iso) {
 function statusLabel(s) {
   return { paid: 'Lunas', partial: 'DP', open: 'Belum bayar', void: 'Batal' }[s] || s || '—'
 }
+// cara bayar — bisa lebih dari satu kalau DP & pelunasan beda metode
+const METODE = { cash: 'Cash', qris: 'QRIS', transfer: 'Transfer' }
+function metodeLabel(m) { return METODE[m] || m }
+function metodeClass(m) {
+  return {
+    cash: 'bg-emerald-100 text-emerald-700',
+    qris: 'bg-indigo-100 text-indigo-700',
+    transfer: 'bg-sky-100 text-sky-700',
+  }[m] || 'bg-slate-100 text-slate-600'
+}
+function metodeTeks(list) {
+  return (list || []).length ? list.map(metodeLabel).join(' + ') : '—'
+}
 function statusClass(s) {
   return {
     paid: 'bg-emerald-100 text-emerald-700',
@@ -182,6 +195,7 @@ function printBookings() {
     <td class="r">${b.order_due != null ? esc(rupiah(b.order_due)) : '—'}</td>
     <td>${esc(fmtPay(b.dp_at))}</td>
     <td>${esc(fmtPay(b.paid_off_at))}</td>
+    <td>${esc(metodeTeks(b.payment_methods))}</td>
     <td>${esc(statusLabel(b.payment_status))}</td>
   </tr>`).join('')
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Laporan Booking</title>
@@ -202,9 +216,9 @@ function printBookings() {
     <table>
       <thead><tr>
         <th>Tanggal Main</th><th>Jam</th><th>Lapangan</th><th>Coach</th><th>Customer</th><th>No. HP</th>
-        <th class="r">Total</th><th class="r">Sisa</th><th>Tgl DP</th><th>Tgl Lunas</th><th>Status</th>
+        <th class="r">Total</th><th class="r">Sisa</th><th>Tgl DP</th><th>Tgl Lunas</th><th>Cara Bayar</th><th>Status</th>
       </tr></thead>
-      <tbody>${body || '<tr><td colspan="11" style="text-align:center;color:#94a3b8">Tidak ada data.</td></tr>'}</tbody>
+      <tbody>${body || '<tr><td colspan="12" style="text-align:center;color:#94a3b8">Tidak ada data.</td></tr>'}</tbody>
     </table>
   </body></html>`
   const w = window.open('', '_blank')
@@ -758,13 +772,14 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-3 font-medium text-right">Sisa</th>
               <th class="px-4 py-3 font-medium">Tgl DP</th>
               <th class="px-4 py-3 font-medium">Tgl Lunas</th>
+              <th class="px-4 py-3 font-medium">Cara Bayar</th>
               <th class="px-4 py-3 font-medium text-center">Status</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td :colspan="showCoaching ? 12 : 11" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!shown.length"><td :colspan="showCoaching ? 12 : 11" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
+            <tr v-if="loading"><td :colspan="showCoaching ? 13 : 12" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!shown.length"><td :colspan="showCoaching ? 13 : 12" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
             <template v-for="it in grouped" :key="it.key">
               <!-- baris tunggal (order 1 tanggal / booking tanpa order) -->
               <tr v-if="it.type === 'single'" @click="openDetail(it.b)" class="border-t hover:bg-slate-50 cursor-pointer">
@@ -788,6 +803,7 @@ onMounted(async () => { await loadVenues(); await run() })
                 <td class="px-4 py-3 text-right" :class="it.b.order_due > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'">{{ it.b.order_due != null ? rupiah(it.b.order_due) : '—' }}</td>
                 <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">{{ fmtPay(it.b.dp_at) }}</td>
                 <td class="px-4 py-3 whitespace-nowrap text-xs" :class="it.b.paid_off_at ? 'text-emerald-600' : 'text-slate-400'">{{ fmtPay(it.b.paid_off_at) }}</td>
+                <td class="px-4 py-3 whitespace-nowrap"><span v-for="m in (it.b.payment_methods || [])" :key="m" :class="metodeClass(m)" class="text-xs rounded px-1.5 py-0.5 mr-1">{{ metodeLabel(m) }}</span><span v-if="!(it.b.payment_methods || []).length" class="text-slate-300">—</span></td>
                 <td class="px-4 py-3 text-center"><span :class="statusClass(it.b.payment_status)" class="text-xs rounded-full px-2 py-0.5">{{ statusLabel(it.b.payment_status) }}</span></td>
                 <td class="px-4 py-3 text-right"><button v-if="canDelete(it.b)" @click.stop="deleteBooking(it.b)" class="text-red-500 text-xs hover:text-red-700">Hapus</button></td>
               </tr>
@@ -812,6 +828,7 @@ onMounted(async () => { await loadVenues(); await run() })
                 <td class="px-4 py-3 text-right" :class="it.parent.order_due > 0 ? 'text-amber-600 font-medium' : 'text-slate-400'">{{ rupiah(it.parent.order_due) }}</td>
                 <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">{{ fmtPay(it.parent.dp_at) }}</td>
                 <td class="px-4 py-3 whitespace-nowrap text-xs" :class="it.parent.paid_off_at ? 'text-emerald-600' : 'text-slate-400'">{{ fmtPay(it.parent.paid_off_at) }}</td>
+                <td class="px-4 py-3 whitespace-nowrap"><span v-for="m in (it.parent.payment_methods || [])" :key="m" :class="metodeClass(m)" class="text-xs rounded px-1.5 py-0.5 mr-1">{{ metodeLabel(m) }}</span><span v-if="!(it.parent.payment_methods || []).length" class="text-slate-300">—</span></td>
                 <td class="px-4 py-3 text-center"><span :class="statusClass(it.parent.payment_status)" class="text-xs rounded-full px-2 py-0.5">{{ statusLabel(it.parent.payment_status) }}</span></td>
                 <td class="px-4 py-3 text-right whitespace-nowrap">
                   <button @click.stop="openDetail(it.parent)" class="text-brand-600 text-xs hover:underline mr-2">Detail</button>
@@ -824,7 +841,7 @@ onMounted(async () => { await loadVenues(); await run() })
                   <td class="px-4 py-2 pl-10 text-slate-600">{{ fmtDate(c.booking_date) }}</td>
                   <td class="px-4 py-2 text-slate-600">{{ c.start_time }}–{{ c.end_time }}</td>
                   <td class="px-4 py-2 text-slate-500">{{ c.facility_name }}</td>
-                  <td :colspan="showCoaching ? 10 : 9" class="px-4 py-2"></td>
+                  <td :colspan="showCoaching ? 11 : 10" class="px-4 py-2"></td>
                 </tr>
               </template>
             </template>
