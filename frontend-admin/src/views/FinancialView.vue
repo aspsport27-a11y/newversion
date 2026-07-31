@@ -6,6 +6,9 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
+// Saldo & mutasi kas tak ditampilkan ke manajer (keputusan owner).
+// Server juga TIDAK mengirim rep.cash utk manajer — cek keduanya biar aman.
+const showCash = computed(() => !isManager.value && !!rep.value?.cash)
 
 const venues = ref([])
 const venueId = ref('')
@@ -93,7 +96,7 @@ onMounted(async () => { await loadVenues(); await run() })
 
     <template v-else-if="rep">
       <!-- Ringkasan -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5" :class="showCash ? 'xl:grid-cols-4' : 'xl:grid-cols-3'">
         <div class="bg-white rounded-xl shadow-sm border p-5">
           <p class="text-sm text-slate-500">Pendapatan</p>
           <p class="text-2xl font-bold text-emerald-600 mt-1">{{ rupiah(rep.revenue.total) }}</p>
@@ -107,7 +110,7 @@ onMounted(async () => { await loadVenues(); await run() })
           <p class="text-2xl font-bold mt-1" :class="isProfit ? 'text-brand-600' : 'text-amber-600'">{{ rupiah(rep.net_profit) }}</p>
           <p class="text-xs text-slate-400 mt-0.5">Margin {{ rep.margin_pct }}%</p>
         </div>
-        <div class="bg-white rounded-xl shadow-sm border p-5">
+        <div v-if="showCash" class="bg-white rounded-xl shadow-sm border p-5">
           <p class="text-sm text-slate-500">Saldo Kas (saat ini)</p>
           <p class="text-2xl font-bold text-slate-800 mt-1">{{ rupiah(rep.cash.total) }}</p>
         </div>
@@ -170,7 +173,7 @@ onMounted(async () => { await loadVenues(); await run() })
         </div>
 
         <!-- Arus Kas Operasional (masuk/keluar rekening venue akibat pengajuan dana) -->
-        <div v-if="isManager" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div v-if="showCash" class="bg-white rounded-xl shadow-sm border overflow-hidden">
           <h3 class="font-semibold text-slate-700 px-4 py-3 border-b">Arus Kas Operasional (Rekening Venue)</h3>
           <div class="grid grid-cols-2 gap-3 p-4">
             <div class="bg-emerald-50 rounded-lg px-3 py-2"><p class="text-xs text-emerald-700">Masuk</p><p class="font-bold text-emerald-700">{{ rupiah(rep.cash.operational_flow.in) }}</p></div>
@@ -180,7 +183,7 @@ onMounted(async () => { await loadVenues(); await run() })
         </div>
 
         <!-- Saldo Kas per rekening -->
-        <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div v-if="showCash" class="bg-white rounded-xl shadow-sm border overflow-hidden">
           <h3 class="font-semibold text-slate-700 px-4 py-3 border-b">Saldo Kas per Rekening</h3>
           <table class="w-full text-sm">
             <tbody>

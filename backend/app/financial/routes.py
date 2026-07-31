@@ -190,9 +190,13 @@ def report():
     ]
 
     # ---------- SALDO KAS (snapshot, bukan periodik) ----------
-    # saldo rekening holding = data owner-sensitif (agregat seluruh venue) —
-    # HANYA admin/head_office boleh lihat. manager_unit cuma lihat rekening venuenya sendiri.
+    # manager_unit TIDAK boleh lihat saldo & mutasi kas sama sekali (keputusan
+    # owner) — datanya tak dikirim, bukan cuma disembunyikan di UI, supaya tak
+    # bisa diintip lewat API langsung.
     u = _current_user()
+    can_see_cash = bool(u and u.role != ROLE_MANAGER)
+    # saldo rekening holding = data owner-sensitif (agregat seluruh venue) —
+    # HANYA admin/head_office boleh lihat.
     can_see_holding = bool(u and u.role in (ROLE_ADMIN, ROLE_HEAD_OFFICE))
     acc_q = BankAccount.query.filter_by(is_active=True)
     if vid:
@@ -206,12 +210,13 @@ def report():
     accounts = []
     cash_total = 0.0
     venue_account_ids = []
-    for acc in acc_q.order_by(BankAccount.type.desc(), BankAccount.name).all():
-        bal = account_balance(acc.id)
-        cash_total += bal
-        accounts.append({**acc.to_dict(balance=bal)})
-        if acc.type == "venue":
-            venue_account_ids.append(acc.id)
+    if can_see_cash:  # manager: lewati sekalian, hasilnya tak dikirim
+        for acc in acc_q.order_by(BankAccount.type.desc(), BankAccount.name).all():
+            bal = account_balance(acc.id)
+            cash_total += bal
+            accounts.append({**acc.to_dict(balance=bal)})
+            if acc.type == "venue":
+                venue_account_ids.append(acc.id)
 
     # ---------- ARUS KAS OPERASIONAL (mutasi rekening venue akibat pengajuan
     # dana operasional yg sudah dicairkan) — masuk/keluar dari rekening venue itu sendiri ----------
@@ -256,11 +261,12 @@ def report():
             "out": round(expense_total, 2),
             "net": net_profit,
         },
-        cash={
+        # None utk manager_unit — saldo & mutasi kas memang tak dikirim
+        cash=({
             "total": round(cash_total, 2),
             "accounts": accounts,
             "operational_flow": {"in": round(op_cash_in, 2), "out": round(op_cash_out, 2)},
-        },
+        } if can_see_cash else None),
     ), 200
 
 
