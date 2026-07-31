@@ -18,6 +18,9 @@ function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 const currentVenue = computed(() => venues.value.find((v) => v.id === venueId.value))
 // tipe venue tiket = waterpark; lainnya = venue lapangan (booking)
 const isTicketVenue = computed(() => /water/i.test(currentVenue.value?.type || ''))
+// coaching cuma relevan di venue padel — pakai TIPE venue (bukan nama/id) biar
+// otomatis benar kalau nanti ada venue padel lain, pola sama spt waterpark
+const isPadelVenue = computed(() => /padel/i.test(currentVenue.value?.type || ''))
 const tab = ref('lapangan')
 
 async function loadVenues() {
@@ -270,7 +273,14 @@ async function resetCoachToken(c) {
 function reload() {
   // set tab default sesuai tipe venue
   tab.value = isTicketVenue.value ? 'tiket' : 'lapangan'
-  if (isTicketVenue.value) { loadTickets(); loadHolidays() } else { loadFacilities(); loadCoaching(); loadAvailability() }
+  if (isTicketVenue.value) {
+    loadTickets(); loadHolidays()
+  } else {
+    loadFacilities()
+    // data coaching cuma diambil kalau venue-nya padel
+    if (isPadelVenue.value) { loadCoaching(); loadAvailability() }
+    else { coaches.value = []; coachRate.value = null; avail.value = [] }
+  }
 }
 onMounted(async () => { loading.value = true; await loadVenues(); reload(); loading.value = false })
 watch(venueId, reload)
@@ -296,7 +306,7 @@ watch(venueId, reload)
       </template>
       <template v-else>
         <button @click="tab = 'lapangan'" :class="tab === 'lapangan' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Lapangan</button>
-        <button @click="tab = 'coaching'" :class="tab === 'coaching' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Coaching</button>
+        <button v-if="isPadelVenue" @click="tab = 'coaching'" :class="tab === 'coaching' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Coaching</button>
       </template>
     </div>
 

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { parseUTC } from '../utils/datetime'
@@ -64,6 +64,15 @@ function statusClass(s) {
     void: 'bg-red-100 text-red-600',
   }[s] || 'bg-slate-100 text-slate-500'
 }
+
+// Coaching cuma relevan di venue padel. Kalau venue tertentu dipilih → ikut
+// tipe venue itu; kalau "Semua venue" → tampil selama ada venue padel dalam
+// cakupan user. Pakai TIPE venue (bukan nama/id) spt pola waterpark.
+const isPadelVenue = (v) => /padel/i.test(v?.type || '')
+const showCoaching = computed(() => {
+  if (venueId.value) return isPadelVenue(venues.value.find((v) => v.id === venueId.value))
+  return venues.value.some(isPadelVenue)
+})
 
 const shown = computed(() => {
   let list = bookings.value
@@ -223,6 +232,7 @@ function params() {
 // daftar coach utk dropdown filter — kosong kalau venue tak punya coaching,
 // dan filternya otomatis disembunyikan
 async function loadCoachList() {
+  if (!showCoaching.value) { coachList.value = []; coachFilter.value = ''; return }
   try {
     const { data } = await client.get('/admin/coaches', {
       params: venueId.value ? { venue_id: venueId.value } : {},
@@ -408,6 +418,8 @@ async function cancelBooking() {
     alert(e?.response?.data?.message || 'Gagal membatalkan.')
   }
 }
+// pindah ke venue non-padel saat tab Rekap Coaching terbuka → kembali ke daftar
+watch(showCoaching, (ada) => { if (!ada && tab.value === 'coaching') tab.value = 'list' })
 onMounted(async () => { await loadVenues(); await run() })
 </script>
 
@@ -445,7 +457,7 @@ onMounted(async () => { await loadVenues(); await run() })
       <button @click="switchTab('list')" :class="tab === 'list' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Booking</button>
       <button @click="switchTab('forfeited')" :class="tab === 'forfeited' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">DP Hangus</button>
       <button @click="switchTab('customers')" :class="tab === 'customers' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Data Customer</button>
-      <button @click="switchTab('coaching')" :class="tab === 'coaching' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Rekap Coaching</button>
+      <button v-if="showCoaching" @click="switchTab('coaching')" :class="tab === 'coaching' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Rekap Coaching</button>
     </div>
 
     <!-- ================= TAB DATA CUSTOMER (CRM) ================= -->
@@ -739,7 +751,7 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-3 font-medium">Tanggal Main</th>
               <th class="px-4 py-3 font-medium">Jam</th>
               <th class="px-4 py-3 font-medium">Lapangan</th>
-              <th class="px-4 py-3 font-medium">Coach</th>
+              <th v-if="showCoaching" class="px-4 py-3 font-medium">Coach</th>
               <th class="px-4 py-3 font-medium">Customer</th>
               <th class="px-4 py-3 font-medium">No. HP</th>
               <th class="px-4 py-3 font-medium text-right">Total</th>
@@ -751,15 +763,15 @@ onMounted(async () => { await loadVenues(); await run() })
             </tr>
           </thead>
           <tbody>
-            <tr v-if="loading"><td colspan="12" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!shown.length"><td colspan="12" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
+            <tr v-if="loading"><td :colspan="showCoaching ? 12 : 11" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!shown.length"><td :colspan="showCoaching ? 12 : 11" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
             <template v-for="it in grouped" :key="it.key">
               <!-- baris tunggal (order 1 tanggal / booking tanpa order) -->
               <tr v-if="it.type === 'single'" @click="openDetail(it.b)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 text-slate-700">{{ fmtDate(it.b.booking_date) }}</td>
                 <td class="px-4 py-3 font-medium text-slate-700">{{ it.b.start_time }}–{{ it.b.end_time }}</td>
                 <td class="px-4 py-3 text-slate-700">{{ it.b.facility_name }}</td>
-                <td class="px-4 py-3 whitespace-nowrap">
+                <td v-if="showCoaching" class="px-4 py-3 whitespace-nowrap">
                   <span v-if="it.b.coach_name" class="text-xs bg-teal-100 text-teal-700 rounded px-1.5 py-0.5">
                     🎾 {{ it.b.coach_name }}<span v-if="it.b.coaching_persons" class="text-teal-600"> · {{ it.b.coaching_persons }} org</span>
                   </span>
@@ -790,7 +802,7 @@ onMounted(async () => { await loadVenues(); await run() })
                 </td>
                 <td class="px-4 py-3 text-slate-500 text-sm">{{ grpJam(it.children) }}</td>
                 <td class="px-4 py-3 text-slate-700">{{ it.parent.facility_name }}</td>
-                <td class="px-4 py-3 text-slate-300">—</td>
+                <td v-if="showCoaching" class="px-4 py-3 text-slate-300">—</td>
                 <td class="px-4 py-3 text-slate-600">{{ it.parent.customer_name || '—' }}</td>
                 <td class="px-4 py-3">
                   <a v-if="waLink(it.parent.customer_phone)" :href="waLink(it.parent.customer_phone)" target="_blank" rel="noopener" @click.stop class="text-emerald-600 hover:underline whitespace-nowrap inline-flex items-center gap-1"><WaIcon /> {{ it.parent.customer_phone }}</a>
@@ -812,7 +824,7 @@ onMounted(async () => { await loadVenues(); await run() })
                   <td class="px-4 py-2 pl-10 text-slate-600">{{ fmtDate(c.booking_date) }}</td>
                   <td class="px-4 py-2 text-slate-600">{{ c.start_time }}–{{ c.end_time }}</td>
                   <td class="px-4 py-2 text-slate-500">{{ c.facility_name }}</td>
-                  <td colspan="10" class="px-4 py-2"></td>
+                  <td :colspan="showCoaching ? 10 : 9" class="px-4 py-2"></td>
                 </tr>
               </template>
             </template>
