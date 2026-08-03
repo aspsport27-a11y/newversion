@@ -407,6 +407,20 @@ function logout() {
           </button>
         </div>
 
+        <!-- Reservasi hari ini — biar kasir tahu tanpa membuka dialog dulu -->
+        <button v-if="pos.reservationsToday.length" @click="showStationResv = true"
+          class="w-full text-left bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 mb-3 hover:bg-indigo-100">
+          <p class="text-xs font-semibold text-indigo-700 mb-0.5">
+            📅 {{ pos.reservationsToday.length }} reservasi hari ini
+          </p>
+          <p v-for="r in pos.reservationsToday.slice(0, 3)" :key="r.id" class="text-xs text-indigo-600">
+            {{ r.start_time }}–{{ r.end_time }} · {{ r.station_type }}<span v-if="r.customer_name"> · {{ r.customer_name }}</span>
+          </p>
+          <p v-if="pos.reservationsToday.length > 3" class="text-xs text-indigo-400">
+            +{{ pos.reservationsToday.length - 3 }} lagi — ketuk untuk lihat semua
+          </p>
+        </button>
+
         <!-- Station Gaming (arena esport) — dikelompokkan per tier -->
         <div v-if="pos.hasStations" class="mb-4">
           <p class="text-xs font-semibold text-slate-400 mb-1.5">🎮 STATION</p>

@@ -14,6 +14,7 @@ export const usePosStore = defineStore('pos', {
     facilities: [],
     holidays: [], // tanggal libur nasional (ISO) — utk tarif booking 'holiday'
     stations: [],
+    reservationsToday: [],
     addons: [],
     cart: [], // {uid, item_type, name, unit_price, quantity, ...}
     discount: 0,
@@ -104,6 +105,9 @@ export const usePosStore = defineStore('pos', {
     async fetchStations() {
       const { data } = await client.get('/stations')
       this.stations = data.stations
+      // reservasi hari ini yg belum dipakai — dipakai utk mengingatkan kasir
+      // sebelum menambah waktu sesi yg sedang jalan
+      this.reservationsToday = data.reservations_today || []
     },
     // --- reservasi station (pesan di muka per JENIS station) ---
     async fetchStationTypes(params = {}) {

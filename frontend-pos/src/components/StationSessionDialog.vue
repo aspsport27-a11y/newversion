@@ -57,6 +57,19 @@ const topupTotal = computed({
   set: (v) => { topupTotalOverride.value = v },
 })
 
+// Reservasi hari ini utk JENIS station yang sama & belum lewat — ditampilkan
+// sebelum kasir menambah waktu, biar tahu duluan (bukan cuma diperingatkan
+// setelah terlanjur). Perpanjangan tetap BOLEH, ini murni pengingat.
+const reservasiJenisIni = computed(() => {
+  const tipe = props.station.station_type
+  if (!tipe) return []
+  const now = new Date()
+  const nowStr = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0')
+  return (pos.reservationsToday || []).filter(
+    (r) => r.station_type === tipe && r.end_time > nowStr,
+  )
+})
+
 async function submitTopup() {
   busy.value = true; err.value = ''
   try {
@@ -68,8 +81,11 @@ async function submitTopup() {
     sessionState.value = res.session
     showTopup.value = false
     topupDuration.value = 60; topupDiscount.value = 0; topupTotalOverride.value = null
+    // perpanjangan menabrak reservasi → beri tahu kasir (tetap dilanjutkan)
+    if (res.warning) window.alert('⚠️ ' + res.warning)
     // PRABAYAR: tambah waktu langsung dibayar → tutup dialog & ke pembayaran delta
     if (res.order && Number(res.order.amount_due) > 0) emit('pay-order', res.order)
+    else pos.fetchStations()
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah jam.' } finally { busy.value = false }
 }
 
@@ -233,6 +249,13 @@ async function doStop() {
       </div>
 
       <div v-if="showTopup" class="border rounded-lg p-3 mb-3 space-y-2">
+        <!-- pengingat: ada yang sudah memesan jenis station ini hari ini -->
+        <div v-if="reservasiJenisIni.length" class="bg-amber-50 border border-amber-300 rounded-lg p-2.5">
+          <p class="text-xs font-medium text-amber-800 mb-0.5">📅 Reservasi {{ station.station_type }} hari ini</p>
+          <p v-for="r in reservasiJenisIni" :key="r.id" class="text-xs text-amber-700">
+            {{ r.start_time }}–{{ r.end_time }}<span v-if="r.customer_name"> · {{ r.customer_name }}</span>
+          </p>
+        </div>
         <div class="grid grid-cols-2 gap-2">
           <div><label class="block text-xs text-slate-500 mb-1">Durasi (menit)</label>
             <input v-model.number="topupDuration" type="number" class="w-full rounded border border-slate-300 px-2 py-1.5 text-sm outline-none" /></div>

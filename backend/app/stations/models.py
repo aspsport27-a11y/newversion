@@ -342,3 +342,63 @@ def station_type_usage(venue_id, station_type, d, start, end, exclude_id=None):
                 used_live += 1
 
     return capacity, used_resv + used_live, {"reservasi": used_resv, "sesi_berjalan": used_live}
+
+
+def topup_reservation_warning(session, station, station_type=None):
+    """Peringatan (string) kalau sesi ini — SETELAH diperpanjang — melewati
+    reservasi jenis yg sama sampai kapasitasnya terlampaui. None = aman.
+
+    Sengaja PERINGATAN, bukan blokir: keputusan user, kasir tetap boleh
+    memperpanjang (mis. slot berikutnya ternyata batal atau bisa dialihkan ke
+    unit lain). Dipanggil SETELAH topup di-flush, jadi allocated_minutes()
+    sudah termasuk tambahan waktunya.
+    """
+    from datetime import date as _date, datetime as _dt
+
+    stype = station_type or station.station_type
+    if not stype:
+        return None
+    anchor = session.play_started_at or session.started_at
+    if anchor is None:
+        return None
+    today = _date.today()
+    if anchor.date() != today:
+        return None  # sesi lintas hari — di luar cakupan peringatan ini
+
+    now_min = _dt.utcnow().hour * 60 + _dt.utcnow().minute
+    end_min = anchor.hour * 60 + anchor.minute + session.allocated_minutes()
+
+    upcoming = StationReservation.query.filter_by(
+        venue_id=session.venue_id, station_type=stype,
+        reservation_date=today, status="booked",
+    ).order_by(StationReservation.start_time).all()
+
+    for r in upcoming:
+        r_start, r_end = _resv_mins(r.start_time), _resv_mins(r.end_time, as_end=True)
+        if r_end <= now_min or r_start >= end_min:
+            continue  # reservasi sudah lewat, atau sesi ini berakhir sebelum mulai
+        cap, used, _d = station_type_usage(
+            session.venue_id, stype, today, r.start_time, r.end_time
+        )
+        if used > cap:
+            return (
+                f"Perpanjangan ini melewati reservasi {stype} jam "
+                f"{r.start_time:%H:%M}–{r.end_time:%H:%M}"
+                + (f" a/n {r.customer_name}" if r.customer_name else "")
+                + f" — semua {cap} unit akan terpakai. Pastikan sudah dikoordinasikan."
+            )
+    return None
+
+
+def reservations_today(venue_id):
+    """Reservasi hari ini yg belum dipakai — utk ditampilkan di layar POS."""
+    from datetime import date as _date
+
+    rows = (
+        StationReservation.query.filter_by(
+            venue_id=venue_id, reservation_date=_date.today(), status="booked"
+        )
+        .order_by(StationReservation.start_time)
+        .all()
+    )
+    return [r.to_dict() for r in rows]

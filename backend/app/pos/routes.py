@@ -872,10 +872,14 @@ def stations_list():
         ).all()
     } if stations else {}
     from .services import is_weekend
+    from ..stations.models import reservations_today
     wknd = is_weekend(date.today())  # tarif weekday/weekend otomatis
     return jsonify(
         count=len(stations), weekend=wknd,
         stations=[s.to_dict(active.get(s.id), weekend=wknd) for s in stations],
+        # reservasi hari ini yg belum dipakai — supaya kasir lihat langsung di
+        # layar utama, tak perlu buka dialog reservasi dulu
+        reservations_today=reservations_today(terminal.venue_id),
     ), 200
 
 
@@ -1221,7 +1225,19 @@ def station_topup(sid):
         }])
     else:
         db.session.commit()  # sesi lama tanpa order → dibayar di stop (perilaku lama)
-    return jsonify(session=session.to_dict(), order=order.to_dict() if order else None), 201
+    # perpanjangan BOLEH walau menabrak reservasi — kasir cuma diperingatkan.
+    # `topups` di-expire dulu: allocated_minutes() membaca koleksi itu, dan
+    # topup yg baru ditambah tak otomatis masuk ke koleksi yg sudah ter-load.
+    # Di produksi commit memang meng-expire semuanya, tapi jangan bergantung
+    # pd efek samping itu — sekali add_items_to_order berubah, ini diam2 salah.
+    from ..stations.models import topup_reservation_warning
+    db.session.expire(session, ["topups"])
+    warning = topup_reservation_warning(session, session.station)
+    return jsonify(
+        session=session.to_dict(),
+        order=order.to_dict() if order else None,
+        warning=warning,
+    ), 201
 
 
 @pos_bp.get("/addons")
