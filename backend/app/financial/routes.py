@@ -190,8 +190,11 @@ def report():
     ]
 
     # ---------- SALDO KAS (snapshot, bukan periodik) ----------
-    # manager_unit TIDAK boleh lihat saldo & mutasi kas sama sekali (keputusan
-    # owner) — datanya tak dikirim, bukan cuma disembunyikan di UI, supaya tak
+    # Keputusan owner, dua hal BERBEDA yg sengaja dipisah:
+    #   - SALDO kas (posisi uang saat ini, termasuk holding) -> manager TIDAK boleh
+    #   - ARUS dana operasional yg cair ke/dari rekening venue-nya (periodik)
+    #     -> manager BOLEH, itu dana yg mereka kelola sendiri
+    # Saldo tak dikirim sama sekali (bukan cuma disembunyikan di UI) supaya tak
     # bisa diintip lewat API langsung.
     u = _current_user()
     can_see_cash = bool(u and u.role != ROLE_MANAGER)
@@ -210,13 +213,16 @@ def report():
     accounts = []
     cash_total = 0.0
     venue_account_ids = []
-    if can_see_cash:  # manager: lewati sekalian, hasilnya tak dikirim
-        for acc in acc_q.order_by(BankAccount.type.desc(), BankAccount.name).all():
-            bal = account_balance(acc.id)
-            cash_total += bal
-            accounts.append({**acc.to_dict(balance=bal)})
-            if acc.type == "venue":
-                venue_account_ids.append(acc.id)
+    for acc in acc_q.order_by(BankAccount.type.desc(), BankAccount.name).all():
+        # id rekening venue tetap dikumpulkan utk semua role — dibutuhkan utk
+        # menghitung arus dana operasional (yg manager boleh lihat)
+        if acc.type == "venue":
+            venue_account_ids.append(acc.id)
+        if not can_see_cash:
+            continue  # manager: jangan hitung saldo sama sekali
+        bal = account_balance(acc.id)
+        cash_total += bal
+        accounts.append({**acc.to_dict(balance=bal)})
 
     # ---------- ARUS KAS OPERASIONAL (mutasi rekening venue akibat pengajuan
     # dana operasional yg sudah dicairkan) — masuk/keluar dari rekening venue itu sendiri ----------
@@ -261,12 +267,14 @@ def report():
             "out": round(expense_total, 2),
             "net": net_profit,
         },
-        # None utk manager_unit — saldo & mutasi kas memang tak dikirim
+        # SALDO — None utk manager_unit (tak dikirim sama sekali)
         cash=({
             "total": round(cash_total, 2),
             "accounts": accounts,
-            "operational_flow": {"in": round(op_cash_in, 2), "out": round(op_cash_out, 2)},
         } if can_see_cash else None),
+        # ARUS dana operasional periode ini — dikirim ke SEMUA role, sudah
+        # otomatis terbatas ke rekening venue yg boleh dilihat pemanggil
+        operational_flow={"in": round(op_cash_in, 2), "out": round(op_cash_out, 2)},
     ), 200
 
 
