@@ -21,6 +21,9 @@ class GameStation(db.Model):
     code = db.Column(db.String(20), nullable=False)
     name = db.Column(db.String(100), nullable=False)
     tier = db.Column(db.String(20), nullable=False, default="reguler")
+    # jenis station (mis. "Ruangan VIP", "Simulator PS") — dasar RESERVASI:
+    # customer pesan jenisnya, unit ditentukan saat datang. Lihat migrasi 050.
+    station_type = db.Column(db.String(50))
     hourly_rate = db.Column(db.Numeric(15, 2), nullable=False, default=0)  # tarif weekday
     weekend_rate = db.Column(db.Numeric(15, 2))  # tarif akhir pekan/libur; NULL = pakai hourly_rate
     is_active = db.Column(db.Boolean, default=True)
@@ -37,7 +40,8 @@ class GameStation(db.Model):
     def to_dict(self, active_session=None, weekend=False):
         return {
             "id": self.id, "venue_id": self.venue_id, "code": self.code, "name": self.name,
-            "tier": self.tier, "hourly_rate": float(self.hourly_rate or 0),
+            "tier": self.tier, "station_type": self.station_type,
+            "hourly_rate": float(self.hourly_rate or 0),
             "weekend_rate": float(self.weekend_rate) if self.weekend_rate is not None else None,
             "today_rate": self.rate_for(weekend), "is_active": self.is_active,
             "status": "ongoing" if active_session else "ready",
@@ -238,3 +242,103 @@ class GameSessionFnb(db.Model):
             "unit_price": float(self.unit_price), "quantity": self.quantity,
             "line_total": round(float(self.unit_price) * self.quantity, 2),
         }
+
+
+class StationReservation(db.Model):
+    """Reservasi station di muka — yg dipesan JENIS station, bukan unit tertentu.
+
+    Alasannya: sesi station tak punya akhir pasti (bisa "tambah waktu"), jadi
+    mengunci unit tertentu terlalu rapuh. Dgn per-jenis, bentrok baru terjadi
+    kalau SEMUA unit jenis itu terpakai. Unit ditentukan saat customer datang.
+    Uangnya nempel di `order_id` (prabayar, pola sama dgn station_start).
+    """
+
+    __tablename__ = "station_reservations"
+
+    id = db.Column(db.Integer, primary_key=True)
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
+    station_type = db.Column(db.String(50), nullable=False)
+    reservation_date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    duration_minutes = db.Column(db.Integer, nullable=False)
+    customer_name = db.Column(db.String(100))
+    customer_phone = db.Column(db.String(20))
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id", ondelete="SET NULL"))
+    status = db.Column(db.String(12), nullable=False, default="booked")  # booked|fulfilled|cancelled
+    station_id = db.Column(db.Integer, db.ForeignKey("game_stations.id", ondelete="SET NULL"))
+    session_id = db.Column(db.Integer, db.ForeignKey("game_sessions.id", ondelete="SET NULL"))
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        hm = lambda t: t.strftime("%H:%M") if t else None
+        return {
+            "id": self.id,
+            "venue_id": self.venue_id,
+            "station_type": self.station_type,
+            "date": self.reservation_date.isoformat() if self.reservation_date else None,
+            "start_time": hm(self.start_time),
+            "end_time": hm(self.end_time),
+            "duration_minutes": self.duration_minutes,
+            "customer_name": self.customer_name,
+            "customer_phone": self.customer_phone,
+            "order_id": self.order_id,
+            "status": self.status,
+            "station_id": self.station_id,
+            "session_id": self.session_id,
+        }
+
+
+def _resv_mins(t, as_end=False):
+    """Jam → menit; 00:00 sbg akhir rentang = jam ke-24 (konvensi sama dgn jam
+    tutup lapangan, lihat HANDOVER §9)."""
+    m = t.hour * 60 + t.minute
+    return 24 * 60 if (as_end and m == 0) else m
+
+
+def station_type_usage(venue_id, station_type, d, start, end, exclude_id=None):
+    """(kapasitas, terpakai, rincian) utk satu jenis station pada slot [start,end).
+
+    'terpakai' = reservasi lain yg tumpang tindih + sesi yg SEDANG BERJALAN di
+    unit jenis itu yg diperkirakan masih jalan saat slot tsb. Perkiraan akhir
+    sesi = mulai main + total waktu yg sudah dibayar (paket + tambah waktu);
+    memang perkiraan, karena customer bisa menambah waktu lagi kapan saja —
+    itulah kenapa reservasi dibuat per-jenis, bukan per-unit.
+    """
+    from datetime import date as _date, datetime as _dt, timedelta as _td
+
+    units = GameStation.query.filter_by(
+        venue_id=venue_id, station_type=station_type, is_active=True
+    ).all()
+    capacity = len(units)
+    s_min, e_min = _resv_mins(start), _resv_mins(end, as_end=True)
+
+    q = StationReservation.query.filter_by(
+        venue_id=venue_id, station_type=station_type,
+        reservation_date=d, status="booked",
+    )
+    if exclude_id:
+        q = q.filter(StationReservation.id != exclude_id)
+    used_resv = sum(
+        1 for r in q.all()
+        if _resv_mins(r.start_time) < e_min and _resv_mins(r.end_time, as_end=True) > s_min
+    )
+
+    # sesi berjalan hanya relevan kalau reservasinya utk HARI INI
+    used_live = 0
+    if units and d == _date.today():
+        unit_ids = [u.id for u in units]
+        for sess in GameSession.query.filter(
+            GameSession.station_id.in_(unit_ids), GameSession.status == "ongoing"
+        ).all():
+            anchor = sess.play_started_at or sess.started_at
+            if anchor is None:
+                continue
+            est_end = anchor + _td(minutes=sess.allocated_minutes())
+            a_min = anchor.hour * 60 + anchor.minute
+            b_min = a_min + max(0, int((est_end - anchor).total_seconds() // 60))
+            if a_min < e_min and b_min > s_min:
+                used_live += 1
+
+    return capacity, used_resv + used_live, {"reservasi": used_resv, "sesi_berjalan": used_live}

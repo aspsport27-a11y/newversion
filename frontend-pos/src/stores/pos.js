@@ -105,6 +105,27 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.get('/stations')
       this.stations = data.stations
     },
+    // --- reservasi station (pesan di muka per JENIS station) ---
+    async fetchStationTypes(params = {}) {
+      const { data } = await client.get('/stations/types', { params })
+      return data.types
+    },
+    async fetchStationReservations(date) {
+      const { data } = await client.get('/stations/reservations', { params: { date } })
+      return data.reservations
+    },
+    async createStationReservation(payload) {
+      const { data } = await client.post('/stations/reservations', payload)
+      return data // { reservation, order } — order dipakai utk bayar DP
+    },
+    async startStationReservation(rid, stationId) {
+      const { data } = await client.post(`/stations/reservations/${rid}/start`, { station_id: stationId })
+      return data // { reservation, session }
+    },
+    async cancelStationReservation(rid) {
+      const { data } = await client.post(`/stations/reservations/${rid}/cancel`)
+      return data
+    },
     async fetchAddons() {
       const { data } = await client.get('/addons')
       this.addons = data.addons

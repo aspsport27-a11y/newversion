@@ -14,6 +14,7 @@ import MemberBookingDialog from '../components/MemberBookingDialog.vue'
 import SettlementDialog from '../components/SettlementDialog.vue'
 import AbsenDialog from '../components/AbsenDialog.vue'
 import StationStartDialog from '../components/StationStartDialog.vue'
+import StationReservationDialog from '../components/StationReservationDialog.vue'
 import StationSessionDialog from '../components/StationSessionDialog.vue'
 import CategoryReportDialog from '../components/CategoryReportDialog.vue'
 
@@ -81,6 +82,7 @@ const lastResult = ref(null)
 const toast = ref('')
 
 const startStation = ref(null)
+const showStationResv = ref(false)
 const sessionStation = ref(null)
 const pendingStationOrder = ref(null)
 
@@ -175,6 +177,18 @@ function onStationStarted(res) {
   startStation.value = null
   sessionToOpenAfterPay.value = res.session?.station_id ?? null
   if (!payStationOrder(res.order)) { pos.fetchStations().then(openSessionAfterPay) }
+}
+// Reservasi dibuat → langsung minta bayar (DP/lunas) lewat PaymentDialog
+function onReservationCreated(res) {
+  showStationResv.value = false
+  payStationOrder({ ...res.order, amount_due: res.order.total_amount })
+}
+// Customer datang & unit ditentukan → buka dialog sesi (state 'belum main/Play').
+// Uangnya sudah menempel di order reservasi, jadi tak ada tagihan baru di sini.
+function onReservationStarted(res) {
+  showStationResv.value = false
+  sessionToOpenAfterPay.value = res.session?.station_id ?? null
+  pos.fetchStations().then(openSessionAfterPay)
 }
 function onStationPayOrder(order) {
   sessionToOpenAfterPay.value = sessionStation.value?.id ?? null
@@ -379,6 +393,10 @@ function logout() {
             class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-medium border border-purple-100 flex items-center justify-center gap-2">
             🗓️ Member
           </button>
+          <button v-if="pos.hasStations" @click="showStationResv = true"
+            class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium border border-indigo-100 flex items-center justify-center gap-2">
+            📅 Reservasi
+          </button>
           <button @click="showSettle = true"
             class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium border border-amber-100 flex items-center justify-center gap-2">
             💰 Pelunasan
@@ -566,6 +584,8 @@ function logout() {
     <CloseShiftDialog v-if="showClose" :shift="pos.openShift" @close="showClose = false" @submit="onCloseShift" />
     <BookingDialog v-if="showBooking" @close="showBooking = false" @added="flash('Booking ditambahkan ke keranjang')" />
     <MemberBookingDialog v-if="showMember" @close="showMember = false" @created="onMemberCreated" />
+    <StationReservationDialog v-if="showStationResv" @close="showStationResv = false"
+      @created="onReservationCreated" @started="onReservationStarted" />
     <SettlementDialog v-if="showSettle" @close="showSettle = false" @paid="onSettlePaid" />
     <OpenBillDialog v-if="showOpenBills" @close="showOpenBills = false"
       @add-item="onBillAddItem" @paid="onBillPaid" @print="draftBill = $event" />

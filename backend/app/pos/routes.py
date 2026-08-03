@@ -879,6 +879,227 @@ def stations_list():
     ), 200
 
 
+# ------------------------------------------------------------------
+# Reservasi station — pesan di muka PER JENIS (unit ditentukan saat datang).
+# Lihat migrasi 050 utk alasan per-jenis, bukan per-unit.
+# ------------------------------------------------------------------
+def _resv_parse(d):
+    """(tanggal, mulai, selesai, menit) dari payload; lempar PosError kalau salah."""
+    from ..stations.models import _resv_mins
+
+    try:
+        rdate = date.fromisoformat(d["date"])
+        start = datetime.strptime(d["start_time"], "%H:%M").time()
+        end = datetime.strptime(d["end_time"], "%H:%M").time()
+    except (KeyError, ValueError, TypeError):
+        raise PosError("Tanggal/jam tidak valid", "bad_time")
+    minutes = _resv_mins(end, as_end=True) - _resv_mins(start)
+    if minutes <= 0:
+        raise PosError("Jam selesai harus setelah jam mulai", "bad_range")
+    if rdate < date.today():
+        raise PosError("Tanggal sudah lewat", "bad_date")
+    return rdate, start, end, minutes
+
+
+@pos_bp.get("/stations/types")
+@jwt_required()
+def station_types():
+    """Jenis station di venue ini + kapasitas & tarif. Kalau diberi slot
+    (date/start_time/end_time), tiap jenis dilengkapi sisa unit yg tersedia."""
+    from ..stations.models import GameStation, station_type_usage
+    from .services import is_weekend
+
+    terminal = _current_terminal()
+    rows = GameStation.query.filter_by(venue_id=terminal.venue_id, is_active=True).all()
+    types = {}
+    for s in rows:
+        t = s.station_type or "Lainnya"
+        g = types.setdefault(t, {"station_type": t, "capacity": 0, "rate": None, "units": []})
+        g["capacity"] += 1
+        g["units"].append({"id": s.id, "name": s.name})
+
+    d = request.args.get("date")
+    s_str, e_str = request.args.get("start_time"), request.args.get("end_time")
+    slot = None
+    if d and s_str and e_str:
+        try:
+            slot = _resv_parse({"date": d, "start_time": s_str, "end_time": e_str})
+        except PosError:
+            slot = None
+
+    for t, g in types.items():
+        # tarif jenis = tarif unit pertama (tarif per jenis memang seragam);
+        # kalau nanti beda-beda, ambil yg terendah supaya perkiraan tak kelebihan
+        unit_rates = [
+            st.rate_for(is_weekend(slot[0] if slot else date.today()))
+            for st in rows if (st.station_type or "Lainnya") == t
+        ]
+        g["rate"] = min(unit_rates) if unit_rates else 0
+        if slot:
+            rdate, start, end, _ = slot
+            cap, used, detail = station_type_usage(terminal.venue_id, t, rdate, start, end)
+            g["available"] = max(0, cap - used)
+            g["used_detail"] = detail
+    return jsonify(count=len(types), types=sorted(types.values(), key=lambda x: x["station_type"])), 200
+
+
+@pos_bp.get("/stations/reservations")
+@jwt_required()
+def station_reservations_list():
+    """Reservasi pd tanggal tertentu (default hari ini). Yg batal disembunyikan."""
+    from ..stations.models import StationReservation
+
+    terminal = _current_terminal()
+    d_str = request.args.get("date") or date.today().isoformat()
+    try:
+        d = date.fromisoformat(d_str)
+    except ValueError:
+        raise PosError("Tanggal tidak valid", "bad_date")
+    rows = (
+        StationReservation.query.filter(
+            StationReservation.venue_id == terminal.venue_id,
+            StationReservation.reservation_date == d,
+            StationReservation.status != "cancelled",
+        )
+        .order_by(StationReservation.start_time)
+        .all()
+    )
+    out = []
+    for r in rows:
+        row = r.to_dict()
+        o = db.session.get(Order, r.order_id) if r.order_id else None
+        if o is not None:
+            row["order_number"] = o.order_number
+            row["order_total"] = float(o.total_amount or 0)
+            row["order_paid"] = float(o.amount_paid or 0)
+            row["order_due"] = round(float(o.total_amount or 0) - float(o.amount_paid or 0), 2)
+            row["order_status"] = o.status
+        out.append(row)
+    return jsonify(date=d.isoformat(), count=len(out), reservations=out), 200
+
+
+@pos_bp.post("/stations/reservations")
+@jwt_required()
+def station_reservation_create():
+    """Buat reservasi + order berisi biaya durasi (prabayar, spt station_start).
+    Pembayaran DP/lunas lewat /pos/orders/<id>/pay seperti order biasa."""
+    from ..stations.models import StationReservation, station_type_usage
+
+    terminal = _current_terminal()
+    shift = _current_open_shift(terminal.id)
+    d = request.get_json(silent=True) or {}
+    stype = (d.get("station_type") or "").strip()
+    if not stype:
+        raise PosError("Jenis station wajib dipilih", "bad_request")
+    rdate, start, end, minutes = _resv_parse(d)
+
+    cap, used, _detail = station_type_usage(terminal.venue_id, stype, rdate, start, end)
+    if cap <= 0:
+        raise PosError(f"Tak ada unit aktif utk jenis {stype}", "no_unit", 404)
+    if used >= cap:
+        raise PosError(
+            f"{stype} sudah penuh pada {rdate:%d/%m} {d['start_time']}-{d['end_time']} "
+            f"({used}/{cap} terpakai)", "type_full", 409,
+        )
+
+    # tarif ikut jenis & kategori hari TANGGAL RESERVASI (bukan hari ini)
+    from ..stations.models import GameStation
+    from .services import is_weekend
+    units = GameStation.query.filter_by(
+        venue_id=terminal.venue_id, station_type=stype, is_active=True
+    ).all()
+    rate = min(u.rate_for(is_weekend(rdate)) for u in units)
+    charge = round(minutes / 60 * float(rate), 2)
+
+    order = create_order(shift, int(get_jwt_identity()), {
+        "items": [{
+            "item_type": "rental",
+            "name": f"Reservasi {stype} {rdate:%d/%m} {d['start_time']}-{d['end_time']} ({minutes} menit)",
+            "unit_price": charge, "quantity": 1,
+        }],
+        "customer_name": d.get("customer_name"),
+        "customer_phone": d.get("customer_phone"),
+    })
+    resv = StationReservation(
+        venue_id=terminal.venue_id, station_type=stype, reservation_date=rdate,
+        start_time=start, end_time=end, duration_minutes=minutes,
+        customer_name=d.get("customer_name"), customer_phone=d.get("customer_phone"),
+        order_id=order.id, created_by=int(get_jwt_identity()),
+    )
+    db.session.add(resv)
+    db.session.commit()
+    return jsonify(reservation=resv.to_dict(), order=order.to_dict()), 201
+
+
+@pos_bp.post("/stations/reservations/<int:rid>/start")
+@jwt_required()
+def station_reservation_start(rid):
+    """Customer datang: kasir tentukan UNIT, sesi dibuat menaut order reservasi.
+
+    Durasi sesi = durasi reservasi; jam mundur baru jalan saat tombol Play
+    (jadi telat datang tak menggeser hitungan, sesuai keputusan). Order-nya
+    dipakai ulang — station_stop sudah tahu sesi ber-order = prabayar, jadi
+    biaya durasi TIDAK ditagih dua kali."""
+    from ..stations.models import GameSession, GameStation, StationReservation
+    from .services import is_weekend
+
+    terminal = _current_terminal()
+    _current_open_shift(terminal.id)
+    resv = db.session.get(StationReservation, rid)
+    if resv is None or resv.venue_id != terminal.venue_id:
+        raise PosError("Reservasi tidak ditemukan", "not_found", 404)
+    if resv.status != "booked":
+        raise PosError("Reservasi sudah dipakai/dibatalkan", "bad_status", 409)
+
+    d = request.get_json(silent=True) or {}
+    station = db.session.get(GameStation, d.get("station_id"))
+    if station is None or station.venue_id != terminal.venue_id or not station.is_active:
+        raise PosError("Station tidak ditemukan", "not_found", 404)
+    if (station.station_type or "Lainnya") != resv.station_type:
+        raise PosError(
+            f"Station ini bukan jenis {resv.station_type}", "wrong_type", 400
+        )
+    if GameSession.query.filter_by(station_id=station.id, status="ongoing").first():
+        raise PosError("Station sedang dipakai", "in_use", 409)
+
+    session = GameSession(
+        station_id=station.id, venue_id=terminal.venue_id,
+        customer_name=resv.customer_name,
+        rate_per_hour=station.rate_for(is_weekend(resv.reservation_date)),
+        booked_minutes=resv.duration_minutes,
+        order_id=resv.order_id,      # <- prabayar: pakai order reservasi
+        opened_by=int(get_jwt_identity()),
+    )
+    db.session.add(session)
+    db.session.flush()
+    resv.status = "fulfilled"
+    resv.station_id = station.id
+    resv.session_id = session.id
+    db.session.commit()
+    return jsonify(reservation=resv.to_dict(), session=session.to_dict()), 201
+
+
+@pos_bp.post("/stations/reservations/<int:rid>/cancel")
+@jwt_required()
+def station_reservation_cancel(rid):
+    """Batalkan reservasi (mis. no-show). Ordernya ikut di-void — DP yg sudah
+    masuk tetap tercatat sbg DP hangus, sama spt pembatalan booking lapangan."""
+    from ..stations.models import StationReservation
+
+    terminal = _current_terminal()
+    resv = db.session.get(StationReservation, rid)
+    if resv is None or resv.venue_id != terminal.venue_id:
+        raise PosError("Reservasi tidak ditemukan", "not_found", 404)
+    if resv.status == "fulfilled":
+        raise PosError("Reservasi sudah jadi sesi — hentikan sesinya, bukan batalkan reservasi", "bad_status", 409)
+    order = db.session.get(Order, resv.order_id) if resv.order_id else None
+    if order is not None and order.status != "void":
+        cancel_order(order, uid=int(get_jwt_identity()))
+    resv.status = "cancelled"
+    db.session.commit()
+    return jsonify(reservation=resv.to_dict()), 200
+
+
 @pos_bp.post("/stations/<int:sid>/start")
 @jwt_required()
 def station_start(sid):
