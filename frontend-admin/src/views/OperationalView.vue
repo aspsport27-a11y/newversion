@@ -90,13 +90,22 @@ function venueLabel(id) {
   const v = venues.value.find((x) => x.id === id)
   return v ? `${v.code} — ${v.name}` : `#${id}`
 }
+// token penangkal race condition: kalau user ganti venue/status cepat-cepat,
+// response yg lebih lama bisa nyampe belakangan & menimpa hasil yg lebih baru
+// dgn data basi — cuma terapkan response dari request TERAKHIR yg dikirim
+let reqSeq = 0
 async function loadRequests() {
+  const seq = ++reqSeq
   loadingReq.value = true
   const params = {}
   if (!isManager.value && venueId.value) params.venue_id = venueId.value
   if (statusFilter.value) params.status = statusFilter.value
-  try { const { data } = await client.get('/ops/requests', { params }); requests.value = data.requests }
-  finally { loadingReq.value = false }
+  try {
+    const { data } = await client.get('/ops/requests', { params })
+    if (seq === reqSeq) requests.value = data.requests
+  } finally {
+    if (seq === reqSeq) loadingReq.value = false
+  }
 }
 
 // create
@@ -497,6 +506,13 @@ watch(statusFilter, loadRequests)
           <div v-else class="flex flex-wrap gap-2">
             <button v-for="a in detail.attachments" :key="a.id" @click="viewAttachment(a)" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded px-2 py-1">📎 {{ a.filename }}</button>
           </div>
+        </div>
+
+        <!-- Jejak siapa yg mengajukan/menindaklanjuti -->
+        <div class="text-xs text-slate-400 space-y-0.5 mb-3">
+          <p v-if="detail.created_by_name">Diajukan oleh: <span class="text-slate-600">{{ detail.created_by_name }}</span></p>
+          <p v-if="detail.approved_by_name">{{ detail.status === 'rejected' ? 'Ditolak' : 'Disetujui' }} oleh: <span class="text-slate-600">{{ detail.approved_by_name }}</span></p>
+          <p v-if="detail.disbursed_by_name">Dicairkan oleh: <span class="text-slate-600">{{ detail.disbursed_by_name }}</span></p>
         </div>
 
         <!-- Aksi Head Office -->

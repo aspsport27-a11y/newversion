@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { RouterView, RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
@@ -12,6 +12,34 @@ const toastStore = useToastStore()
 function flash(m) { toastStore.show(m) }
 const sidebarOpen = ref(false)
 const showAskAi = ref(false)
+const showUserMenu = ref(false)
+
+// Notifikasi hal-hal yg menunggu tindakan — Procurement (kind=sale), Procurement
+// Ops (kind=ops), & Operasional/pengajuan dana. Endpoint list masing2 sudah scope
+// venue/area sesuai role di backend, jadi tinggal hitung status non-final di sini.
+const showNotif = ref(false)
+const procPending = ref({ sale: 0, ops: 0 })
+const opsPending = ref(0)
+const notifTotal = computed(() => procPending.value.sale + procPending.value.ops + opsPending.value)
+let procPendingTimer = null
+async function loadProcPending() {
+  if (auth.hasPerm('proc.view')) {
+    try {
+      const [sale, ops] = await Promise.all([
+        client.get('/procurement/pos', { params: { kind: 'sale' } }),
+        client.get('/procurement/pos', { params: { kind: 'ops' } }),
+      ])
+      const pending = (list) => list.filter((p) => p.status !== 'paid' && p.status !== 'rejected').length
+      procPending.value = { sale: pending(sale.data.pos), ops: pending(ops.data.pos) }
+    } catch (_) { /* diam-diam gagal, bukan fitur kritis */ }
+  }
+  if (auth.hasPerm('ops.view')) {
+    try {
+      const { data } = await client.get('/ops/requests')
+      opsPending.value = data.requests.filter((r) => r.status !== 'disbursed' && r.status !== 'rejected').length
+    } catch (_) { /* diam-diam gagal, bukan fitur kritis */ }
+  }
+}
 
 // Ganti password akun sendiri (semua role login-portal, termasuk super admin)
 const showPwd = ref(false)
@@ -44,7 +72,10 @@ onMounted(async () => {
   } catch (_) {
     /* interceptor 401 akan redirect */
   }
+  loadProcPending()
+  procPendingTimer = setInterval(loadProcPending, 60000)
 })
+onUnmounted(() => clearInterval(procPendingTimer))
 
 async function doLogout() {
   await auth.logout()
@@ -193,32 +224,103 @@ function toggleGroup(label) {
         <button class="lg:hidden text-2xl" @click="sidebarOpen = true">☰</button>
         <div class="flex-1" />
         <div class="flex items-center gap-3">
+          <div v-if="auth.hasPerm('proc.view') || auth.hasPerm('ops.view')" class="relative">
+            <div v-if="showNotif" class="fixed inset-0 z-30" @click="showNotif = false" />
+            <button
+              @click="showNotif = !showNotif"
+              class="relative text-xl w-9 h-9 flex items-center justify-center rounded-lg hover:bg-slate-100 transition"
+            >
+              🔔
+              <span
+                v-if="notifTotal > 0"
+                class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[18px] font-semibold text-center"
+              >
+                {{ notifTotal > 99 ? '99+' : notifTotal }}
+              </span>
+            </button>
+            <div
+              v-if="showNotif"
+              class="absolute right-0 mt-2 w-72 bg-white border rounded-xl shadow-lg z-40 overflow-hidden"
+              @click.self="showNotif = false"
+            >
+              <div class="px-4 py-2.5 border-b text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Notifikasi
+              </div>
+              <div v-if="notifTotal === 0" class="px-4 py-6 text-sm text-slate-400 text-center">
+                Tidak ada yang menunggu.
+              </div>
+              <template v-else>
+                <RouterLink
+                  v-if="procPending.sale > 0"
+                  :to="{ name: 'procurement' }"
+                  @click="showNotif = false"
+                  class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
+                  :class="{ 'border-b': procPending.ops > 0 || opsPending > 0 }"
+                >
+                  <span class="text-sm text-slate-700">🛒 Procurement</span>
+                  <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ procPending.sale }} menunggu</span>
+                </RouterLink>
+                <RouterLink
+                  v-if="procPending.ops > 0"
+                  :to="{ name: 'procurement-ops' }"
+                  @click="showNotif = false"
+                  class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
+                  :class="{ 'border-b': opsPending > 0 }"
+                >
+                  <span class="text-sm text-slate-700">🧾 Procurement Ops</span>
+                  <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ procPending.ops }} menunggu</span>
+                </RouterLink>
+                <RouterLink
+                  v-if="opsPending > 0"
+                  :to="{ name: 'operational' }"
+                  @click="showNotif = false"
+                  class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
+                >
+                  <span class="text-sm text-slate-700">💰 Operasional</span>
+                  <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ opsPending }} menunggu</span>
+                </RouterLink>
+              </template>
+            </div>
+          </div>
           <button
             @click="showAskAi = true"
             class="text-sm text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-100 rounded-lg px-3 py-1.5 transition"
           >
             ✨ Ask AI
           </button>
-          <div class="text-right leading-tight">
-            <p class="text-sm font-medium text-slate-700">{{ auth.user?.username }}</p>
-            <p class="text-xs text-slate-400">{{ auth.roleLabel }}</p>
+          <div class="relative">
+            <div v-if="showUserMenu" class="fixed inset-0 z-30" @click="showUserMenu = false" />
+            <button
+              @click="showUserMenu = !showUserMenu"
+              class="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-slate-100 transition"
+            >
+              <div class="text-right leading-tight">
+                <p class="text-sm font-medium text-slate-700">{{ auth.user?.username }}</p>
+                <p class="text-xs text-slate-400">{{ auth.roleLabel }}</p>
+              </div>
+              <div class="h-9 w-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-semibold uppercase">
+                {{ (auth.user?.username || '?').charAt(0) }}
+              </div>
+            </button>
+            <div
+              v-if="showUserMenu"
+              class="absolute right-0 mt-2 w-52 bg-white border rounded-xl shadow-lg z-40 overflow-hidden py-1"
+            >
+              <button
+                v-if="auth.user?.role === 'admin'"
+                @click="showUserMenu = false; openPwd()"
+                class="w-full text-left flex items-center gap-2 px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50 transition"
+              >
+                🔒 Ganti Password
+              </button>
+              <button
+                @click="showUserMenu = false; doLogout()"
+                class="w-full text-left flex items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition"
+              >
+                🚪 Keluar
+              </button>
+            </div>
           </div>
-          <div class="h-9 w-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-semibold uppercase">
-            {{ (auth.user?.username || '?').charAt(0) }}
-          </div>
-          <button
-            v-if="auth.user?.role === 'admin'"
-            @click="openPwd"
-            class="text-sm text-slate-500 hover:text-brand-600 border rounded-lg px-3 py-1.5 transition"
-          >
-            🔒 Ganti Password
-          </button>
-          <button
-            @click="doLogout"
-            class="text-sm text-slate-500 hover:text-red-600 border rounded-lg px-3 py-1.5 transition"
-          >
-            Keluar
-          </button>
         </div>
       </header>
 

@@ -269,10 +269,16 @@ def pos_list():
     kind = request.args.get("kind") or "sale"
     q = PurchaseOrder.query.filter(PurchaseOrder.kind == kind)
     vids = _scope_vids(_user())
+    vid_param = request.args.get("venue_id", type=int)
     if vids is not None:
-        q = q.filter(PurchaseOrder.venue_id.in_(vids)) if vids else q.filter(db.false())
-    elif request.args.get("venue_id", type=int):
-        q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
+        # manager/admin_unit dibatasi ke cakupannya; kalau dropdown venue di FE
+        # pilih 1 venue spesifik dlm cakupan itu, sempitkan lagi ke venue itu saja
+        if vid_param and vid_param in vids:
+            q = q.filter_by(venue_id=vid_param)
+        else:
+            q = q.filter(PurchaseOrder.venue_id.in_(vids)) if vids else q.filter(db.false())
+    elif vid_param:
+        q = q.filter_by(venue_id=vid_param)
     if request.args.get("status"):
         q = q.filter_by(status=request.args.get("status"))
     pos = q.order_by(PurchaseOrder.created_at.desc()).all()
@@ -635,10 +641,14 @@ def consignment_last_settled():
 def consignment_settlements_list():
     q = ConsignmentSettlement.query
     vids = _scope_vids(_user())
+    vid_param = request.args.get("venue_id", type=int)
     if vids is not None:
-        q = q.filter(ConsignmentSettlement.venue_id.in_(vids)) if vids else q.filter(db.false())
-    elif request.args.get("venue_id", type=int):
-        q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
+        if vid_param and vid_param in vids:
+            q = q.filter_by(venue_id=vid_param)
+        else:
+            q = q.filter(ConsignmentSettlement.venue_id.in_(vids)) if vids else q.filter(db.false())
+    elif vid_param:
+        q = q.filter_by(venue_id=vid_param)
     if request.args.get("supplier_id", type=int):
         q = q.filter_by(supplier_id=request.args.get("supplier_id", type=int))
     rows = q.order_by(ConsignmentSettlement.created_at.desc()).all()

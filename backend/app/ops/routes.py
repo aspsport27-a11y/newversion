@@ -73,6 +73,10 @@ def _cat_map():
     return {c.id: c.name for c in ExpenseCategory.query.all()}
 
 
+def _user_map():
+    return {u.id: u.username for u in User.query.all()}
+
+
 def _D(v):
     try:
         return float(v)
@@ -275,16 +279,22 @@ def _gen_code(venue, year, month):
 def requests_list():
     q = OpRequest.query
     vids = _scope_vids(_user())
+    vid_param = request.args.get("venue_id", type=int)
     if vids is not None:
-        # manager/admin_unit dibatasi ke cakupannya (list kosong bila belum di-set)
-        q = q.filter(OpRequest.venue_id.in_(vids)) if vids else q.filter(db.false())
-    elif request.args.get("venue_id", type=int):
-        q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
+        # manager/admin_unit dibatasi ke cakupannya (list kosong bila belum di-set);
+        # kalau dropdown venue di FE pilih 1 venue spesifik dlm cakupan itu, sempitkan lagi
+        if vid_param and vid_param in vids:
+            q = q.filter_by(venue_id=vid_param)
+        else:
+            q = q.filter(OpRequest.venue_id.in_(vids)) if vids else q.filter(db.false())
+    elif vid_param:
+        q = q.filter_by(venue_id=vid_param)
     if request.args.get("status"):
         q = q.filter_by(status=request.args.get("status"))
     reqs = q.order_by(OpRequest.created_at.desc()).all()
     cats = _cat_map()
-    return jsonify(count=len(reqs), requests=[r.to_dict(cats) for r in reqs]), 200
+    users = _user_map()
+    return jsonify(count=len(reqs), requests=[r.to_dict(cats, users) for r in reqs]), 200
 
 
 @ops_bp.get("/requests/<int:rid>")
@@ -297,7 +307,7 @@ def request_detail(rid):
     vids = _scope_vids(_user())
     if vids is not None and r.venue_id not in vids:
         return _err("Bukan pengajuan dalam cakupan Anda", "forbidden", 403)
-    d = r.to_dict(_cat_map())
+    d = r.to_dict(_cat_map(), _user_map())
     # konteks budget per kategori
     plafon = {b.category_id: float(b.amount) for b in Budget.query.filter_by(venue_id=r.venue_id, year=r.period_year, month=r.period_month).all()}
     used = _used_by_category(r.venue_id, r.period_year, r.period_month)
@@ -350,7 +360,7 @@ def request_create():
     r.total_amount = total
     db.session.add(r)
     db.session.commit()
-    return jsonify(request=r.to_dict(_cat_map())), 201
+    return jsonify(request=r.to_dict(_cat_map(), _user_map())), 201
 
 
 @ops_bp.post("/requests/<int:rid>/approve")
@@ -367,7 +377,7 @@ def request_approve(rid):
     r.approved_at = datetime.utcnow()
     r.updated_at = datetime.utcnow()
     db.session.commit()
-    return jsonify(request=r.to_dict(_cat_map())), 200
+    return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200
 
 
 @ops_bp.post("/requests/<int:rid>/reject")
@@ -386,7 +396,7 @@ def request_reject(rid):
     r.approved_at = datetime.utcnow()
     r.updated_at = datetime.utcnow()
     db.session.commit()
-    return jsonify(request=r.to_dict(_cat_map())), 200
+    return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200
 
 
 @ops_bp.post("/requests/<int:rid>/disburse")
@@ -410,7 +420,7 @@ def request_disburse(rid):
     r.disbursed_at = datetime.utcnow()
     r.updated_at = datetime.utcnow()
     db.session.commit()
-    return jsonify(request=r.to_dict(_cat_map())), 200
+    return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200
 
 
 @ops_bp.post("/requests/<int:rid>/revert")
@@ -447,7 +457,7 @@ def request_revert(rid):
     r.rejection_reason = None
     r.updated_at = datetime.utcnow()
     db.session.commit()
-    return jsonify(request=r.to_dict(_cat_map())), 200
+    return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200
 
 
 @ops_bp.delete("/requests/<int:rid>")

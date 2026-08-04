@@ -59,8 +59,9 @@ class OpRequest(db.Model):
     items = db.relationship("OpRequestItem", backref="request", lazy="selectin", cascade="all, delete-orphan")
     attachments = db.relationship("OpRequestAttachment", backref="request", lazy="selectin", cascade="all, delete-orphan")
 
-    def to_dict(self, categories=None):
+    def to_dict(self, categories=None, users=None):
         f = lambda v: float(v) if v is not None else None
+        uname = lambda uid: (users or {}).get(uid) if uid else None
         return {
             "id": self.id,
             "code": self.code,
@@ -71,7 +72,10 @@ class OpRequest(db.Model):
             "description": self.description,
             "status": self.status,
             "rejection_reason": self.rejection_reason,
+            "created_by_name": uname(self.created_by),
+            "approved_by_name": uname(self.approved_by),
             "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "disbursed_by_name": uname(self.disbursed_by),
             "disbursed_at": self.disbursed_at.isoformat() if self.disbursed_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "items": [i.to_dict(categories) for i in self.items],
