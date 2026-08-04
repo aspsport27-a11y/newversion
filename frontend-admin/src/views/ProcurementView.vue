@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
@@ -15,13 +16,13 @@ const venues = ref([])
 const venueId = ref('')
 const suppliers = ref([])
 const products = ref([])
-const toast = ref('')
+const toastStore = useToastStore()
 
 const searchPo = ref('')
 const searchReorder = ref('')
 const searchSup = ref('')
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 
 function downloadCsv(filename, rows) {
@@ -50,9 +51,11 @@ async function onSupFile(e) {
     const fd = new FormData(); fd.append('file', file)
     const { data } = await client.post('/procurement/suppliers/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     await loadBase()
-    let msg = `${data.created} supplier berhasil diimpor.`
-    if (data.skipped?.length) msg += `\nDilewati ${data.skipped.length} baris:\n` + data.skipped.map((s) => `- Baris ${s.row}: ${s.reason}`).join('\n')
-    alert(msg)
+    if (data.skipped?.length) {
+      alert(`${data.created} supplier berhasil diimpor.\nDilewati ${data.skipped.length} baris:\n` + data.skipped.map((s) => `- Baris ${s.row}: ${s.reason}`).join('\n'))
+    } else {
+      flash(`${data.created} supplier berhasil diimpor`)
+    }
   } catch (e) { alert(e?.response?.data?.message || 'Gagal mengimpor CSV.') } finally { importingSup.value = false }
 }
 const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], received: ['Diterima', 'bg-violet-100 text-violet-700'], paid: ['Lunas', 'bg-emerald-100 text-emerald-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'] }
@@ -712,6 +715,5 @@ watch(tab, reloadTab)
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

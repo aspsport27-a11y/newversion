@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { usePosStore } from '../stores/pos'
+import { useToastStore } from '../stores/toast'
 import { stationClock, playAlarmBeep } from '../utils/stationClock'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import QrisDialog from '../components/QrisDialog.vue'
@@ -20,6 +21,7 @@ import CategoryReportDialog from '../components/CategoryReportDialog.vue'
 
 const pos = usePosStore()
 const router = useRouter()
+const toastStore = useToastStore()
 const showAbsen = ref(false)
 const showCategoryReport = ref(false)
 
@@ -79,7 +81,6 @@ function onOpenPriceAdd(amount) {
 const showMember = ref(false)
 const showSettle = ref(false)
 const lastResult = ref(null)
-const toast = ref('')
 
 const startStation = ref(null)
 const showStationResv = ref(false)
@@ -274,8 +275,7 @@ function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
 }
 function flash(msg) {
-  toast.value = msg
-  setTimeout(() => (toast.value = ''), 2500)
+  toastStore.show(msg)
 }
 
 async function submitOpenShift() {
@@ -608,10 +608,5 @@ function logout() {
       @started="onStationStarted" />
     <StationSessionDialog v-if="sessionStation" :station="sessionStation" @close="sessionStation = null; pos.fetchStations()"
       @stopped="onStationStopped" @pay-order="onStationPayOrder" />
-
-    <!-- Toast -->
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
-      {{ toast }}
-    </div>
   </div>
 </template>

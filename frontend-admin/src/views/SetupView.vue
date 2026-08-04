@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
@@ -10,7 +11,7 @@ const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 const venues = ref([])
 const terminals = ref([])
 const cashiers = ref([])
-const toast = ref('')
+const toastStore = useToastStore()
 
 // forms
 const showTerminal = ref(false)
@@ -22,7 +23,7 @@ const cForm = ref({})
 const err = ref('')
 const saving = ref(false)
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 function venueName(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
 
 // filter venue (menyaring tabel Terminal & Kasir sekaligus)
@@ -213,6 +214,5 @@ async function resetPin(u) {
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

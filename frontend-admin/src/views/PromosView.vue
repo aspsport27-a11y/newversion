@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
@@ -17,9 +18,9 @@ const editing = ref(null)
 const form = ref({})
 const error = ref('')
 const saving = ref(false)
-const toast = ref('')
+const toastStore = useToastStore()
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function productName(id) { const p = products.value.find((x) => x.id === id); return p ? p.name : '—' }
 
@@ -179,6 +180,5 @@ async function remove(p) {
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

@@ -2,8 +2,11 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 
@@ -77,7 +80,7 @@ async function applyBulkMin() {
     })
     showBulkMin.value = false
     await loadProducts()
-    alert(`${data.updated} produk diperbarui.`)
+    flash(`${data.updated} produk diperbarui`)
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { bulkBusy.value = false }
 }
 
@@ -110,9 +113,11 @@ async function onFile(e) {
     const fd = new FormData(); fd.append('file', file)
     const { data } = await client.post(`/admin/products/import?venue_id=${venueId.value}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     await loadProducts()
-    let msg = `${data.created} produk berhasil diimpor.`
-    if (data.skipped?.length) msg += `\nDilewati ${data.skipped.length} baris:\n` + data.skipped.map((s) => `- Baris ${s.row}: ${s.reason}`).join('\n')
-    alert(msg)
+    if (data.skipped?.length) {
+      alert(`${data.created} produk berhasil diimpor.\nDilewati ${data.skipped.length} baris:\n` + data.skipped.map((s) => `- Baris ${s.row}: ${s.reason}`).join('\n'))
+    } else {
+      flash(`${data.created} produk berhasil diimpor`)
+    }
   } catch (e) { alert(e?.response?.data?.message || 'Gagal mengimpor CSV.') } finally { importing.value = false }
 }
 
@@ -159,6 +164,7 @@ async function removeProduct(p) {
   try {
     await client.delete(`/admin/products/${p.id}`)
     await loadProducts()
+    flash('Produk dihapus')
   } catch (e) {
     alert(e?.response?.data?.message || 'Gagal menghapus.')
   }
@@ -177,6 +183,7 @@ async function save() {
     }
     showForm.value = false
     await loadProducts()
+    flash(editing.value ? 'Produk diperbarui' : 'Produk ditambahkan')
   } catch (e) {
     error.value = e?.response?.data?.message || 'Gagal menyimpan.'
   } finally {

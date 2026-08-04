@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
@@ -12,7 +13,7 @@ const venueId = ref('')
 const employees = ref([])
 const positions = ref([])
 const loading = ref(false)
-const toast = ref('')
+const toastStore = useToastStore()
 
 // paging + pencarian
 const search = ref('')
@@ -56,7 +57,7 @@ const debtForm = ref({ type: 'advance', amount: null, note: '' })
 const acctForm = ref({ username: '', role: 'staff', pin: '', password: '', area_id: '' })
 const busy = ref(false)
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function venueCode(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
 
@@ -402,6 +403,5 @@ async function resetAccount(pinOnly) {
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

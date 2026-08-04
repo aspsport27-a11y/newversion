@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
@@ -20,9 +21,9 @@ const venueId = ref('')
 const categories = ref([])
 const now = new Date()
 const period = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
-const toast = ref('')
+const toastStore = useToastStore()
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function ym() { const [y, m] = period.value.split('-'); return { year: +y, month: +m } }
 const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'], disbursed: ['Dicairkan', 'bg-emerald-100 text-emerald-700'] }
@@ -226,7 +227,7 @@ async function renameCat(c) {
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
 }
 async function toggleCat(c) {
-  try { await client.put(`/ops/categories/${c.id}`, { is_active: !c.is_active }); await loadCats(); await loadBase() }
+  try { await client.put(`/ops/categories/${c.id}`, { is_active: !c.is_active }); await loadCats(); await loadBase(); flash(c.is_active ? 'Kategori dinonaktifkan' : 'Kategori diaktifkan') }
   catch (e) { alert('Gagal.') }
 }
 
@@ -524,6 +525,5 @@ watch(statusFilter, loadRequests)
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

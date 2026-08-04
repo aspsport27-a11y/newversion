@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
@@ -17,8 +18,8 @@ const sourceAccount = ref('')
 const pos = ref([])
 const statusFilter = ref('')
 const loading = ref(false)
-const toast = ref('')
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 
 // ringkasan nilai pembelian ops per status (kartu)
@@ -134,6 +135,7 @@ async function onProof(e) {
     const fd = new FormData(); fd.append('file', f)
     await client.post(`/procurement/pos/${detail.value.id}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     const { data } = await client.get(`/procurement/pos/${detail.value.id}`); detail.value = data.po
+    flash('Bukti diunggah')
   } catch (err) { alert('Gagal upload.') } finally { uploadingProof.value = false; e.target.value = '' }
 }
 
@@ -311,6 +313,5 @@ onMounted(async () => { await loadBase(); await loadPo() })
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

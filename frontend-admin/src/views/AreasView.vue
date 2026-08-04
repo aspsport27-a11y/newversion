@@ -1,17 +1,18 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import client from '../api/client'
+import { useToastStore } from '../stores/toast'
 
 const areas = ref([])
 const venues = ref([])
 const loading = ref(false)
-const toast = ref('')
+const toastStore = useToastStore()
 const showForm = ref(false)
 const editing = ref(null)
 const form = ref({ code: '', name: '', is_active: true })
 const busy = ref(false)
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 
 async function load() {
   loading.value = true
@@ -132,6 +133,5 @@ onMounted(load)
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-6 right-6 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

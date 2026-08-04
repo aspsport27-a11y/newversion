@@ -3,6 +3,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { parseUTC } from '../utils/datetime'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
@@ -11,8 +12,8 @@ const isManager = computed(() => auth.user?.role === 'manager_unit')
 const venues = ref([])
 const venueId = ref(null)
 const loading = ref(false)
-const toast = ref('')
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 
 const currentVenue = computed(() => venues.value.find((v) => v.id === venueId.value))
@@ -98,6 +99,7 @@ async function delRateRule(r) {
     await client.delete(`/admin/rate-rules/${r.id}`)
     await loadRateRules()
     await loadFacilities()
+    flash('Tarif dihapus')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
 }
 
@@ -152,7 +154,7 @@ async function addHoliday() {
 }
 async function delHoliday(h) {
   if (!confirm(`Hapus ${h.date}${h.name ? ' — ' + h.name : ''}?`)) return
-  try { await client.delete(`/admin/holidays/${h.id}`); await loadHolidays() } catch { alert('Gagal.') }
+  try { await client.delete(`/admin/holidays/${h.id}`); await loadHolidays(); flash('Hari libur dihapus') } catch { alert('Gagal.') }
 }
 
 // ---------------- COACHING (padel) ----------------
@@ -211,7 +213,7 @@ async function saveCoach() {
 }
 async function delCoach(c) {
   if (!confirm(`Hapus coach ${c.name}?`)) return
-  try { await client.delete(`/admin/coaches/${c.id}`); await loadCoaching() }
+  try { await client.delete(`/admin/coaches/${c.id}`); await loadCoaching(); flash('Coach dihapus') }
   catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
 }
 // --- ketersediaan coach (diisi coach sendiri lewat tautannya) ---
@@ -666,6 +668,5 @@ watch(venueId, reload)
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

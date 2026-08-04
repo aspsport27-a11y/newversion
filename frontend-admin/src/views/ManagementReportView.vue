@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
+import { useToastStore } from '../stores/toast'
 
 const tab = ref('report')
 const year = new Date().getFullYear()
@@ -16,10 +17,10 @@ const loadingHexp = ref(false)
 const showForm = ref(false)
 const busy = ref(false)
 const form = ref({ category: 'Prive', description: '', amount: null, expense_date: to.value })
-const toast = ref('')
+const toastStore = useToastStore()
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 const isProfit = computed(() => (rep.value?.net_profit ?? 0) >= 0)
 
 async function loadReport() {
@@ -202,6 +203,5 @@ onMounted(loadReport)
     </div>
 
     <!-- Toast -->
-    <div v-if="toast" class="fixed bottom-6 right-6 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

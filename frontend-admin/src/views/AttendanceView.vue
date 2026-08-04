@@ -2,8 +2,11 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const canManage = computed(() => auth.hasPerm('hr.manage'))
 const busy = ref(false)
@@ -73,6 +76,7 @@ async function setLeave(row, status) {
       employee_id: row.employee_id, date: rosterDate.value, status,
     })
     await loadRoster()
+    flash(status === 'clear' ? 'Keterangan dibatalkan' : 'Keterangan tersimpan')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
 

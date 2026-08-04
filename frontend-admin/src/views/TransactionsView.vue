@@ -3,8 +3,11 @@ import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { parseUTC } from '../utils/datetime'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const canCancel = computed(() => auth.hasPerm('order.cancel'))
 
@@ -122,6 +125,7 @@ async function cancelOrder(o, ev) {
     await client.post(`/admin/orders/${o.id}/cancel`)
     if (detail.value?.id === o.id) detail.value = null
     await loadOrders()
+    flash('Transaksi dibatalkan')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan.') } finally { busy.value = false }
 }
 
@@ -133,6 +137,7 @@ async function deleteOrder(o, ev) {
     await client.delete(`/admin/orders/${o.id}`)
     if (detail.value?.id === o.id) detail.value = null
     await loadOrders()
+    flash('Transaksi dihapus')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') } finally { busy.value = false }
 }
 </script>

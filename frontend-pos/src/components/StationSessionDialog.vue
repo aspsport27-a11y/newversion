@@ -1,11 +1,14 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { usePosStore } from '../stores/pos'
+import { useToastStore } from '../stores/toast'
 import { stationClock } from '../utils/stationClock'
 
 const props = defineProps({ station: Object })
 const emit = defineEmits(['close', 'stopped', 'pay-order'])
 const pos = usePosStore()
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 
 // sesi disimpan lokal & di-update dr response tiap aksi (topup/addon/fnb) —
 // props.station statis (fetchStations bikin objek baru, prop tak ikut berubah),
@@ -85,7 +88,7 @@ async function submitTopup() {
     if (res.warning) window.alert('⚠️ ' + res.warning)
     // PRABAYAR: tambah waktu langsung dibayar → tutup dialog & ke pembayaran delta
     if (res.order && Number(res.order.amount_due) > 0) emit('pay-order', res.order)
-    else pos.fetchStations()
+    else { pos.fetchStations(); flash('Jam ditambah') }
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah jam.' } finally { busy.value = false }
 }
 
@@ -117,6 +120,7 @@ async function submitAddon() {
     addonId.value = null; addonQty.value = 1; addonHours.value = 1
     // PRABAYAR: langsung ke pembayaran biaya add-on
     if (res.order && Number(res.order.amount_due) > 0) emit('pay-order', res.order)
+    else flash('Add-on ditambahkan')
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menambah add-on.' } finally { busy.value = false }
 }
 
@@ -136,7 +140,7 @@ function addonClock(a) {
 
 async function removeAddon(a) {
   busy.value = true; err.value = ''
-  try { sessionState.value = await pos.detachAddon(props.station.id, a.id) }
+  try { sessionState.value = await pos.detachAddon(props.station.id, a.id); flash('Add-on dihapus') }
   catch (e) { err.value = e?.response?.data?.message || 'Gagal.' } finally { busy.value = false }
 }
 
@@ -184,6 +188,7 @@ async function doStop() {
     // F&B sudah tersimpan di sesi (server) — stop tak perlu kirim apa2 lagi
     const result = await pos.stopStation(props.station.id)
     emit('stopped', result)
+    flash('Sesi dihentikan')
   } catch (e) { err.value = e?.response?.data?.message || 'Gagal menghentikan sesi.' } finally { busy.value = false }
 }
 </script>

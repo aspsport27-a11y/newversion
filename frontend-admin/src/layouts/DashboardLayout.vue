@@ -2,11 +2,14 @@
 import { onMounted, ref, computed } from 'vue'
 import { RouterView, RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 import client from '../api/client'
 import AskAiDialog from '../components/AskAiDialog.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 const sidebarOpen = ref(false)
 const showAskAi = ref(false)
 
@@ -27,7 +30,7 @@ async function savePwd() {
       new_password: pwdForm.value.new_password,
     })
     showPwd.value = false
-    alert('Password berhasil diganti.')
+    flash('Password berhasil diganti')
   } catch (e) { pwdErr.value = e?.response?.data?.message || 'Gagal mengganti password.' } finally { pwdBusy.value = false }
 }
 

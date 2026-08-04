@@ -1,15 +1,16 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import client from '../api/client'
+import { useToastStore } from '../stores/toast'
 
 const permissions = ref([])
 const roles = ref([])
 const grants = ref({})           // { role: [codes] }
 const loading = ref(false)
-const toast = ref('')
+const toastStore = useToastStore()
 const saving = ref('')            // "role:code" yang sedang disimpan
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2000) }
+function flash(m) { toastStore.show(m) }
 
 // kelompokkan izin per kategori (urutan sesuai katalog backend)
 const grouped = computed(() => {
@@ -97,6 +98,5 @@ onMounted(load)
       Catatan: cakupan data (venue/area) tetap otomatis — Manager hanya venue-nya, Admin Unit hanya areanya. Izin di sini mengatur <i>fitur apa</i> yang boleh diakses, bukan <i>venue mana</i>.
     </p>
 
-    <div v-if="toast" class="fixed bottom-6 right-6 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue'
 import client from '../api/client'
+import { useToastStore } from '../stores/toast'
 
 const venues = ref([])
 const loading = ref(true)
@@ -10,9 +11,9 @@ const editing = ref(null)
 const form = ref({})
 const error = ref('')
 const saving = ref(false)
-const toast = ref('')
+const toastStore = useToastStore()
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 function rupiah(n) { return (Number(n) || 0).toLocaleString('id-ID') }
 
 const filtered = computed(() => {
@@ -151,6 +152,5 @@ async function remove(v) {
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

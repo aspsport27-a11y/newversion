@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.user?.role === 'admin')
@@ -10,7 +11,7 @@ const tab = ref('accounts')
 const venues = ref([])
 const accounts = ref([])
 const totalBalance = ref(0)
-const toast = ref('')
+const toastStore = useToastStore()
 const busy = ref(false)
 
 // filter periode tanggal — level menu (dipakai Setoran & QRIS, jadi default utk modal Buku Besar)
@@ -19,7 +20,7 @@ const monthStart = `${today.slice(0, 7)}-01`
 const periodFrom = ref(monthStart)
 const periodTo = ref(today)
 
-function flash(m) { toast.value = m; setTimeout(() => (toast.value = ''), 2500) }
+function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function venueName(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
 
@@ -480,6 +481,5 @@ function switchTab(t) {
       </div>
     </div>
 
-    <div v-if="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{{ toast }}</div>
   </div>
 </template>

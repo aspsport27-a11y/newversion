@@ -5,8 +5,11 @@ import { useAuthStore } from '../stores/auth'
 import { parseUTC } from '../utils/datetime'
 import WaIcon from '../components/WaIcon.vue'
 import RescheduleDialog from '../components/RescheduleDialog.vue'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const canReschedule = computed(() => auth.hasPerm('order.cancel'))
 const rescheduleOrder = ref(null)
@@ -403,7 +406,7 @@ async function onRescheduled(res) {
   const due = Number(info.amount_due || 0)
   if (refunded > 0) alert(`Reschedule berhasil. Kelebihan ${rupiah(refunded)} dicatat sebagai kas keluar (refund).`)
   else if (due > 0) alert(`Reschedule berhasil. Sisa tagih ke customer ${rupiah(due)}.`)
-  else alert('Reschedule berhasil.')
+  else flash('Reschedule berhasil')
 }
 async function deleteBooking(b) {
   try {
@@ -417,6 +420,7 @@ async function deleteBooking(b) {
       await client.delete(`/admin/orders/${b.order_id}`)
     }
     await run()
+    flash('Booking dihapus')
   } catch (e) {
     alert(e?.response?.data?.message || 'Gagal menghapus.')
   }
@@ -428,6 +432,7 @@ async function cancelBooking() {
     await client.post(`/admin/orders/${detail.value.id}/cancel`)
     detail.value = null
     await run()
+    flash('Booking dibatalkan')
   } catch (e) {
     alert(e?.response?.data?.message || 'Gagal membatalkan.')
   }

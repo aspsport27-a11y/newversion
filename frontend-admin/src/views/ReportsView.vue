@@ -4,8 +4,11 @@ import client from '../api/client'
 import Chart from 'chart.js/auto'
 import { parseUTC } from '../utils/datetime'
 import { useAuthStore } from '../stores/auth'
+import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
+const toastStore = useToastStore()
+function flash(m) { toastStore.show(m) }
 const canDeleteShift = computed(() => auth.hasPerm('order.cancel'))
 
 const venues = ref([])
@@ -46,6 +49,7 @@ async function deleteShift(s) {
   try {
     await client.delete(`/admin/shifts/${s.id}`)
     await run()
+    flash('Shift dihapus')
   } catch (e) {
     alert(e?.response?.data?.message || 'Gagal menghapus shift.')
   }
