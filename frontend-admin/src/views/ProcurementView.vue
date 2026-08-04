@@ -120,12 +120,20 @@ async function loadProducts(vid) {
 // -------- PO --------
 const pos = ref([])
 const loadingPo = ref(false)
+// token penangkal race condition: kalau ganti venue cepat-cepat, response
+// yg lebih lama bisa nyampe belakangan & menimpa hasil yg lebih baru dgn data basi
+let poSeq = 0
 async function loadPo() {
+  const seq = ++poSeq
   loadingPo.value = true
   const params = {}
   if (!isManager.value && venueId.value) params.venue_id = venueId.value
-  try { const { data } = await client.get('/procurement/pos', { params }); pos.value = data.pos }
-  finally { loadingPo.value = false }
+  try {
+    const { data } = await client.get('/procurement/pos', { params })
+    if (seq === poSeq) pos.value = data.pos
+  } finally {
+    if (seq === poSeq) loadingPo.value = false
+  }
 }
 const showCreate = ref(false)
 const cForm = ref({ supplier_id: '', notes: '', items: [] })
@@ -243,10 +251,13 @@ async function removeSup(s) { if (!window.confirm(`Hapus supplier ${s.name}?`)) 
 
 // -------- Reorder --------
 const reorder = ref([])
+let reorderSeq = 0
 async function loadReorder() {
+  const seq = ++reorderSeq
   const params = {}
   if (!isManager.value && venueId.value) params.venue_id = venueId.value
-  const { data } = await client.get('/procurement/reorder', { params }); reorder.value = data.products
+  const { data } = await client.get('/procurement/reorder', { params })
+  if (seq === reorderSeq) reorder.value = data.products
 }
 
 // -------- Konsinyasi (titip barang) — settlement bagi hasil --------
@@ -291,15 +302,19 @@ async function loadKsgLastSettled() {
     ksgLastSettled.value = data.last_period_to
   } catch (_) { /* ignore */ }
 }
+let ksgSeq = 0
 async function loadKsgSettlements() {
+  const seq = ++ksgSeq
   ksgLoading.value = true
   try {
     const params = {}
     if (!isManager.value && ksgVenueId.value) params.venue_id = ksgVenueId.value
     if (ksgSupplierId.value) params.supplier_id = ksgSupplierId.value
     const { data } = await client.get('/procurement/consignment/settlements', { params })
-    ksgSettlements.value = data.settlements
-  } finally { ksgLoading.value = false }
+    if (seq === ksgSeq) ksgSettlements.value = data.settlements
+  } finally {
+    if (seq === ksgSeq) ksgLoading.value = false
+  }
 }
 async function generateKsg() {
   if (!ksgVenueId.value || !ksgSupplierId.value) { alert('Pilih venue & supplier dulu'); return }

@@ -217,6 +217,12 @@ def reorder_list():
     )
     if vid:
         q = q.filter(Product.venue_id == vid)
+    elif forced is None:
+        # bukan manager (yg sudah kena `forced` di atas) & tak pilih venue spesifik
+        # → tetap batasi admin_unit ke venue2 di areanya (admin/HO: semua venue)
+        vids = _scope_vids(_user())
+        if vids is not None:
+            q = q.filter(Product.venue_id.in_(vids)) if vids else q.filter(db.false())
     prods = q.order_by(Product.stock_qty).all()
     return jsonify(count=len(prods), products=[p.to_dict() for p in prods]), 200
 
