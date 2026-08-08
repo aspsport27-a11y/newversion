@@ -12,6 +12,7 @@ from ..ops.models import OpRequest
 from ..payroll.models import PayrollRun
 from ..pos.models import Order, Payment, Product
 from ..proc.models import PurchaseOrder
+from ..treasury.models import BankAccount
 
 
 def _rp(n):
@@ -22,7 +23,8 @@ def build_business_context(user):
     """Kembalikan blok teks ringkas keadaan bisnis terkini sesuai scope `user`,
     atau string kosong bila tak bisa dihitung."""
     # impor di dalam fungsi utk hindari circular import (admin.routes berat)
-    from ..admin.routes import _radar_findings, _scope_vids
+    from ..admin.routes import _radar_findings, _sales_growth_mom, _scope_vids
+    from ..treasury.service import account_balance
 
     vids = _scope_vids(user)
 
@@ -79,6 +81,61 @@ def build_business_context(user):
         f"- Approval menunggu: operasional {ops_p}, payroll {pay_p}, procurement {proc_p}",
         f"- Produk stok menipis: {low_stock}",
     ]
+
+    # --- Omzet & pertumbuhan bulan ini per venue (dari data Dashboard) ---
+    try:
+        mom = _sales_growth_mom(vids)
+        active = [v for v in mom["venues"] if v["this_month"] or v["last_month"]]
+        if active:
+            lines.append(
+                f"- Omzet bulan ini per venue ({mom['this_month_range']['from']}..{mom['this_month_range']['to']}, "
+                "vs periode sama bulan lalu):"
+            )
+            for v in sorted(active, key=lambda x: x["this_month"], reverse=True):
+                if v["is_new"]:
+                    g = "baru"
+                elif v["growth_pct"] is None:
+                    g = "—"
+                else:
+                    g = f"{'+' if v['growth_pct'] >= 0 else ''}{v['growth_pct']}%"
+                lines.append(f"  • {v['venue_name']}: {_rp(v['this_month'])} ({g})")
+    except Exception:
+        pass
+
+    # --- Saldo kas per rekening + piutang (Kas & Bank) ---
+    try:
+        acc_q = BankAccount.query
+        if vids is not None:
+            acc_q = acc_q.filter(BankAccount.venue_id.in_(vids)) if vids else acc_q.filter(db.false())
+        accounts = acc_q.all()
+        if accounts:
+            total_cash = 0.0
+            bal_lines = []
+            for a in accounts:
+                b = account_balance(a.id)
+                total_cash += b
+                bal_lines.append(f"  • {a.name}: {_rp(b)}")
+            lines.append(f"- Saldo kas/rekening (total {_rp(total_cash)}):")
+            lines.extend(bal_lines)
+    except Exception:
+        pass
+
+    try:
+        oq = Order.query.filter(Order.status == "partial")
+        if vids is not None:
+            oq = oq.filter(Order.venue_id.in_(vids)) if vids else oq.filter(db.false())
+        due = 0.0
+        cnt = 0
+        for o in oq.all():
+            due += float(o.total_amount or 0) - float(o.amount_paid or 0)
+            cnt += 1
+        if cnt:
+            lines.append(f"- Piutang (DP belum lunas): {_rp(due)} dari {cnt} booking")
+        else:
+            lines.append("- Piutang: tidak ada")
+    except Exception:
+        pass
+
     if findings:
         lines.append(f"- Radar Operasional — {len(findings)} hal perlu dicek (urut prioritas):")
         for i, f in enumerate(findings[:10], 1):

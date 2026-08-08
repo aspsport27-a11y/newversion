@@ -10,6 +10,18 @@ const busy = ref(false)
 const err = ref('')
 const scrollEl = ref(null)
 
+// Pertanyaan contoh siap-klik — bantu user yang bingung mau nanya apa.
+const SUGGESTIONS = [
+  'Apa yang perlu saya cek hari ini?',
+  'Ringkas kondisi bisnis sekarang',
+  'Venue mana paling ramai bulan ini?',
+  'Berapa piutang yang belum tertagih?',
+]
+function ask(q) {
+  question.value = q
+  send()
+}
+
 async function scrollToBottom() {
   await nextTick()
   if (scrollEl.value) scrollEl.value.scrollTop = scrollEl.value.scrollHeight
@@ -47,9 +59,21 @@ async function send() {
       </div>
 
       <div ref="scrollEl" class="flex-1 overflow-auto px-5 py-4 space-y-3">
-        <p v-if="!messages.length" class="text-center text-slate-400 text-sm mt-6">
-          Tanya apa saja seputar operasional venue atau cara pakai sistem ini.
-        </p>
+        <div v-if="!messages.length" class="mt-6">
+          <p class="text-center text-slate-400 text-sm">
+            Tanya apa saja seputar operasional venue atau cara pakai sistem ini.
+          </p>
+          <p class="text-center text-xs text-slate-400 mt-4 mb-2">Contoh pertanyaan:</p>
+          <div class="flex flex-col gap-2 max-w-sm mx-auto">
+            <button
+              v-for="s in SUGGESTIONS"
+              :key="s"
+              @click="ask(s)"
+              :disabled="busy"
+              class="text-left text-sm text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-100 rounded-lg px-3 py-2 transition disabled:opacity-50"
+            >{{ s }}</button>
+          </div>
+        </div>
         <div v-for="(m, i) in messages" :key="i" :class="m.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
           <div
             class="max-w-[85%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap"
