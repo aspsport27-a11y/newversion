@@ -29,7 +29,9 @@ def ai_complete(system, messages, max_tokens=1024, model=None, thinking=False):
         "system": system,
         "messages": messages,
     }
-    if thinking:
+    # "adaptive thinking" tak didukung semua model (mis. Haiku) → cuma aktifkan
+    # untuk yg mendukung, biar tak 400. Kalau ragu, aman untuk dilewati.
+    if thinking and ("opus" in model.lower() or "sonnet" in model.lower()):
         kwargs["thinking"] = {"type": "adaptive"}
     try:
         resp = client.messages.create(**kwargs)

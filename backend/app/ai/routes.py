@@ -94,7 +94,9 @@ def ask():
     messages.append({"role": "user", "content": question})
 
     try:
-        answer = ai_complete(system, messages, max_tokens=2048, thinking=True)
+        # thinking sengaja OFF: mode "adaptive thinking" tak didukung semua model
+        # (mis. Haiku) — untuk Q&A ini kualitas tetap bagus tanpanya.
+        answer = ai_complete(system, messages, max_tokens=2048)
     except AINotConfigured:
         return jsonify(
             error="not_configured",
