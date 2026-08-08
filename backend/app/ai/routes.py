@@ -51,10 +51,13 @@ def ask():
 
     import anthropic
 
+    # Model bisa diatur lewat env (ANTHROPIC_MODEL) tanpa ubah kode — mis. ganti ke
+    # model lebih murah utk hemat biaya. Default: Opus (paling pintar).
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
     client = anthropic.Anthropic(api_key=api_key)
     try:
         response = client.messages.create(
-            model="claude-opus-4-8",
+            model=model,
             max_tokens=2048,
             thinking={"type": "adaptive"},
             system=SYSTEM_PROMPT,
