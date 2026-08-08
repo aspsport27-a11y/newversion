@@ -1,8 +1,11 @@
 """Endpoint AI — konsultasi dengan Claude. Prefix: /api/ai"""
-import os
-
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt, jwt_required
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
+
+from ..extensions import db
+from ..models import User
+from .context import build_business_context
+from .service import AIError, AINotConfigured, ai_complete
 
 ai_bp = Blueprint("ai", __name__)
 
@@ -14,8 +17,13 @@ SYSTEM_PROMPT = (
     "(POS, karyawan & kasbon, operasional, procurement, payroll, kas & bank, laporan keuangan). "
     "Pengguna yang bertanya adalah admin/manajer venue. Bantu jawab pertanyaan seputar "
     "operasional bisnis, cara pakai sistem, atau analisis singkat. Jawab singkat, jelas, "
-    "dan praktis dalam Bahasa Indonesia. Kamu tidak punya akses langsung ke data transaksi "
-    "sistem ini — jika pertanyaan butuh angka spesifik, arahkan pengguna ke menu Laporan yang relevan."
+    "dan praktis dalam Bahasa Indonesia.\n\n"
+    "Di bawah ini tersedia RINGKASAN DATA TERKINI (sesuai cakupan/venue pengguna) — gunakan "
+    "untuk menjawab pertanyaan tentang keadaan sekarang (omzet hari ini, approval menunggu, "
+    "hal yang perlu dicek, stok menipis, dll). Angka di ringkasan itu nyata; jangan mengarang "
+    "angka lain. Untuk data historis spesifik yang TIDAK ada di ringkasan (mis. omzet bulan "
+    "lalu, rincian per kasir jangka panjang), katakan datanya tak tersedia di sini dan arahkan "
+    "pengguna ke menu Laporan yang relevan."
 )
 
 MAX_HISTORY = 10
@@ -33,12 +41,16 @@ def ask():
     if not question:
         return jsonify(error="bad_request", message="Pertanyaan wajib diisi"), 400
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        return jsonify(
-            error="not_configured",
-            message="Fitur AI belum dikonfigurasi di server (ANTHROPIC_API_KEY belum diset).",
-        ), 503
+    user = db.session.get(User, int(get_jwt_identity()))
+
+    # suntik ringkasan data terkini (scoped) supaya AI "melek data"
+    system = SYSTEM_PROMPT
+    try:
+        ctx = build_business_context(user)
+        if ctx:
+            system = SYSTEM_PROMPT + "\n\n===== DATA =====\n" + ctx
+    except Exception:
+        pass  # kalau gagal ambil konteks, tetap jawab tanpa data (jangan blokir)
 
     history = data.get("history") or []
     messages = []
@@ -49,27 +61,16 @@ def ask():
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": question})
 
-    import anthropic
-
-    # Model bisa diatur lewat env (ANTHROPIC_MODEL) tanpa ubah kode — mis. ganti ke
-    # model lebih murah utk hemat biaya. Default: Opus (paling pintar).
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
-    client = anthropic.Anthropic(api_key=api_key)
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=2048,
-            thinking={"type": "adaptive"},
-            system=SYSTEM_PROMPT,
-            messages=messages,
-        )
-    except anthropic.APIStatusError as e:
-        return jsonify(error="ai_error", message=f"Gagal menghubungi AI: {e.message}"), 502
-    except anthropic.APIConnectionError:
-        return jsonify(error="ai_error", message="Gagal menghubungi AI: koneksi bermasalah"), 502
+        answer = ai_complete(system, messages, max_tokens=2048, thinking=True)
+    except AINotConfigured:
+        return jsonify(
+            error="not_configured",
+            message="Fitur AI belum dikonfigurasi di server (ANTHROPIC_API_KEY belum diset).",
+        ), 503
+    except AIError as e:
+        if str(e) == "__refusal__":
+            return jsonify(error="ai_refusal", message="AI tidak bisa menjawab pertanyaan ini."), 200
+        return jsonify(error="ai_error", message=f"Gagal menghubungi AI: {e}"), 502
 
-    if response.stop_reason == "refusal":
-        return jsonify(error="ai_refusal", message="AI tidak bisa menjawab pertanyaan ini."), 200
-
-    answer = "".join(block.text for block in response.content if block.type == "text")
     return jsonify(answer=answer), 200

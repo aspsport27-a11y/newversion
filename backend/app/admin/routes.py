@@ -2329,6 +2329,64 @@ def radar():
     return jsonify(count=len(items), counts=counts, findings=items), 200
 
 
+# Cache briefing di memori: key = tanda-tangan temuan (scope+isi), value = teks.
+# Karena briefing cuma berubah kalau temuannya berubah, ini mencegah panggilan AI
+# berulang tiap buka Dashboard (hemat biaya). Per-worker; reset saat restart — aman.
+_BRIEFING_CACHE = {}
+
+BRIEFING_SYSTEM = (
+    "Kamu asisten yang meringkas 'Radar Operasional' untuk pemilik bisnis venue olahraga "
+    "yang mengelola belasan cabang dari jauh. Tulis SATU paragraf singkat (2-4 kalimat) dalam "
+    "Bahasa Indonesia yang natural, menyapa langsung ('Pagi ini...'), menyorot 1-2 hal paling "
+    "penting (rupiah terbesar/paling berisiko) dan sisanya diringkas. Framing 'perlu dicek', "
+    "BUKAN tuduhan mencuri. Jangan pakai poin/bullet, jangan mengulang semua angka mentah, "
+    "jangan mengarang data di luar yang diberikan. Ajak bertindak singkat di akhir."
+)
+
+
+def _briefing_signature(vids, findings):
+    scope = "all" if vids is None else ",".join(map(str, sorted(vids)))
+    body = ";".join(f"{f['signal']}:{f['venue_id']}:{round(f['severity'])}" for f in findings)
+    return scope + "|" + body
+
+
+@admin_bp.get("/radar/briefing")
+@jwt_required()
+@VIEW
+def radar_briefing():
+    """Briefing AI (1 paragraf) atas temuan radar. Di-cache per tanda-tangan temuan
+    supaya tak memanggil AI tiap buka Dashboard. Tanpa temuan → tak panggil AI."""
+    from ..ai.service import AIError, AINotConfigured, ai_complete
+
+    vids = _scope_vids(_current_user())
+    findings = _radar_findings(vids)
+    if not findings:
+        return jsonify(briefing=None, empty=True), 200
+
+    sig = _briefing_signature(vids, findings)
+    if sig in _BRIEFING_CACHE:
+        return jsonify(briefing=_BRIEFING_CACHE[sig], cached=True), 200
+
+    payload = "\n".join(f"- [{f['level']}] {f['title']} — {f['detail']}" for f in findings)
+    try:
+        text = ai_complete(
+            BRIEFING_SYSTEM,
+            [{"role": "user", "content": "Temuan radar hari ini:\n" + payload}],
+            max_tokens=400,
+        )
+    except AINotConfigured:
+        return jsonify(briefing=None, not_configured=True), 200
+    except AIError:
+        return jsonify(briefing=None, error=True), 200
+
+    text = text.strip()
+    _BRIEFING_CACHE[sig] = text
+    # jaga cache tak membengkak (temuan berubah-ubah tiap hari)
+    if len(_BRIEFING_CACHE) > 50:
+        _BRIEFING_CACHE.pop(next(iter(_BRIEFING_CACHE)))
+    return jsonify(briefing=text, cached=False), 200
+
+
 @admin_bp.delete("/shifts/<int:shift_id>")
 @jwt_required()
 @ORDER_CANCEL

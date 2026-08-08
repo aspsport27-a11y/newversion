@@ -16,6 +16,11 @@ const radar = ref(null)
 const radarLoading = ref(true)
 const radarIcon = { cash_variance_recurring: '💸', cash_variance_single: '⚖️', undeposited_shift: '🏦' }
 
+// Briefing AI (Fase 2) — ringkasan 1 paragraf atas temuan radar. Di-cache di
+// backend per isi temuan, jadi tak memanggil AI tiap buka Dashboard.
+const briefing = ref(null)
+const briefingLoading = ref(false)
+
 const isManagerLike = computed(() => ['manager_unit', 'admin_unit'].includes(auth.user?.role))
 
 function rupiah(n) {
@@ -54,6 +59,18 @@ onMounted(async () => {
   } finally {
     radarLoading.value = false
   }
+  // briefing AI hanya kalau ada temuan (hemat: tak panggil AI kalau radar bersih)
+  if (radar.value && radar.value.count > 0) {
+    briefingLoading.value = true
+    try {
+      const { data } = await client.get('/admin/radar/briefing')
+      briefing.value = data.briefing // null bila AI belum dikonfigurasi / error → box disembunyikan
+    } catch (e) {
+      briefing.value = null
+    } finally {
+      briefingLoading.value = false
+    }
+  }
 })
 </script>
 
@@ -74,6 +91,17 @@ onMounted(async () => {
         </div>
       </div>
       <p class="text-xs text-slate-400 mb-3">Hal yang perlu dicek — bukan tuduhan. Klik untuk menindaklanjuti.</p>
+
+      <!-- Briefing AI (Fase 2) -->
+      <div v-if="briefingLoading" class="mb-3 rounded-lg bg-brand-50 border border-brand-100 px-4 py-3 text-sm text-brand-700/70 flex items-center gap-2">
+        <span class="animate-pulse">✨</span> Menyusun ringkasan AI…
+      </div>
+      <div v-else-if="briefing" class="mb-3 rounded-lg bg-brand-50 border border-brand-100 px-4 py-3">
+        <p class="text-[11px] font-semibold uppercase tracking-wide text-brand-600 mb-1 flex items-center gap-1">
+          <span>✨</span> Ringkasan AI
+        </p>
+        <p class="text-sm text-slate-700 leading-relaxed">{{ briefing }}</p>
+      </div>
 
       <div v-if="!radar.count" class="text-sm text-emerald-600 bg-emerald-50 rounded-lg px-4 py-6 text-center">
         ✅ Semua aman — tidak ada yang perlu dicek.
