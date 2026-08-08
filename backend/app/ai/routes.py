@@ -33,6 +33,34 @@ SYSTEM_PROMPT = (
 MAX_HISTORY = 10
 
 
+def _model_label(model_id):
+    """Ubah id model jadi label ramah, mis. claude-haiku-4-5-2025... -> 'Haiku 4.5'."""
+    import re
+
+    m = (model_id or "").lower()
+    fam = "Opus" if "opus" in m else "Sonnet" if "sonnet" in m else "Haiku" if "haiku" in m else None
+    if not fam:
+        return model_id or "AI"
+    ver = re.search(r"(\d+)-(\d+)", m)
+    return f"{fam} {ver.group(1)}.{ver.group(2)}" if ver else fam
+
+
+@ai_bp.get("/info")
+@jwt_required()
+def info():
+    """Info ringan utk UI Ask AI: apakah AI aktif + label model yg dipakai."""
+    import os
+
+    if get_jwt().get("role") not in ALLOWED_ROLES:
+        return jsonify(error="forbidden"), 403
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-8")
+    return jsonify(
+        configured=bool(os.environ.get("ANTHROPIC_API_KEY")),
+        model=model,
+        model_label=_model_label(model),
+    ), 200
+
+
 @ai_bp.post("/ask")
 @jwt_required()
 def ask():
