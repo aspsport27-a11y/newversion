@@ -10,6 +10,12 @@ const error = ref('')
 const summary = ref(null)
 const growthView = ref('rupiah') // 'rupiah' | 'persen'
 
+// Radar Operasional (Fase 1 — deterministik). Owner/admin/HO lihat semua venue,
+// manager lihat venue-nya sendiri (scope diatur backend).
+const radar = ref(null)
+const radarLoading = ref(true)
+const radarIcon = { cash_variance_recurring: '💸', cash_variance_single: '⚖️', undeposited_shift: '🏦' }
+
 const isManagerLike = computed(() => ['manager_unit', 'admin_unit'].includes(auth.user?.role))
 
 function rupiah(n) {
@@ -40,6 +46,14 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  try {
+    const { data } = await client.get('/admin/radar')
+    radar.value = data
+  } catch (e) {
+    radar.value = null // radar bukan fitur kritis; kalau gagal, sembunyikan saja
+  } finally {
+    radarLoading.value = false
+  }
 })
 </script>
 
@@ -47,6 +61,46 @@ onMounted(async () => {
   <div>
     <h1 class="text-2xl font-bold text-slate-800">Selamat datang, {{ auth.user?.username }} 👋</h1>
     <p class="text-slate-500 mt-1">Ringkasan operasional hari ini.</p>
+
+    <!-- Radar Operasional (Fase 1) -->
+    <div v-if="!radarLoading && radar" class="mt-6 bg-white rounded-xl shadow-sm border p-5">
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="font-semibold text-slate-700 flex items-center gap-2">
+          <span>📡</span> Radar Operasional
+        </h3>
+        <div v-if="radar.count" class="flex items-center gap-1.5 text-xs">
+          <span v-if="radar.counts.high" class="bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ radar.counts.high }} penting</span>
+          <span v-if="radar.counts.medium" class="bg-amber-50 text-amber-600 font-semibold rounded-full px-2 py-0.5">{{ radar.counts.medium }} perhatikan</span>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">Hal yang perlu dicek — bukan tuduhan. Klik untuk menindaklanjuti.</p>
+
+      <div v-if="!radar.count" class="text-sm text-emerald-600 bg-emerald-50 rounded-lg px-4 py-6 text-center">
+        ✅ Semua aman — tidak ada yang perlu dicek.
+      </div>
+      <div v-else class="space-y-2">
+        <RouterLink
+          v-for="(f, i) in radar.findings"
+          :key="i"
+          :to="{ name: f.link.view, query: { venue_id: f.venue_id, tab: f.link.tab } }"
+          class="flex items-start gap-3 rounded-lg border px-4 py-3 hover:bg-slate-50 transition"
+          :class="f.level === 'high' ? 'border-red-100' : 'border-amber-100'"
+        >
+          <span
+            class="mt-0.5 h-8 w-8 shrink-0 rounded-lg flex items-center justify-center text-base"
+            :class="f.level === 'high' ? 'bg-red-50' : 'bg-amber-50'"
+          >{{ radarIcon[f.signal] || '⚠️' }}</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <p class="text-sm font-medium text-slate-800 truncate">{{ f.title }}</p>
+              <span v-if="f.venue_code" class="shrink-0 text-[10px] font-semibold text-slate-400 bg-slate-100 rounded px-1.5 py-0.5">{{ f.venue_code }}</span>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">{{ f.detail }}</p>
+          </div>
+          <span class="text-slate-300 text-lg leading-none shrink-0">›</span>
+        </RouterLink>
+      </div>
+    </div>
 
     <div v-if="loading" class="mt-8 text-slate-400">Memuat data…</div>
     <p v-else-if="error" class="mt-8 text-red-600">{{ error }}</p>

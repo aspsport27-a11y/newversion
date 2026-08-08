@@ -2207,6 +2207,128 @@ def report_shifts():
     return jsonify(range={"from": d_from, "to": d_to}, count=len(rows), shifts=rows), 200
 
 
+# ------------------------------------------------------------------
+# Radar Operasional (Fase 1 — deterministik, TANPA AI)
+# ------------------------------------------------------------------
+# Menyapu data harian → tandai kejanggalan → urut per bobot rupiah. Framing
+# "perlu dicek", BUKAN tuduhan. Semua dari data yg ada (tanpa tabel/migrasi baru).
+# Ambang batas sengaja konstanta di sini supaya gampang dituning tanpa bongkar logika.
+RADAR_VARIANCE_MIN = 50_000       # |selisih kas| >= ini baru ditandai (buang recehan)
+RADAR_RECUR_DAYS = 7              # jendela deteksi pola selisih berulang
+RADAR_RECUR_COUNT = 2            # kasir sama selisih >= sekian kali dlm jendela = pola
+RADAR_DEPOSIT_STALE_DAYS = 1     # shift closed belum disetor > sekian hari = perlu dicek
+
+
+def _rp(n):
+    return "Rp " + f"{int(round(abs(n))):,}".replace(",", ".")
+
+
+def _radar_findings(vids):
+    """vids: None = semua venue (admin/HO); list = dibatasi (manager → venue-nya).
+    Kembalikan daftar temuan deterministik, sudah diberi `severity` (bobot rupiah)
+    untuk diurut. Tak menyentuh AI sama sekali."""
+    from collections import defaultdict
+
+    now = datetime.utcnow()
+    findings = []
+    vcode = {v.id: v.code for v in Venue.query.all()}
+    uname = {u.id: u.username for u in User.query.all()}
+
+    base = Shift.query.filter(Shift.status == "closed")
+    if vids is not None:
+        base = base.filter(Shift.venue_id.in_(vids)) if vids else base.filter(db.false())
+
+    # ---------- Sinyal 1: Selisih Kas ----------
+    var_shifts = [
+        s for s in base.filter(Shift.cash_variance.isnot(None)).all()
+        if s.cash_variance is not None and abs(float(s.cash_variance)) >= RADAR_VARIANCE_MIN
+    ]
+    # 1B — pola berulang per kasir dlm jendela (sinyal terpenting)
+    recur_cut = now - timedelta(days=RADAR_RECUR_DAYS)
+    per_cashier = defaultdict(list)
+    for s in var_shifts:
+        if s.closed_at and s.closed_at >= recur_cut:
+            per_cashier[(s.cashier_id, s.venue_id)].append(s)
+    grouped = set()
+    for (cid, vid), slist in per_cashier.items():
+        if len(slist) >= RADAR_RECUR_COUNT:
+            total = sum(float(s.cash_variance) for s in slist)
+            grouped.update(s.id for s in slist)
+            findings.append({
+                "signal": "cash_variance_recurring",
+                "level": "high",
+                "severity": abs(total),
+                "venue_id": vid, "venue_code": vcode.get(vid),
+                "title": f"Kasir {uname.get(cid, '?')} selisih kas {len(slist)}× dalam {RADAR_RECUR_DAYS} hari",
+                "detail": f"Total selisih {_rp(total)} dari {len(slist)} shift. Pola berulang — perlu dicek.",
+                "amount": total,
+                "occurred_at": max(s.closed_at for s in slist).isoformat(),
+                "link": {"view": "reports", "tab": "shifts", "venue_id": vid},
+            })
+    # 1A — selisih besar sekali jalan (yg belum masuk pola berulang)
+    for s in var_shifts:
+        if s.id in grouped:
+            continue
+        v = float(s.cash_variance)
+        findings.append({
+            "signal": "cash_variance_single",
+            "level": "high" if abs(v) >= RADAR_VARIANCE_MIN * 4 else "medium",
+            "severity": abs(v),
+            "venue_id": s.venue_id, "venue_code": vcode.get(s.venue_id),
+            "title": f"Selisih kas {_rp(v)} {'(kurang)' if v < 0 else '(lebih)'} — kasir {uname.get(s.cashier_id, '?')}",
+            "detail": f"Shift {s.closed_at.date().isoformat() if s.closed_at else ''} uang fisik {'kurang' if v < 0 else 'lebih'} {_rp(v)} dari seharusnya.",
+            "amount": v,
+            "occurred_at": s.closed_at.isoformat() if s.closed_at else None,
+            "link": {"view": "reports", "tab": "shifts", "venue_id": s.venue_id},
+        })
+
+    # ---------- Sinyal 2: Shift Belum Disetor ----------
+    stale_cut = now - timedelta(days=RADAR_DEPOSIT_STALE_DAYS)
+    undep = base.filter(
+        Shift.deposit_id.is_(None),
+        Shift.deposit_amount.isnot(None),
+        Shift.deposit_amount > 0,
+    ).all()
+    per_venue = defaultdict(list)
+    for s in undep:
+        if s.closed_at and s.closed_at <= stale_cut:
+            per_venue[s.venue_id].append(s)
+    for vid, slist in per_venue.items():
+        total = sum(float(s.deposit_amount or 0) for s in slist)
+        oldest = min(s.closed_at for s in slist)
+        age = (now - oldest).days
+        findings.append({
+            "signal": "undeposited_shift",
+            "level": "high" if age >= 3 else "medium",
+            "severity": total,
+            "venue_id": vid, "venue_code": vcode.get(vid),
+            "title": f"{len(slist)} shift belum disetor — {vcode.get(vid, '')}",
+            "detail": f"Total {_rp(total)}, tertua {age} hari lalu. Segera setor / rekonsiliasi.",
+            "amount": total,
+            "occurred_at": oldest.isoformat(),
+            "link": {"view": "treasury", "tab": "deposits", "venue_id": vid},
+        })
+
+    findings.sort(key=lambda f: f["severity"], reverse=True)
+    return findings
+
+
+@admin_bp.get("/radar")
+@jwt_required()
+@VIEW
+def radar():
+    """Radar Operasional — owner/admin/HO lihat semua venue; manager lihat
+    venue-nya sendiri (scope sama dgn master data)."""
+    vids = _scope_vids(_current_user())
+    items = _radar_findings(vids)
+    counts = {
+        "high": sum(1 for f in items if f["level"] == "high"),
+        "medium": sum(1 for f in items if f["level"] == "medium"),
+        "total": len(items),
+    }
+    return jsonify(count=len(items), counts=counts, findings=items), 200
+
+
 @admin_bp.delete("/shifts/<int:shift_id>")
 @jwt_required()
 @ORDER_CANCEL
