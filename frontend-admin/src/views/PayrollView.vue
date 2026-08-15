@@ -55,7 +55,7 @@ watch([venueId], loadRuns)
 const tab = ref('payroll') // 'payroll' | 'lembur'
 const otRows = ref([])
 const otLoading = ref(false)
-const otSavingId = ref(null)
+const otSaving = ref(false)
 const otTotal = computed(() => otRows.value.reduce((s, r) => s + (Number(r.amount) || 0), 0))
 async function loadOvertime() {
   const vid = isManager.value ? auth.user?.venue_id : venueId.value
@@ -67,18 +67,18 @@ async function loadOvertime() {
     otRows.value = data.items
   } catch (e) { otRows.value = [] } finally { otLoading.value = false }
 }
-async function saveOvertime(row) {
+async function saveAllOvertime() {
   const vid = isManager.value ? auth.user?.venue_id : venueId.value
-  if (!vid) return
-  otSavingId.value = row.employee_id
+  if (!vid || !otRows.value.length) return
+  otSaving.value = true
   const { period_year, period_month } = ym()
   try {
-    await client.put('/payroll/overtime', {
-      employee_id: row.employee_id, period_year, period_month,
-      amount: Number(row.amount) || 0, note: row.note || null,
+    const { data } = await client.put('/payroll/overtime/bulk', {
+      venue_id: vid, period_year, period_month,
+      items: otRows.value.map((r) => ({ employee_id: r.employee_id, amount: Number(r.amount) || 0, note: r.note || null })),
     })
-    flash(`Lembur ${row.employee_name} disimpan`)
-  } catch (e) { alert(e?.response?.data?.message || 'Gagal menyimpan.') } finally { otSavingId.value = null }
+    flash(`Lembur tersimpan (${data.saved} karyawan)`)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menyimpan.') } finally { otSaving.value = false }
 }
 // muat data lembur saat pindah ke tab-nya / ganti venue-periode saat di tab itu
 watch(tab, (t) => { if (t === 'lembur') loadOvertime() })
@@ -252,7 +252,13 @@ function slip(it) {
       <div v-else class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <div class="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
           <p class="text-sm text-slate-500">Entri lembur manual — periode {{ MONTHS[ym().period_month] }} {{ ym().period_year }}. Nilai dalam Rupiah.</p>
-          <p class="text-sm font-semibold text-slate-700">Total: {{ rupiah(otTotal) }}</p>
+          <div class="flex items-center gap-4">
+            <p class="text-sm font-semibold text-slate-700">Total: {{ rupiah(otTotal) }}</p>
+            <button @click="saveAllOvertime" :disabled="otSaving || !otRows.length"
+              class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">
+              {{ otSaving ? 'Menyimpan…' : 'Simpan Semua' }}
+            </button>
+          </div>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -261,11 +267,10 @@ function slip(it) {
               <th class="px-4 py-3 font-medium">Jabatan</th>
               <th class="px-4 py-3 font-medium text-right">Nilai Lembur (Rp)</th>
               <th class="px-4 py-3 font-medium">Catatan</th>
-              <th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="otLoading"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!otRows.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Tidak ada karyawan aktif di venue ini.</td></tr>
+              <tr v-if="otLoading"><td colspan="4" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!otRows.length"><td colspan="4" class="px-4 py-8 text-center text-slate-400">Tidak ada karyawan aktif di venue ini.</td></tr>
               <tr v-for="row in otRows" :key="row.employee_id" class="border-t">
                 <td class="px-4 py-2.5 text-slate-700">{{ row.employee_name }}</td>
                 <td class="px-4 py-2.5 text-slate-500 text-xs">{{ row.position || '—' }}</td>
@@ -276,12 +281,6 @@ function slip(it) {
                 <td class="px-4 py-2">
                   <input v-model="row.note" type="text" placeholder="opsional"
                     class="w-full min-w-[8rem] rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500" />
-                </td>
-                <td class="px-4 py-2 text-right">
-                  <button @click="saveOvertime(row)" :disabled="otSavingId === row.employee_id"
-                    class="text-brand-600 hover:underline text-sm disabled:opacity-50">
-                    {{ otSavingId === row.employee_id ? 'Menyimpan…' : 'Simpan' }}
-                  </button>
                 </td>
               </tr>
             </tbody>

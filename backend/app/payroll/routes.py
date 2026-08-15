@@ -239,6 +239,47 @@ def overtime_save():
     return jsonify(ok=True, amount=float(o.amount)), 200
 
 
+@payroll_bp.put("/overtime/bulk")
+@jwt_required()
+@CREATE
+def overtime_bulk():
+    """Simpan banyak entri lembur sekaligus (1 tombol 'Simpan Semua')."""
+    d = request.get_json(silent=True) or {}
+    year, month = d.get("period_year"), d.get("period_month")
+    if not year or not month:
+        return _err("periode wajib")
+    forced = _forced_venue()
+    uid = _user().id
+    saved = 0
+    for it in (d.get("items") or []):
+        emp_id = it.get("employee_id")
+        if not emp_id:
+            continue
+        emp = db.session.get(Employee, emp_id)
+        if not emp or (forced is not None and emp.venue_id != forced):
+            continue
+        amount = _D(it.get("amount"))
+        note = (it.get("note") or None)
+        o = Overtime.query.filter_by(
+            employee_id=emp_id, period_year=int(year), period_month=int(month),
+        ).first()
+        if not o:
+            if amount == 0 and not note:
+                continue  # jangan bikin entri kosong (0 tanpa catatan)
+            o = Overtime(
+                employee_id=emp_id, venue_id=emp.venue_id,
+                period_year=int(year), period_month=int(month),
+            )
+            db.session.add(o)
+        o.amount = amount
+        o.note = note
+        o.updated_by = uid
+        o.updated_at = datetime.utcnow()
+        saved += 1
+    db.session.commit()
+    return jsonify(ok=True, saved=saved), 200
+
+
 def _transition(rid, allowed_from, new_status, extra=None):
     r = db.session.get(PayrollRun, rid)
     if not r:
