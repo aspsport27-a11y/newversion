@@ -77,6 +77,27 @@ class PayrollItem(db.Model):
         }
 
 
+class Overtime(db.Model):
+    """Entri lembur manual per karyawan per periode (migration 051). TERPISAH dari
+    payroll_items — baru pencatatan, belum diikat ke perhitungan gaji."""
+    __tablename__ = "overtime_entries"
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="SET NULL"))
+    period_year = db.Column(db.Integer, nullable=False)
+    period_month = db.Column(db.Integer, nullable=False)
+    amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    note = db.Column(db.String(200))
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("employee_id", "period_year", "period_month", name="uq_overtime_emp_period"),
+    )
+
+
 class PayrollAttachment(db.Model):
     __tablename__ = "payroll_attachments"
 

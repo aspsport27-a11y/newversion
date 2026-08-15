@@ -51,6 +51,39 @@ async function loadRuns() {
 onMounted(async () => { await loadVenues(); await loadRuns() })
 watch([venueId], loadRuns)
 
+// ---- Tab Lembur (terpisah — pencatatan manual, belum masuk hitungan gaji) ----
+const tab = ref('payroll') // 'payroll' | 'lembur'
+const otRows = ref([])
+const otLoading = ref(false)
+const otSavingId = ref(null)
+const otTotal = computed(() => otRows.value.reduce((s, r) => s + (Number(r.amount) || 0), 0))
+async function loadOvertime() {
+  const vid = isManager.value ? auth.user?.venue_id : venueId.value
+  if (!vid) { otRows.value = []; return }
+  otLoading.value = true
+  const { period_year, period_month } = ym()
+  try {
+    const { data } = await client.get('/payroll/overtime', { params: { venue_id: vid, year: period_year, month: period_month } })
+    otRows.value = data.items
+  } catch (e) { otRows.value = [] } finally { otLoading.value = false }
+}
+async function saveOvertime(row) {
+  const vid = isManager.value ? auth.user?.venue_id : venueId.value
+  if (!vid) return
+  otSavingId.value = row.employee_id
+  const { period_year, period_month } = ym()
+  try {
+    await client.put('/payroll/overtime', {
+      employee_id: row.employee_id, period_year, period_month,
+      amount: Number(row.amount) || 0, note: row.note || null,
+    })
+    flash(`Lembur ${row.employee_name} disimpan`)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menyimpan.') } finally { otSavingId.value = null }
+}
+// muat data lembur saat pindah ke tab-nya / ganti venue-periode saat di tab itu
+watch(tab, (t) => { if (t === 'lembur') loadOvertime() })
+watch([venueId, period], () => { if (tab.value === 'lembur') loadOvertime() })
+
 async function generate() {
   if (!isManager.value && !venueId.value) { alert('Pilih venue dulu (bukan "Semua venue") untuk generate gaji.'); return }
   busy.value = true
@@ -168,12 +201,20 @@ function slip(it) {
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
         <input v-model="period" type="month" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
-        <button @click="generate" :disabled="busy || (!isManager && !venueId)" :title="(!isManager && !venueId) ? 'Pilih venue dulu (bukan Semua venue)' : ''" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Generate Gaji</button>
+        <button v-if="tab === 'payroll'" @click="generate" :disabled="busy || (!isManager && !venueId)" :title="(!isManager && !venueId) ? 'Pilih venue dulu (bukan Semua venue)' : ''" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Generate Gaji</button>
       </div>
     </div>
-    <p v-if="!isManager && !venueId" class="text-xs text-amber-600 -mt-3 mb-3">Pilih venue tertentu (bukan "Semua venue") untuk bisa generate gaji.</p>
 
-    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-4 border-b">
+      <button @click="tab = 'payroll'" :class="tab === 'payroll' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Payroll</button>
+      <button @click="tab = 'lembur'" :class="tab === 'lembur' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Lembur</button>
+    </div>
+
+    <p v-if="tab === 'payroll' && !isManager && !venueId" class="text-xs text-amber-600 -mt-1 mb-3">Pilih venue tertentu (bukan "Semua venue") untuk bisa generate gaji.</p>
+
+    <!-- ================= TAB PAYROLL ================= -->
+    <div v-show="tab === 'payroll'" class="bg-white rounded-xl shadow-sm border overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
@@ -200,6 +241,52 @@ function slip(it) {
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- ================= TAB LEMBUR ================= -->
+    <div v-show="tab === 'lembur'">
+      <p v-if="!isManager && !venueId" class="text-sm text-amber-600 bg-amber-50 rounded-lg px-4 py-3">
+        Pilih venue tertentu (bukan "Semua venue") untuk menampilkan karyawan.
+      </p>
+      <div v-else class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
+          <p class="text-sm text-slate-500">Entri lembur manual — periode {{ MONTHS[ym().period_month] }} {{ ym().period_year }}. Nilai dalam Rupiah.</p>
+          <p class="text-sm font-semibold text-slate-700">Total: {{ rupiah(otTotal) }}</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-3 font-medium">Karyawan</th>
+              <th class="px-4 py-3 font-medium">Jabatan</th>
+              <th class="px-4 py-3 font-medium text-right">Nilai Lembur (Rp)</th>
+              <th class="px-4 py-3 font-medium">Catatan</th>
+              <th class="px-4 py-3"></th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="otLoading"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!otRows.length"><td colspan="5" class="px-4 py-8 text-center text-slate-400">Tidak ada karyawan aktif di venue ini.</td></tr>
+              <tr v-for="row in otRows" :key="row.employee_id" class="border-t">
+                <td class="px-4 py-2.5 text-slate-700">{{ row.employee_name }}</td>
+                <td class="px-4 py-2.5 text-slate-500 text-xs">{{ row.position || '—' }}</td>
+                <td class="px-4 py-2 text-right">
+                  <input v-model.number="row.amount" type="number" min="0" step="1000"
+                    class="w-32 text-right rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500" />
+                </td>
+                <td class="px-4 py-2">
+                  <input v-model="row.note" type="text" placeholder="opsional"
+                    class="w-full min-w-[8rem] rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500" />
+                </td>
+                <td class="px-4 py-2 text-right">
+                  <button @click="saveOvertime(row)" :disabled="otSavingId === row.employee_id"
+                    class="text-brand-600 hover:underline text-sm disabled:opacity-50">
+                    {{ otSavingId === row.employee_id ? 'Menyimpan…' : 'Simpan' }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 

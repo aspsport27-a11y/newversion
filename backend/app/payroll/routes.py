@@ -12,7 +12,7 @@ from werkzeug.utils import secure_filename
 from ..extensions import db
 from ..models import Employee, EmployeeDebt, User, Venue
 from ..security import ROLE_MANAGER, require_perm
-from .models import PayrollAttachment, PayrollItem, PayrollRun
+from .models import Overtime, PayrollAttachment, PayrollItem, PayrollRun
 
 ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
 
@@ -164,6 +164,79 @@ def item_update(iid):
     run.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(item=item.to_dict(), total_net=float(run.total_net)), 200
+
+
+# ------------------------------------------------------------------
+# Lembur (tab terpisah) — entri manual per karyawan per periode.
+# Belum diikat ke perhitungan gaji; baru pencatatan.
+# ------------------------------------------------------------------
+@payroll_bp.get("/overtime")
+@jwt_required()
+@VIEW
+def overtime_list():
+    """Daftar karyawan aktif di venue + nilai lembur periode itu (0 bila belum ada)."""
+    forced = _forced_venue()
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
+    if not vid:
+        return _err("venue wajib")
+    year = request.args.get("year", type=int)
+    month = request.args.get("month", type=int)
+    if not year or not month:
+        return _err("periode wajib")
+
+    emps = Employee.query.filter_by(venue_id=vid, status="active").order_by(Employee.name).all()
+    existing = {
+        o.employee_id: o
+        for o in Overtime.query.filter_by(venue_id=vid, period_year=year, period_month=month).all()
+    }
+    rows = []
+    total = 0.0
+    for e in emps:
+        o = existing.get(e.id)
+        amt = float(o.amount) if o else 0.0
+        total += amt
+        rows.append({
+            "employee_id": e.id,
+            "employee_name": e.name,
+            "position": e.position,
+            "amount": amt,
+            "note": o.note if o else None,
+        })
+    return jsonify(count=len(rows), total=round(total, 2), items=rows), 200
+
+
+@payroll_bp.put("/overtime")
+@jwt_required()
+@CREATE
+def overtime_save():
+    """Simpan (upsert) nilai lembur 1 karyawan utk 1 periode."""
+    d = request.get_json(silent=True) or {}
+    emp_id = d.get("employee_id")
+    year, month = d.get("period_year"), d.get("period_month")
+    if not emp_id or not year or not month:
+        return _err("employee_id & periode wajib")
+    emp = db.session.get(Employee, emp_id)
+    if not emp:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and emp.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+
+    o = Overtime.query.filter_by(
+        employee_id=emp_id, period_year=int(year), period_month=int(month),
+    ).first()
+    if not o:
+        o = Overtime(
+            employee_id=emp_id, venue_id=emp.venue_id,
+            period_year=int(year), period_month=int(month),
+        )
+        db.session.add(o)
+    o.amount = _D(d.get("amount"))
+    o.note = (d.get("note") or None)
+    o.updated_by = _user().id
+    o.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(ok=True, amount=float(o.amount)), 200
 
 
 def _transition(rid, allowed_from, new_status, extra=None):
