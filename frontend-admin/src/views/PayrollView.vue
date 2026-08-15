@@ -43,6 +43,19 @@ async function loadVenues() {
     } catch (_) { /* treasury belum disetup */ }
   }
 }
+// ringkasan payroll per status (dari daftar yg sedang tampil)
+const runsSummary = computed(() => {
+  const s = {
+    draft: { count: 0, total: 0 }, submitted: { count: 0, total: 0 },
+    approved: { count: 0, total: 0 }, paid: { count: 0, total: 0 }, rejected: { count: 0, total: 0 },
+  }
+  for (const r of runs.value) {
+    const k = s[r.status] ? r.status : 'draft'
+    s[k].count += 1
+    s[k].total += Number(r.total_net) || 0
+  }
+  return s
+})
 async function loadRuns() {
   loading.value = true
   const params = {}
@@ -246,7 +259,32 @@ function slip(it) {
     <p v-if="tab === 'payroll' && !isManager && !venueId" class="text-xs text-amber-600 -mt-1 mb-3">Pilih venue tertentu (bukan "Semua venue") untuk bisa generate gaji.</p>
 
     <!-- ================= TAB PAYROLL ================= -->
-    <div v-show="tab === 'payroll'" class="bg-white rounded-xl shadow-sm border overflow-hidden">
+    <div v-show="tab === 'payroll'">
+      <!-- Stiker ringkasan per status payroll -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Draft ({{ runsSummary.draft.count }})</p>
+          <p class="text-lg font-bold text-slate-600">{{ rupiah(runsSummary.draft.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Menunggu ({{ runsSummary.submitted.count }})</p>
+          <p class="text-lg font-bold text-amber-600">{{ rupiah(runsSummary.submitted.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Disetujui ({{ runsSummary.approved.count }})</p>
+          <p class="text-lg font-bold text-blue-600">{{ rupiah(runsSummary.approved.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Dibayar ({{ runsSummary.paid.count }})</p>
+          <p class="text-lg font-bold text-emerald-600">{{ rupiah(runsSummary.paid.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Ditolak ({{ runsSummary.rejected.count }})</p>
+          <p class="text-lg font-bold text-red-600">{{ rupiah(runsSummary.rejected.total) }}</p>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
@@ -273,6 +311,7 @@ function slip(it) {
             </tr>
           </tbody>
         </table>
+      </div>
       </div>
     </div>
 
