@@ -265,7 +265,7 @@ async function resetAccount(pinOnly) {
                 <span :class="e.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5">{{ e.status }}</span>
               </td>
               <td class="px-4 py-3 text-right whitespace-nowrap">
-                <button @click="openDetail(e)" class="text-slate-600 text-sm hover:underline">Kasbon/Akun</button>
+                <button @click="openDetail(e)" class="text-slate-600 text-sm hover:underline">Akun</button>
                 <button @click="openEdit(e)" class="text-brand-600 text-sm hover:underline ml-3">Edit</button>
                 <button @click="remove(e)" class="text-red-500 text-sm hover:underline ml-3">Hapus</button>
               </td>
