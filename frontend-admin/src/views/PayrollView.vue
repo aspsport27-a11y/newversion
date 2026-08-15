@@ -50,13 +50,17 @@ async function loadRuns() {
   try { const { data } = await client.get('/payroll/runs', { params }); runs.value = data.runs }
   finally { loading.value = false }
 }
-onMounted(async () => { await loadVenues(); await loadRuns(); if (tab.value === 'lembur') loadOvertime() })
+onMounted(async () => { await loadVenues(); await loadRuns(); if (tab.value === 'lembur') { loadOvertime(); loadOtSummary() } })
 watch([venueId], loadRuns)
 
 // ---- Tab Lembur (terpisah — pencatatan manual + approval, belum masuk hitungan gaji) ----
 const tab = ref(route.query.tab === 'lembur' ? 'lembur' : 'payroll') // 'payroll' | 'lembur'
 const otRows = ref([])
 const otRun = ref({ status: 'draft' })
+const otSummary = ref({ draft: { count: 0, total: 0 }, submitted: { count: 0, total: 0 }, approved: { count: 0, total: 0 }, rejected: { count: 0, total: 0 } })
+async function loadOtSummary() {
+  try { const { data } = await client.get('/payroll/overtime/summary'); otSummary.value = data.summary } catch (_) { /* abaikan */ }
+}
 const otLoading = ref(false)
 const otSaving = ref(false)
 const otBusy = ref(false)
@@ -86,6 +90,7 @@ async function saveAllOvertime() {
       items: otRows.value.map((r) => ({ employee_id: r.employee_id, amount: Number(r.amount) || 0, note: r.note || null })),
     })
     if (data.run) otRun.value = data.run
+    loadOtSummary()
     flash(`Lembur tersimpan (${data.saved} karyawan)`)
   } catch (e) { alert(e?.response?.data?.message || 'Gagal menyimpan.') } finally { otSaving.value = false }
 }
@@ -98,6 +103,7 @@ async function otAction(action, extra = {}) {
     const { data } = await client.post(`/payroll/overtime/${action}`, { venue_id: vid, period_year, period_month, ...extra })
     if (data.run) otRun.value = data.run
     await loadOvertime()
+    loadOtSummary()
     flash('Berhasil')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { otBusy.value = false }
 }
@@ -107,7 +113,7 @@ function submitOvertime() {
 }
 function rejectOvertime() { const reason = prompt('Alasan penolakan:'); if (reason !== null) otAction('reject', { reason }) }
 // muat data lembur saat pindah ke tab-nya / ganti venue-periode saat di tab itu
-watch(tab, (t) => { if (t === 'lembur') loadOvertime() })
+watch(tab, (t) => { if (t === 'lembur') { loadOvertime(); loadOtSummary() } })
 watch([venueId, period], () => { if (tab.value === 'lembur') loadOvertime() })
 
 async function generate() {
@@ -272,6 +278,26 @@ function slip(it) {
 
     <!-- ================= TAB LEMBUR ================= -->
     <div v-show="tab === 'lembur'">
+      <!-- Stiker ringkasan per status pengajuan lembur -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Draft ({{ otSummary.draft.count }})</p>
+          <p class="text-lg font-bold text-slate-600">{{ rupiah(otSummary.draft.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Menunggu ({{ otSummary.submitted.count }})</p>
+          <p class="text-lg font-bold text-amber-600">{{ rupiah(otSummary.submitted.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Disetujui ({{ otSummary.approved.count }})</p>
+          <p class="text-lg font-bold text-emerald-600">{{ rupiah(otSummary.approved.total) }}</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border p-4">
+          <p class="text-xs text-slate-400 mb-1">Ditolak ({{ otSummary.rejected.count }})</p>
+          <p class="text-lg font-bold text-red-600">{{ rupiah(otSummary.rejected.total) }}</p>
+        </div>
+      </div>
+
       <p v-if="!isManager && !venueId" class="text-sm text-amber-600 bg-amber-50 rounded-lg px-4 py-3">
         Pilih venue tertentu (bukan "Semua venue") untuk menampilkan karyawan.
       </p>

@@ -360,6 +360,26 @@ def overtime_pending_count():
     return jsonify(count=q.count()), 200
 
 
+@payroll_bp.get("/overtime/summary")
+@jwt_required()
+@VIEW
+def overtime_summary():
+    """Ringkasan pengajuan lembur per status (jumlah + total Rp), sesuai scope —
+    utk kartu 'stiker per kategori' di tab Lembur."""
+    forced = _forced_venue()
+    q = OvertimeRun.query
+    if forced is not None:
+        q = q.filter_by(venue_id=forced)
+    out = {s: {"count": 0, "total": 0.0} for s in ("draft", "submitted", "approved", "rejected")}
+    for r in q.all():
+        s = r.status if r.status in out else "draft"
+        out[s]["count"] += 1
+        out[s]["total"] += float(r.total_amount or 0)
+    for s in out:
+        out[s]["total"] = round(out[s]["total"], 2)
+    return jsonify(summary=out), 200
+
+
 def _transition(rid, allowed_from, new_status, extra=None):
     r = db.session.get(PayrollRun, rid)
     if not r:
