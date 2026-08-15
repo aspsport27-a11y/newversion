@@ -360,6 +360,76 @@ def overtime_pending_count():
     return jsonify(count=q.count()), 200
 
 
+@payroll_bp.get("/overtime/runs")
+@jwt_required()
+@VIEW
+def overtime_runs_list():
+    """Daftar batch lembur (baris seperti payroll) — venue, periode, status, total,
+    jumlah karyawan terisi. Scope venue seperti payroll."""
+    forced = _forced_venue()
+    q = OvertimeRun.query
+    if forced is not None:
+        q = q.filter_by(venue_id=forced)
+    elif request.args.get("venue_id", type=int):
+        q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
+    runs = q.order_by(
+        OvertimeRun.period_year.desc(), OvertimeRun.period_month.desc(), OvertimeRun.id.desc()
+    ).all()
+    out = []
+    for r in runs:
+        d = r.to_dict()
+        d["employee_count"] = Overtime.query.filter_by(
+            venue_id=r.venue_id, period_year=r.period_year, period_month=r.period_month
+        ).count()
+        out.append(d)
+    return jsonify(count=len(out), runs=out), 200
+
+
+@payroll_bp.post("/overtime/runs")
+@jwt_required()
+@CREATE
+def overtime_run_create():
+    """Buat batch lembur (draft) utk venue+periode — mirip 'Generate Gaji'."""
+    d = request.get_json(silent=True) or {}
+    year, month = d.get("period_year"), d.get("period_month")
+    forced = _forced_venue()
+    vid = forced if forced is not None else d.get("venue_id")
+    if not vid or not year or not month:
+        return _err("venue & periode wajib")
+    if not db.session.get(Venue, vid):
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    if OvertimeRun.query.filter_by(venue_id=vid, period_year=int(year), period_month=int(month)).first():
+        return _err("Lembur periode ini sudah ada", "duplicate", 409)
+    if not Employee.query.filter_by(venue_id=vid, status="active").first():
+        return _err("Tidak ada karyawan aktif di venue ini")
+    run = OvertimeRun(venue_id=vid, period_year=int(year), period_month=int(month),
+                      status="draft", created_by=_user().id)
+    db.session.add(run)
+    db.session.commit()
+    return jsonify(run=run.to_dict()), 201
+
+
+@payroll_bp.delete("/overtime/runs/<int:rid>")
+@jwt_required()
+@CREATE
+def overtime_run_delete(rid):
+    """Hapus batch lembur + entrinya — hanya draft/rejected (belum diajukan)."""
+    run = db.session.get(OvertimeRun, rid)
+    if not run:
+        return _err("Tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and run.venue_id != forced:
+        return _err("Bukan lembur venue Anda", "forbidden", 403)
+    if run.status in ("submitted", "approved"):
+        return _err("Sudah diajukan/disetujui — tak bisa dihapus", "locked", 409)
+    Overtime.query.filter_by(
+        venue_id=run.venue_id, period_year=run.period_year, period_month=run.period_month
+    ).delete()
+    db.session.delete(run)
+    db.session.commit()
+    return jsonify(ok=True), 200
+
+
 @payroll_bp.get("/overtime/summary")
 @jwt_required()
 @VIEW
