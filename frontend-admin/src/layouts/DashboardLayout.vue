@@ -20,7 +20,8 @@ const showUserMenu = ref(false)
 const showNotif = ref(false)
 const procPending = ref({ sale: 0, ops: 0 })
 const opsPending = ref(0)
-const notifTotal = computed(() => procPending.value.sale + procPending.value.ops + opsPending.value)
+const otPending = ref(0)
+const notifTotal = computed(() => procPending.value.sale + procPending.value.ops + opsPending.value + otPending.value)
 let procPendingTimer = null
 async function loadProcPending() {
   if (auth.hasPerm('proc.view')) {
@@ -37,6 +38,13 @@ async function loadProcPending() {
     try {
       const { data } = await client.get('/ops/requests')
       opsPending.value = data.requests.filter((r) => r.status !== 'disbursed' && r.status !== 'rejected').length
+    } catch (_) { /* diam-diam gagal, bukan fitur kritis */ }
+  }
+  // pengajuan lembur menunggu persetujuan — cuma relevan utk yg bisa approve (HO)
+  if (auth.hasPerm('payroll.approve')) {
+    try {
+      const { data } = await client.get('/payroll/overtime/pending-count')
+      otPending.value = data.count
     } catch (_) { /* diam-diam gagal, bukan fitur kritis */ }
   }
 }
@@ -224,7 +232,7 @@ function toggleGroup(label) {
         <button class="lg:hidden text-2xl" @click="sidebarOpen = true">☰</button>
         <div class="flex-1" />
         <div class="flex items-center gap-3">
-          <div v-if="auth.hasPerm('proc.view') || auth.hasPerm('ops.view')" class="relative">
+          <div v-if="auth.hasPerm('proc.view') || auth.hasPerm('ops.view') || auth.hasPerm('payroll.approve')" class="relative">
             <div v-if="showNotif" class="fixed inset-0 z-30" @click="showNotif = false" />
             <button
               @click="showNotif = !showNotif"
@@ -275,9 +283,19 @@ function toggleGroup(label) {
                   :to="{ name: 'operational' }"
                   @click="showNotif = false"
                   class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
+                  :class="{ 'border-b': otPending > 0 }"
                 >
                   <span class="text-sm text-slate-700">💰 Operasional</span>
                   <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ opsPending }} menunggu</span>
+                </RouterLink>
+                <RouterLink
+                  v-if="otPending > 0"
+                  :to="{ name: 'payroll', query: { tab: 'lembur' } }"
+                  @click="showNotif = false"
+                  class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
+                >
+                  <span class="text-sm text-slate-700">🕐 Lembur</span>
+                  <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ otPending }} menunggu</span>
                 </RouterLink>
               </template>
             </div>

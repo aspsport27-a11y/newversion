@@ -1,10 +1,12 @@
 <script setup>
 import { ref, onMounted, watch, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
 const auth = useAuthStore()
+const route = useRoute()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const isApprover = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
 const canRevert = computed(() => auth.hasPerm('payroll.approve'))
@@ -48,27 +50,33 @@ async function loadRuns() {
   try { const { data } = await client.get('/payroll/runs', { params }); runs.value = data.runs }
   finally { loading.value = false }
 }
-onMounted(async () => { await loadVenues(); await loadRuns() })
+onMounted(async () => { await loadVenues(); await loadRuns(); if (tab.value === 'lembur') loadOvertime() })
 watch([venueId], loadRuns)
 
-// ---- Tab Lembur (terpisah — pencatatan manual, belum masuk hitungan gaji) ----
-const tab = ref('payroll') // 'payroll' | 'lembur'
+// ---- Tab Lembur (terpisah — pencatatan manual + approval, belum masuk hitungan gaji) ----
+const tab = ref(route.query.tab === 'lembur' ? 'lembur' : 'payroll') // 'payroll' | 'lembur'
 const otRows = ref([])
+const otRun = ref({ status: 'draft' })
 const otLoading = ref(false)
 const otSaving = ref(false)
+const otBusy = ref(false)
+const canEditOt = computed(() => auth.hasPerm('payroll.generate'))
+const otEditable = computed(() => ['draft', 'rejected'].includes(otRun.value?.status || 'draft') && canEditOt.value)
 const otTotal = computed(() => otRows.value.reduce((s, r) => s + (Number(r.amount) || 0), 0))
+function otVenue() { return isManager.value ? auth.user?.venue_id : venueId.value }
 async function loadOvertime() {
-  const vid = isManager.value ? auth.user?.venue_id : venueId.value
-  if (!vid) { otRows.value = []; return }
+  const vid = otVenue()
+  if (!vid) { otRows.value = []; otRun.value = { status: 'draft' }; return }
   otLoading.value = true
   const { period_year, period_month } = ym()
   try {
     const { data } = await client.get('/payroll/overtime', { params: { venue_id: vid, year: period_year, month: period_month } })
     otRows.value = data.items
-  } catch (e) { otRows.value = [] } finally { otLoading.value = false }
+    otRun.value = data.run || { status: 'draft' }
+  } catch (e) { otRows.value = []; otRun.value = { status: 'draft' } } finally { otLoading.value = false }
 }
 async function saveAllOvertime() {
-  const vid = isManager.value ? auth.user?.venue_id : venueId.value
+  const vid = otVenue()
   if (!vid || !otRows.value.length) return
   otSaving.value = true
   const { period_year, period_month } = ym()
@@ -77,9 +85,27 @@ async function saveAllOvertime() {
       venue_id: vid, period_year, period_month,
       items: otRows.value.map((r) => ({ employee_id: r.employee_id, amount: Number(r.amount) || 0, note: r.note || null })),
     })
+    if (data.run) otRun.value = data.run
     flash(`Lembur tersimpan (${data.saved} karyawan)`)
   } catch (e) { alert(e?.response?.data?.message || 'Gagal menyimpan.') } finally { otSaving.value = false }
 }
+async function otAction(action, extra = {}) {
+  const vid = otVenue()
+  if (!vid) return
+  otBusy.value = true
+  const { period_year, period_month } = ym()
+  try {
+    const { data } = await client.post(`/payroll/overtime/${action}`, { venue_id: vid, period_year, period_month, ...extra })
+    if (data.run) otRun.value = data.run
+    await loadOvertime()
+    flash('Berhasil')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { otBusy.value = false }
+}
+function submitOvertime() {
+  if (!window.confirm('Ajukan lembur periode ini ke HO? Setelah diajukan tidak bisa diubah sampai ditinjau.')) return
+  otAction('submit')
+}
+function rejectOvertime() { const reason = prompt('Alasan penolakan:'); if (reason !== null) otAction('reject', { reason }) }
 // muat data lembur saat pindah ke tab-nya / ganti venue-periode saat di tab itu
 watch(tab, (t) => { if (t === 'lembur') loadOvertime() })
 watch([venueId, period], () => { if (tab.value === 'lembur') loadOvertime() })
@@ -250,16 +276,38 @@ function slip(it) {
         Pilih venue tertentu (bukan "Semua venue") untuk menampilkan karyawan.
       </p>
       <div v-else class="bg-white rounded-xl shadow-sm border overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-3 border-b bg-slate-50">
-          <p class="text-sm text-slate-500">Entri lembur manual — periode {{ MONTHS[ym().period_month] }} {{ ym().period_year }}. Nilai dalam Rupiah.</p>
-          <div class="flex items-center gap-4">
+        <div class="flex items-center justify-between flex-wrap gap-3 px-4 py-3 border-b bg-slate-50">
+          <div class="flex items-center gap-2">
+            <p class="text-sm text-slate-500">Lembur — {{ MONTHS[ym().period_month] }} {{ ym().period_year }} (Rupiah)</p>
+            <span :class="statusMap[otRun.status]?.[1] || 'bg-slate-100 text-slate-600'" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[otRun.status]?.[0] || 'Draft' }}</span>
+          </div>
+          <div class="flex items-center gap-3">
             <p class="text-sm font-semibold text-slate-700">Total: {{ rupiah(otTotal) }}</p>
-            <button @click="saveAllOvertime" :disabled="otSaving || !otRows.length"
-              class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">
-              {{ otSaving ? 'Menyimpan…' : 'Simpan Semua' }}
-            </button>
+            <!-- Manajer/unit: simpan + ajukan (saat draft/ditolak) -->
+            <template v-if="otEditable">
+              <button @click="saveAllOvertime" :disabled="otSaving || !otRows.length"
+                class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">
+                {{ otSaving ? 'Menyimpan…' : 'Simpan Semua' }}
+              </button>
+              <button @click="submitOvertime" :disabled="otBusy || !otTotal"
+                :title="!otTotal ? 'Isi & simpan nilai lembur dulu' : ''"
+                class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">
+                Ajukan ke HO
+              </button>
+            </template>
+            <!-- HO: setujui / tolak (saat submitted) -->
+            <template v-else-if="otRun.status === 'submitted' && isApprover">
+              <button @click="otAction('approve')" :disabled="otBusy" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Setujui</button>
+              <button @click="rejectOvertime" :disabled="otBusy" class="bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Tolak</button>
+            </template>
+            <span v-else-if="otRun.status === 'submitted'" class="text-sm text-amber-600">Menunggu persetujuan HO</span>
           </div>
         </div>
+
+        <p v-if="otRun.status === 'rejected' && otRun.rejection_reason" class="text-sm text-red-600 bg-red-50 px-4 py-2">
+          Ditolak HO: {{ otRun.rejection_reason }}
+        </p>
+
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-left"><tr>
@@ -275,12 +323,12 @@ function slip(it) {
                 <td class="px-4 py-2.5 text-slate-700">{{ row.employee_name }}</td>
                 <td class="px-4 py-2.5 text-slate-500 text-xs">{{ row.position || '—' }}</td>
                 <td class="px-4 py-2 text-right">
-                  <input v-model.number="row.amount" type="number" min="0" step="1000"
-                    class="w-32 text-right rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500" />
+                  <input v-model.number="row.amount" type="number" min="0" step="1000" :disabled="!otEditable"
+                    class="w-32 text-right rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 disabled:text-slate-500" />
                 </td>
                 <td class="px-4 py-2">
-                  <input v-model="row.note" type="text" placeholder="opsional"
-                    class="w-full min-w-[8rem] rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500" />
+                  <input v-model="row.note" type="text" placeholder="opsional" :disabled="!otEditable"
+                    class="w-full min-w-[8rem] rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 disabled:text-slate-500" />
                 </td>
               </tr>
             </tbody>

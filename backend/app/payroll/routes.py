@@ -12,7 +12,7 @@ from werkzeug.utils import secure_filename
 from ..extensions import db
 from ..models import Employee, EmployeeDebt, User, Venue
 from ..security import ROLE_MANAGER, require_perm
-from .models import Overtime, PayrollAttachment, PayrollItem, PayrollRun
+from .models import Overtime, OvertimeRun, PayrollAttachment, PayrollItem, PayrollRun
 
 ALLOWED_EXT = {"jpg", "jpeg", "png", "webp", "gif", "pdf"}
 
@@ -167,14 +167,31 @@ def item_update(iid):
 
 
 # ------------------------------------------------------------------
-# Lembur (tab terpisah) — entri manual per karyawan per periode.
-# Belum diikat ke perhitungan gaji; baru pencatatan.
+# Lembur (tab terpisah) — entri manual per karyawan per periode, dgn alur
+# approval seperti payroll: draft → submitted (diajukan ke HO) → approved/rejected.
+# Belum diikat ke perhitungan gaji; baru pencatatan + approval.
 # ------------------------------------------------------------------
+def _ot_run(vid, year, month, create=False):
+    r = OvertimeRun.query.filter_by(venue_id=vid, period_year=int(year), period_month=int(month)).first()
+    if not r and create:
+        r = OvertimeRun(venue_id=vid, period_year=int(year), period_month=int(month),
+                        status="draft", created_by=_user().id)
+        db.session.add(r)
+    return r
+
+
+def _ot_total(vid, year, month):
+    t = db.session.query(func.coalesce(func.sum(Overtime.amount), 0)).filter_by(
+        venue_id=vid, period_year=int(year), period_month=int(month)).scalar() or 0
+    return round(float(t), 2)
+
+
 @payroll_bp.get("/overtime")
 @jwt_required()
 @VIEW
 def overtime_list():
-    """Daftar karyawan aktif di venue + nilai lembur periode itu (0 bila belum ada)."""
+    """Daftar karyawan aktif di venue + nilai lembur periode itu (0 bila belum ada),
+    beserta status batch (draft/submitted/approved/rejected)."""
     forced = _forced_venue()
     vid = forced if forced is not None else request.args.get("venue_id", type=int)
     if not vid:
@@ -189,66 +206,40 @@ def overtime_list():
         o.employee_id: o
         for o in Overtime.query.filter_by(venue_id=vid, period_year=year, period_month=month).all()
     }
-    rows = []
-    total = 0.0
+    rows, total = [], 0.0
     for e in emps:
         o = existing.get(e.id)
         amt = float(o.amount) if o else 0.0
         total += amt
         rows.append({
-            "employee_id": e.id,
-            "employee_name": e.name,
-            "position": e.position,
-            "amount": amt,
-            "note": o.note if o else None,
+            "employee_id": e.id, "employee_name": e.name, "position": e.position,
+            "amount": amt, "note": o.note if o else None,
         })
-    return jsonify(count=len(rows), total=round(total, 2), items=rows), 200
-
-
-@payroll_bp.put("/overtime")
-@jwt_required()
-@CREATE
-def overtime_save():
-    """Simpan (upsert) nilai lembur 1 karyawan utk 1 periode."""
-    d = request.get_json(silent=True) or {}
-    emp_id = d.get("employee_id")
-    year, month = d.get("period_year"), d.get("period_month")
-    if not emp_id or not year or not month:
-        return _err("employee_id & periode wajib")
-    emp = db.session.get(Employee, emp_id)
-    if not emp:
-        return _err("Karyawan tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and emp.venue_id != forced:
-        return _err("Bukan karyawan venue Anda", "forbidden", 403)
-
-    o = Overtime.query.filter_by(
-        employee_id=emp_id, period_year=int(year), period_month=int(month),
-    ).first()
-    if not o:
-        o = Overtime(
-            employee_id=emp_id, venue_id=emp.venue_id,
-            period_year=int(year), period_month=int(month),
-        )
-        db.session.add(o)
-    o.amount = _D(d.get("amount"))
-    o.note = (d.get("note") or None)
-    o.updated_by = _user().id
-    o.updated_at = datetime.utcnow()
-    db.session.commit()
-    return jsonify(ok=True, amount=float(o.amount)), 200
+    run = _ot_run(vid, year, month)
+    return jsonify(
+        count=len(rows), total=round(total, 2), items=rows,
+        run=run.to_dict() if run else {"status": "draft", "total_amount": round(total, 2)},
+    ), 200
 
 
 @payroll_bp.put("/overtime/bulk")
 @jwt_required()
 @CREATE
 def overtime_bulk():
-    """Simpan banyak entri lembur sekaligus (1 tombol 'Simpan Semua')."""
+    """Simpan banyak entri lembur sekaligus (tombol 'Simpan Semua'). Hanya boleh
+    saat status draft/rejected (belum diajukan / dikembalikan)."""
     d = request.get_json(silent=True) or {}
     year, month = d.get("period_year"), d.get("period_month")
     if not year or not month:
         return _err("periode wajib")
     forced = _forced_venue()
+    vid = forced if forced is not None else d.get("venue_id")
+    if not vid:
+        return _err("venue wajib")
+    run = _ot_run(vid, year, month)
+    if run and run.status in ("submitted", "approved"):
+        return _err("Lembur sudah diajukan/disetujui — tak bisa diubah", "locked", 409)
+
     uid = _user().id
     saved = 0
     for it in (d.get("items") or []):
@@ -266,18 +257,107 @@ def overtime_bulk():
         if not o:
             if amount == 0 and not note:
                 continue  # jangan bikin entri kosong (0 tanpa catatan)
-            o = Overtime(
-                employee_id=emp_id, venue_id=emp.venue_id,
-                period_year=int(year), period_month=int(month),
-            )
+            o = Overtime(employee_id=emp_id, venue_id=emp.venue_id,
+                         period_year=int(year), period_month=int(month))
             db.session.add(o)
         o.amount = amount
         o.note = note
         o.updated_by = uid
         o.updated_at = datetime.utcnow()
         saved += 1
+
+    run = _ot_run(vid, year, month, create=True)
+    run.status = "draft"  # simpan ulang setelah ditolak → balik draft
+    run.rejection_reason = None
+    db.session.flush()
+    run.total_amount = _ot_total(vid, year, month)
+    run.updated_at = datetime.utcnow()
     db.session.commit()
-    return jsonify(ok=True, saved=saved), 200
+    return jsonify(ok=True, saved=saved, run=run.to_dict()), 200
+
+
+@payroll_bp.post("/overtime/submit")
+@jwt_required()
+@CREATE
+def overtime_submit():
+    """Ajukan lembur venue+periode ke HO (draft/rejected → submitted)."""
+    d = request.get_json(silent=True) or {}
+    year, month = d.get("period_year"), d.get("period_month")
+    forced = _forced_venue()
+    vid = forced if forced is not None else d.get("venue_id")
+    if not vid or not year or not month:
+        return _err("venue & periode wajib")
+    run = _ot_run(vid, year, month, create=True)
+    if run.status not in ("draft", "rejected"):
+        return _err(f"Status '{run.status}' tak bisa diajukan", "bad_status", 409)
+    db.session.flush()
+    run.total_amount = _ot_total(vid, year, month)
+    if run.total_amount <= 0:
+        return _err("Belum ada nilai lembur untuk diajukan")
+    run.status = "submitted"
+    run.submitted_at = datetime.utcnow()
+    run.rejection_reason = None
+    run.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(run=run.to_dict()), 200
+
+
+def _ot_review(new_status, allowed_from="submitted"):
+    d = request.get_json(silent=True) or {}
+    vid = d.get("venue_id")
+    year, month = d.get("period_year"), d.get("period_month")
+    if not vid or not year or not month:
+        return None, _err("venue & periode wajib")
+    run = _ot_run(vid, year, month)
+    if not run:
+        return None, _err("Pengajuan lembur tidak ditemukan", "not_found", 404)
+    if run.status != allowed_from:
+        return None, _err(f"Status '{run.status}' tak bisa ke '{new_status}'", "bad_status", 409)
+    return run, None
+
+
+@payroll_bp.post("/overtime/approve")
+@jwt_required()
+@APPROVE
+def overtime_approve():
+    run, err = _ot_review("approved")
+    if err:
+        return err
+    run.status = "approved"
+    run.approved_by = _user().id
+    run.approved_at = datetime.utcnow()
+    run.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(run=run.to_dict()), 200
+
+
+@payroll_bp.post("/overtime/reject")
+@jwt_required()
+@APPROVE
+def overtime_reject():
+    run, err = _ot_review("rejected")
+    if err:
+        return err
+    d = request.get_json(silent=True) or {}
+    run.status = "rejected"
+    run.rejection_reason = d.get("reason")
+    run.approved_by = _user().id
+    run.approved_at = datetime.utcnow()
+    run.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(run=run.to_dict()), 200
+
+
+@payroll_bp.get("/overtime/pending-count")
+@jwt_required()
+@VIEW
+def overtime_pending_count():
+    """Jumlah pengajuan lembur berstatus submitted (utk notifikasi HO)."""
+    forced = _forced_venue()
+    q = OvertimeRun.query.filter_by(status="submitted")
+    if forced is not None:
+        q = q.filter_by(venue_id=forced)
+    return jsonify(count=q.count()), 200
 
 
 def _transition(rid, allowed_from, new_status, extra=None):

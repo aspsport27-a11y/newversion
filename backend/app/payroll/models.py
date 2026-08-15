@@ -77,6 +77,41 @@ class PayrollItem(db.Model):
         }
 
 
+class OvertimeRun(db.Model):
+    """Batch lembur per venue+periode dgn status approval (migration 052) —
+    konsep sama PayrollRun: draft → submitted → approved/rejected."""
+    __tablename__ = "overtime_runs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
+    period_year = db.Column(db.Integer, nullable=False)
+    period_month = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(12), nullable=False, default="draft")  # draft|submitted|approved|rejected
+    total_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    submitted_at = db.Column(db.DateTime)
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    approved_at = db.Column(db.DateTime)
+    rejection_reason = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("venue_id", "period_year", "period_month", name="uq_overtime_run_venue_period"),
+    )
+
+    def to_dict(self):
+        f = lambda v: float(v) if v is not None else None
+        return {
+            "id": self.id, "venue_id": self.venue_id,
+            "period_year": self.period_year, "period_month": self.period_month,
+            "status": self.status, "total_amount": f(self.total_amount),
+            "rejection_reason": self.rejection_reason,
+            "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+        }
+
+
 class Overtime(db.Model):
     """Entri lembur manual per karyawan per periode (migration 051). TERPISAH dari
     payroll_items — baru pencatatan, belum diikat ke perhitungan gaji."""
