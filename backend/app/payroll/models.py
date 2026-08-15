@@ -84,6 +84,7 @@ class OvertimeRun(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
+    category = db.Column(db.String(20), nullable=False, default="lembur")  # lembur|reward|tambahan
     period_year = db.Column(db.Integer, nullable=False)
     period_month = db.Column(db.Integer, nullable=False)
     status = db.Column(db.String(12), nullable=False, default="draft")  # draft|submitted|approved|rejected
@@ -97,13 +98,13 @@ class OvertimeRun(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        db.UniqueConstraint("venue_id", "period_year", "period_month", name="uq_overtime_run_venue_period"),
+        db.UniqueConstraint("venue_id", "period_year", "period_month", "category", name="uq_overtime_run_cat"),
     )
 
     def to_dict(self):
         f = lambda v: float(v) if v is not None else None
         return {
-            "id": self.id, "venue_id": self.venue_id,
+            "id": self.id, "venue_id": self.venue_id, "category": self.category,
             "period_year": self.period_year, "period_month": self.period_month,
             "status": self.status, "total_amount": f(self.total_amount),
             "rejection_reason": self.rejection_reason,
@@ -120,6 +121,7 @@ class Overtime(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
     venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="SET NULL"))
+    category = db.Column(db.String(20), nullable=False, default="lembur")  # lembur|reward|tambahan
     period_year = db.Column(db.Integer, nullable=False)
     period_month = db.Column(db.Integer, nullable=False)
     amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
@@ -129,7 +131,7 @@ class Overtime(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        db.UniqueConstraint("employee_id", "period_year", "period_month", name="uq_overtime_emp_period"),
+        db.UniqueConstraint("employee_id", "period_year", "period_month", "category", name="uq_overtime_entry_cat"),
     )
 
 

@@ -20,8 +20,11 @@ const showUserMenu = ref(false)
 const showNotif = ref(false)
 const procPending = ref({ sale: 0, ops: 0 })
 const opsPending = ref(0)
-const otPending = ref(0)
-const notifTotal = computed(() => procPending.value.sale + procPending.value.ops + opsPending.value + otPending.value)
+const otPending = ref({ lembur: 0, reward: 0, tambahan: 0 })
+const OT_LABELS = { lembur: 'Lembur', reward: 'Reward', tambahan: 'Pekerjaan Tambahan' }
+const otPendingRows = computed(() => Object.entries(otPending.value).filter(([, n]) => n > 0).map(([k, n]) => ({ key: k, label: OT_LABELS[k], count: n })))
+const otPendingTotal = computed(() => Object.values(otPending.value).reduce((a, b) => a + b, 0))
+const notifTotal = computed(() => procPending.value.sale + procPending.value.ops + opsPending.value + otPendingTotal.value)
 let procPendingTimer = null
 async function loadProcPending() {
   if (auth.hasPerm('proc.view')) {
@@ -40,11 +43,11 @@ async function loadProcPending() {
       opsPending.value = data.requests.filter((r) => r.status !== 'disbursed' && r.status !== 'rejected').length
     } catch (_) { /* diam-diam gagal, bukan fitur kritis */ }
   }
-  // pengajuan lembur menunggu persetujuan — cuma relevan utk yg bisa approve (HO)
+  // pengajuan lembur/reward/tambahan menunggu persetujuan — relevan utk HO
   if (auth.hasPerm('payroll.approve')) {
     try {
       const { data } = await client.get('/payroll/overtime/pending-count')
-      otPending.value = data.count
+      if (data.counts) otPending.value = data.counts
     } catch (_) { /* diam-diam gagal, bukan fitur kritis */ }
   }
 }
@@ -283,19 +286,21 @@ function toggleGroup(label) {
                   :to="{ name: 'operational' }"
                   @click="showNotif = false"
                   class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
-                  :class="{ 'border-b': otPending > 0 }"
+                  :class="{ 'border-b': otPendingTotal > 0 }"
                 >
                   <span class="text-sm text-slate-700">💰 Operasional</span>
                   <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ opsPending }} menunggu</span>
                 </RouterLink>
                 <RouterLink
-                  v-if="otPending > 0"
-                  :to="{ name: 'payroll', query: { tab: 'lembur' } }"
+                  v-for="(row, i) in otPendingRows"
+                  :key="row.key"
+                  :to="{ name: 'payroll', query: { tab: row.key } }"
                   @click="showNotif = false"
                   class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
+                  :class="{ 'border-b': i < otPendingRows.length - 1 }"
                 >
-                  <span class="text-sm text-slate-700">🕐 Lembur</span>
-                  <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ otPending }} menunggu</span>
+                  <span class="text-sm text-slate-700">🕐 {{ row.label }}</span>
+                  <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ row.count }} menunggu</span>
                 </RouterLink>
               </template>
             </div>

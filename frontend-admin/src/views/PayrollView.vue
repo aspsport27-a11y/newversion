@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
+import ManualEntryTab from '../components/ManualEntryTab.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -63,102 +64,18 @@ async function loadRuns() {
   try { const { data } = await client.get('/payroll/runs', { params }); runs.value = data.runs }
   finally { loading.value = false }
 }
-onMounted(async () => { await loadVenues(); await loadRuns(); if (tab.value === 'lembur') { loadOtRuns(); loadOtSummary() } })
+onMounted(async () => { await loadVenues(); await loadRuns() })
 watch([venueId], loadRuns)
 
 // ---- Tab Lembur (baris seperti payroll: buat → baris → Detail utk isi/ajukan) ----
-const tab = ref(route.query.tab === 'lembur' ? 'lembur' : 'payroll') // 'payroll' | 'lembur'
+const tab = ref(['lembur', 'reward', 'tambahan'].includes(route.query.tab) ? route.query.tab : 'payroll')
 const canEditOt = computed(() => auth.hasPerm('payroll.generate'))
-
-// daftar batch lembur + ringkasan
-const otRunsList = ref([])
-const otRunsLoading = ref(false)
-const otBusyCreate = ref(false)
-const otSummary = ref({ draft: { count: 0, total: 0 }, submitted: { count: 0, total: 0 }, approved: { count: 0, total: 0 }, rejected: { count: 0, total: 0 } })
-async function loadOtSummary() {
-  try { const { data } = await client.get('/payroll/overtime/summary'); otSummary.value = data.summary } catch (_) { /* abaikan */ }
-}
-async function loadOtRuns() {
-  otRunsLoading.value = true
-  const params = {}
-  if (!isManager.value && venueId.value) params.venue_id = venueId.value
-  try { const { data } = await client.get('/payroll/overtime/runs', { params }); otRunsList.value = data.runs }
-  catch (e) { otRunsList.value = [] } finally { otRunsLoading.value = false }
-}
-async function createOtRun() {
-  const vid = isManager.value ? auth.user?.venue_id : venueId.value
-  if (!vid) { alert('Pilih venue dulu (bukan "Semua venue") untuk membuat lembur.'); return }
-  otBusyCreate.value = true
-  const { period_year, period_month } = ym()
-  try {
-    const { data } = await client.post('/payroll/overtime/runs', { venue_id: vid, period_year, period_month })
-    await loadOtRuns(); loadOtSummary(); flash('Lembur dibuat')
-    if (data.run) openOtDetail(data.run)
-  } catch (e) { alert(e?.response?.data?.message || 'Gagal membuat.') } finally { otBusyCreate.value = false }
-}
-const canDeleteOtRun = (r) => ['draft', 'rejected'].includes(r.status)
-async function deleteOtRun(run, ev) {
-  ev?.stopPropagation()
-  if (!window.confirm(`Hapus lembur ${MONTHS[run.period_month]} ${run.period_year}?`)) return
-  try {
-    await client.delete(`/payroll/overtime/runs/${run.id}`)
-    if (otDetail.value?.id === run.id) otDetail.value = null
-    await loadOtRuns(); loadOtSummary(); flash('Lembur dihapus')
-  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
-}
-
-// --- detail modal (isi nilai + ajukan/setujui/tolak) ---
-const otDetail = ref(null) // batch yg dibuka: {id, venue_id, period_year, period_month, ...}
-const otRows = ref([])
-const otRun = ref({ status: 'draft' })
-const otLoading = ref(false)
-const otSaving = ref(false)
-const otBusy = ref(false)
-const otEditable = computed(() => ['draft', 'rejected'].includes(otRun.value?.status || 'draft') && canEditOt.value)
-const otTotal = computed(() => otRows.value.reduce((s, r) => s + (Number(r.amount) || 0), 0))
-async function openOtDetail(run) {
-  otDetail.value = { ...run }
-  otRows.value = []; otRun.value = { status: run.status }
-  otLoading.value = true
-  try {
-    const { data } = await client.get('/payroll/overtime', { params: { venue_id: run.venue_id, year: run.period_year, month: run.period_month } })
-    otRows.value = data.items
-    otRun.value = data.run || { status: 'draft' }
-  } catch (e) { /* abaikan */ } finally { otLoading.value = false }
-}
-async function saveAllOvertime() {
-  const d = otDetail.value
-  if (!d || !otRows.value.length) return
-  otSaving.value = true
-  try {
-    const { data } = await client.put('/payroll/overtime/bulk', {
-      venue_id: d.venue_id, period_year: d.period_year, period_month: d.period_month,
-      items: otRows.value.map((r) => ({ employee_id: r.employee_id, amount: Number(r.amount) || 0, note: r.note || null })),
-    })
-    if (data.run) otRun.value = data.run
-    loadOtRuns(); loadOtSummary()
-    flash(`Lembur tersimpan (${data.saved} karyawan)`)
-  } catch (e) { alert(e?.response?.data?.message || 'Gagal menyimpan.') } finally { otSaving.value = false }
-}
-async function otAction(action, extra = {}) {
-  const d = otDetail.value
-  if (!d) return
-  otBusy.value = true
-  try {
-    const { data } = await client.post(`/payroll/overtime/${action}`, { venue_id: d.venue_id, period_year: d.period_year, period_month: d.period_month, ...extra })
-    if (data.run) otRun.value = data.run
-    await loadOtRuns(); loadOtSummary()
-    flash('Berhasil')
-  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { otBusy.value = false }
-}
-function submitOvertime() {
-  if (!window.confirm('Ajukan lembur ini ke HO? Setelah diajukan tidak bisa diubah sampai ditinjau.')) return
-  otAction('submit')
-}
-function rejectOvertime() { const reason = prompt('Alasan penolakan:'); if (reason !== null) otAction('reject', { reason }) }
-
-watch(tab, (t) => { if (t === 'lembur') { loadOtRuns(); loadOtSummary() } })
-watch([venueId], () => { if (tab.value === 'lembur') loadOtRuns() })
+const MANUAL_TABS = [
+  { key: 'lembur', label: 'Lembur' },
+  { key: 'reward', label: 'Reward' },
+  { key: 'tambahan', label: 'Pekerjaan Tambahan' },
+]
+const activeManual = computed(() => MANUAL_TABS.find((t) => t.key === tab.value))
 
 async function generate() {
   if (!isManager.value && !venueId.value) { alert('Pilih venue dulu (bukan "Semua venue") untuk generate gaji.'); return }
@@ -278,14 +195,13 @@ function slip(it) {
         </select>
         <input v-model="period" type="month" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
         <button v-if="tab === 'payroll'" @click="generate" :disabled="busy || (!isManager && !venueId)" :title="(!isManager && !venueId) ? 'Pilih venue dulu (bukan Semua venue)' : ''" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Generate Gaji</button>
-        <button v-if="tab === 'lembur'" @click="createOtRun" :disabled="otBusyCreate || (!isManager && !venueId)" :title="(!isManager && !venueId) ? 'Pilih venue dulu (bukan Semua venue)' : ''" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Buat Lembur</button>
       </div>
     </div>
 
     <!-- Tabs -->
-    <div class="flex gap-1 mb-4 border-b">
+    <div class="flex gap-1 mb-4 border-b flex-wrap">
       <button @click="tab = 'payroll'" :class="tab === 'payroll' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Payroll</button>
-      <button @click="tab = 'lembur'" :class="tab === 'lembur' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Lembur</button>
+      <button v-for="t in MANUAL_TABS" :key="t.key" @click="tab = t.key" :class="tab === t.key ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">{{ t.label }}</button>
     </div>
 
     <p v-if="tab === 'payroll' && !isManager && !venueId" class="text-xs text-amber-600 -mt-1 mb-3">Pilih venue tertentu (bukan "Semua venue") untuk bisa generate gaji.</p>
@@ -347,128 +263,10 @@ function slip(it) {
       </div>
     </div>
 
-    <!-- ================= TAB LEMBUR ================= -->
-    <div v-show="tab === 'lembur'">
-      <!-- Stiker ringkasan per status pengajuan lembur -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-        <div class="bg-white rounded-xl shadow-sm border p-4">
-          <p class="text-xs text-slate-400 mb-1">Draft ({{ otSummary.draft.count }})</p>
-          <p class="text-lg font-bold text-slate-600">{{ rupiah(otSummary.draft.total) }}</p>
-        </div>
-        <div class="bg-white rounded-xl shadow-sm border p-4">
-          <p class="text-xs text-slate-400 mb-1">Menunggu ({{ otSummary.submitted.count }})</p>
-          <p class="text-lg font-bold text-amber-600">{{ rupiah(otSummary.submitted.total) }}</p>
-        </div>
-        <div class="bg-white rounded-xl shadow-sm border p-4">
-          <p class="text-xs text-slate-400 mb-1">Disetujui ({{ otSummary.approved.count }})</p>
-          <p class="text-lg font-bold text-emerald-600">{{ rupiah(otSummary.approved.total) }}</p>
-        </div>
-        <div class="bg-white rounded-xl shadow-sm border p-4">
-          <p class="text-xs text-slate-400 mb-1">Ditolak ({{ otSummary.rejected.count }})</p>
-          <p class="text-lg font-bold text-red-600">{{ rupiah(otSummary.rejected.total) }}</p>
-        </div>
-      </div>
-
-      <p v-if="!isManager && !venueId" class="text-xs text-amber-600 mb-3">Pilih venue tertentu (bukan "Semua venue") untuk membuat lembur baru.</p>
-
-      <!-- Daftar batch lembur (baris seperti payroll) -->
-      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-              <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
-              <th class="px-4 py-3 font-medium">Periode</th>
-              <th class="px-4 py-3 font-medium text-center">Karyawan</th>
-              <th class="px-4 py-3 font-medium text-right">Total</th>
-              <th class="px-4 py-3 font-medium text-center">Status</th>
-              <th class="px-4 py-3"></th>
-            </tr></thead>
-            <tbody>
-              <tr v-if="otRunsLoading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!otRunsList.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada lembur. Klik "Buat Lembur".</td></tr>
-              <tr v-for="r in otRunsList" :key="r.id" @click="openOtDetail(r)" class="border-t hover:bg-slate-50 cursor-pointer">
-                <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===r.venue_id)?.code || '—' }}</td>
-                <td class="px-4 py-3 text-slate-600">{{ MONTHS[r.period_month] }} {{ r.period_year }}</td>
-                <td class="px-4 py-3 text-center">{{ r.employee_count }}</td>
-                <td class="px-4 py-3 text-right font-medium">{{ rupiah(r.total_amount) }}</td>
-                <td class="px-4 py-3 text-center"><span :class="statusMap[r.status]?.[1] || 'bg-slate-100 text-slate-600'" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[r.status]?.[0] || 'Draft' }}</span></td>
-                <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
-                  <span class="text-brand-600">Detail</span>
-                  <button v-if="canDeleteOtRun(r) && canEditOt" @click="deleteOtRun(r, $event)" class="text-red-500 hover:underline ml-3">Hapus</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- Detail Lembur -->
-    <div v-if="otDetail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="otDetail = null">
-      <div class="bg-white w-full max-w-3xl rounded-2xl max-h-[92vh] overflow-auto">
-        <div class="flex justify-between items-start p-5 pb-3">
-          <div class="flex items-center gap-2">
-            <div>
-              <h3 class="text-lg font-bold text-slate-800">Lembur {{ MONTHS[otDetail.period_month] }} {{ otDetail.period_year }}</h3>
-              <p class="text-sm text-slate-500">{{ venues.find(v=>v.id===otDetail.venue_id)?.name || '' }}</p>
-            </div>
-            <span :class="statusMap[otRun.status]?.[1] || 'bg-slate-100 text-slate-600'" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[otRun.status]?.[0] || 'Draft' }}</span>
-          </div>
-          <button @click="otDetail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
-        </div>
-
-        <div class="flex items-center justify-between flex-wrap gap-3 px-5 py-2 bg-slate-50 border-y">
-          <p class="text-sm font-semibold text-slate-700">Total: {{ rupiah(otTotal) }}</p>
-          <div class="flex items-center gap-2">
-            <template v-if="otEditable">
-              <button @click="saveAllOvertime" :disabled="otSaving || !otRows.length"
-                class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">
-                {{ otSaving ? 'Menyimpan…' : 'Simpan Semua' }}
-              </button>
-              <button @click="submitOvertime" :disabled="otBusy || !otTotal" :title="!otTotal ? 'Isi & simpan nilai lembur dulu' : ''"
-                class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Ajukan ke HO</button>
-            </template>
-            <template v-else-if="otRun.status === 'submitted' && isApprover">
-              <button @click="otAction('approve')" :disabled="otBusy" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Setujui</button>
-              <button @click="rejectOvertime" :disabled="otBusy" class="bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">Tolak</button>
-            </template>
-            <span v-else-if="otRun.status === 'submitted'" class="text-sm text-amber-600">Menunggu persetujuan HO</span>
-          </div>
-        </div>
-
-        <p v-if="otRun.status === 'rejected' && otRun.rejection_reason" class="text-sm text-red-600 bg-red-50 px-5 py-2">
-          Ditolak HO: {{ otRun.rejection_reason }}
-        </p>
-
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
-              <th class="px-5 py-3 font-medium">Karyawan</th>
-              <th class="px-4 py-3 font-medium">Jabatan</th>
-              <th class="px-4 py-3 font-medium text-right">Nilai Lembur (Rp)</th>
-              <th class="px-4 py-3 font-medium">Catatan</th>
-            </tr></thead>
-            <tbody>
-              <tr v-if="otLoading"><td colspan="4" class="px-5 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!otRows.length"><td colspan="4" class="px-5 py-8 text-center text-slate-400">Tidak ada karyawan aktif di venue ini.</td></tr>
-              <tr v-for="row in otRows" :key="row.employee_id" class="border-t">
-                <td class="px-5 py-2.5 text-slate-700">{{ row.employee_name }}</td>
-                <td class="px-4 py-2.5 text-slate-500 text-xs">{{ row.position || '—' }}</td>
-                <td class="px-4 py-2 text-right">
-                  <input v-model.number="row.amount" type="number" min="0" step="1000" :disabled="!otEditable"
-                    class="w-32 text-right rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 disabled:text-slate-500" />
-                </td>
-                <td class="px-4 py-2">
-                  <input v-model="row.note" type="text" placeholder="opsional" :disabled="!otEditable"
-                    class="w-full min-w-[8rem] rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500 disabled:bg-slate-50 disabled:text-slate-500" />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div class="p-4"></div>
-      </div>
-    </div>
+    <!-- ===== TAB LEMBUR / REWARD / PEKERJAAN TAMBAHAN (konsep sama, 1 komponen) ===== -->
+    <ManualEntryTab v-if="activeManual" :key="activeManual.key"
+      :category="activeManual.key" :label="activeManual.label" :venue-id="venueId" :period="period"
+      :is-manager="isManager" :is-approver="isApprover" :can-edit="canEditOt" :venues="venues" />
 
     <!-- Detail -->
     <div v-if="detail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="detail = null">
