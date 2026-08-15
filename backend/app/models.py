@@ -154,6 +154,38 @@ class EmployeeDebt(db.Model):
         }
 
 
+class KasbonRequest(db.Model):
+    """Pengajuan kasbon (migration 054). Diajukan manajer → disetujui HO → sistem
+    otomatis catat advance + set cicilan di karyawan. Payroll potong otomatis."""
+    __tablename__ = "kasbon_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="SET NULL"))
+    amount = db.Column(db.Numeric(15, 2), nullable=False)
+    months = db.Column(db.Integer, nullable=False)
+    installment = db.Column(db.Numeric(15, 2), nullable=False)
+    note = db.Column(db.String(200))
+    status = db.Column(db.String(12), nullable=False, default="submitted")  # submitted|approved|rejected
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    approved_at = db.Column(db.DateTime)
+    rejection_reason = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self, employee_name=None, venue_code=None):
+        f = lambda v: float(v) if v is not None else None
+        return {
+            "id": self.id, "employee_id": self.employee_id, "employee_name": employee_name,
+            "venue_id": self.venue_id, "venue_code": venue_code,
+            "amount": f(self.amount), "months": self.months, "installment": f(self.installment),
+            "note": self.note, "status": self.status, "rejection_reason": self.rejection_reason,
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Payroll(db.Model):
     __tablename__ = "payroll"
 

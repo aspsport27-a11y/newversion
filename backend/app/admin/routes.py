@@ -3,6 +3,7 @@
 Akses: admin & head_office (kelola); reports juga manager_unit.
 """
 import calendar
+import math
 from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request
@@ -10,7 +11,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Area, Employee, EmployeeDebt, Supplier, User, Venue
+from ..models import Area, Employee, EmployeeDebt, KasbonRequest, Supplier, User, Venue
 from ..security import (
     ROLE_ADMIN,
     ROLE_ADMIN_UNIT,
@@ -825,6 +826,137 @@ def employee_debt_add(eid):
     ))
     db.session.commit()
     return jsonify(debt_balance=_emp_debt_balance(eid)), 201
+
+
+# ------------------------------------------------------------------
+# Pengajuan Kasbon (tab di menu Karyawan) — ajukan → HO setujui → otomatis
+# catat advance + set cicilan di karyawan. Payroll potong otomatis (mekanisme lama).
+# ------------------------------------------------------------------
+KASBON_APPROVE = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+
+
+def _kasbon_scope_q():
+    q = KasbonRequest.query
+    vids = _scope_vids(_current_user())
+    if vids is not None:
+        q = q.filter(KasbonRequest.venue_id.in_(vids)) if vids else q.filter(db.false())
+    return q
+
+
+@admin_bp.get("/kasbon-requests")
+@jwt_required()
+@MANAGE_HR
+def kasbon_requests_list():
+    q = _kasbon_scope_q()
+    if request.args.get("status"):
+        q = q.filter_by(status=request.args.get("status"))
+    if _scope_vids(_current_user()) is None and request.args.get("venue_id", type=int):
+        q = q.filter_by(venue_id=request.args.get("venue_id", type=int))
+    reqs = q.order_by(KasbonRequest.created_at.desc()).all()
+    emps = {e.id: e.name for e in Employee.query.all()}
+    vmap = {v.id: v.code for v in Venue.query.all()}
+    return jsonify(
+        count=len(reqs),
+        requests=[r.to_dict(emps.get(r.employee_id), vmap.get(r.venue_id)) for r in reqs],
+    ), 200
+
+
+@admin_bp.get("/kasbon-requests/pending-count")
+@jwt_required()
+@MANAGE_HR
+def kasbon_pending_count():
+    return jsonify(count=_kasbon_scope_q().filter_by(status="submitted").count()), 200
+
+
+@admin_bp.post("/kasbon-requests")
+@jwt_required()
+@MANAGE_HR
+def kasbon_request_create():
+    d = request.get_json(silent=True) or {}
+    emp = db.session.get(Employee, d.get("employee_id"))
+    if not emp:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and emp.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    amount = _D(d.get("amount"))
+    months = int(d.get("months") or 0)
+    if amount <= 0:
+        return _err("Jumlah kasbon harus > 0")
+    if months < 1:
+        return _err("Jumlah bulan cicilan minimal 1")
+    installment = float(math.ceil(amount / months))  # cicilan otomatis; sisa akhir ditangani payroll
+    r = KasbonRequest(
+        employee_id=emp.id, venue_id=emp.venue_id, amount=amount, months=months,
+        installment=installment, note=d.get("note"), status="submitted",
+        created_by=_current_user().id,
+    )
+    db.session.add(r)
+    db.session.commit()
+    return jsonify(request=r.to_dict(emp.name)), 201
+
+
+@admin_bp.post("/kasbon-requests/<int:rid>/approve")
+@jwt_required()
+@KASBON_APPROVE
+def kasbon_request_approve(rid):
+    r = db.session.get(KasbonRequest, rid)
+    if not r:
+        return _err("Pengajuan tidak ditemukan", "not_found", 404)
+    if r.status != "submitted":
+        return _err(f"Status '{r.status}' tak bisa disetujui", "bad_status", 409)
+    emp = db.session.get(Employee, r.employee_id)
+    if not emp:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    # OTOMATIS tulis ke data karyawan: saldo kasbon naik + cicilan ter-set
+    db.session.add(EmployeeDebt(
+        employee_id=emp.id, type="advance", amount=r.amount,
+        note=f"Kasbon disetujui (cicil {r.months} bln)", created_by=_current_user().id,
+    ))
+    emp.kasbon_installment = r.installment
+    emp.updated_at = datetime.utcnow()
+    r.status = "approved"
+    r.approved_by = _current_user().id
+    r.approved_at = datetime.utcnow()
+    r.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(request=r.to_dict(emp.name)), 200
+
+
+@admin_bp.post("/kasbon-requests/<int:rid>/reject")
+@jwt_required()
+@KASBON_APPROVE
+def kasbon_request_reject(rid):
+    r = db.session.get(KasbonRequest, rid)
+    if not r:
+        return _err("Pengajuan tidak ditemukan", "not_found", 404)
+    if r.status != "submitted":
+        return _err(f"Status '{r.status}' tak bisa ditolak", "bad_status", 409)
+    d = request.get_json(silent=True) or {}
+    r.status = "rejected"
+    r.rejection_reason = d.get("reason")
+    r.approved_by = _current_user().id
+    r.approved_at = datetime.utcnow()
+    r.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(request=r.to_dict()), 200
+
+
+@admin_bp.delete("/kasbon-requests/<int:rid>")
+@jwt_required()
+@MANAGE_HR
+def kasbon_request_delete(rid):
+    r = db.session.get(KasbonRequest, rid)
+    if not r:
+        return _err("Tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and r.venue_id != forced:
+        return _err("Bukan venue Anda", "forbidden", 403)
+    if r.status == "approved":
+        return _err("Sudah disetujui — tak bisa dihapus", "locked", 409)
+    db.session.delete(r)
+    db.session.commit()
+    return jsonify(ok=True), 200
 
 
 @admin_bp.post("/employees/<int:eid>/account")

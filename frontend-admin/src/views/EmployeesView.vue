@@ -3,9 +3,15 @@ import { ref, onMounted, watch, computed } from 'vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
+import { useRoute } from 'vue-router'
+import KasbonRequestsTab from '../components/KasbonRequestsTab.vue'
 
 const auth = useAuthStore()
+const route = useRoute()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
+const isApprover = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
+const canManageHr = computed(() => auth.hasPerm('hr.manage'))
+const tab = ref(route.query.tab === 'kasbon' ? 'kasbon' : 'karyawan')
 
 const venues = ref([])
 const areas = ref([])
@@ -185,15 +191,27 @@ async function resetAccount(pinOnly) {
         <p class="text-slate-500 mt-1">Data karyawan, kasbon/piutang, dan akun login.</p>
       </div>
       <div class="flex gap-2 flex-wrap">
-        <input v-model="search" placeholder="Cari nama / kode / jabatan…"
+        <input v-if="tab === 'karyawan'" v-model="search" placeholder="Cari nama / kode / jabatan…"
           class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 w-48" />
         <select v-if="!isManager" v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
         </select>
-        <button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Karyawan</button>
+        <button v-if="tab === 'karyawan'" @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Karyawan</button>
       </div>
     </div>
 
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-4 border-b">
+      <button @click="tab = 'karyawan'" :class="tab === 'karyawan' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Karyawan</button>
+      <button @click="tab = 'kasbon'" :class="tab === 'kasbon' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Pengajuan Kasbon</button>
+    </div>
+
+    <!-- ===== TAB KASBON ===== -->
+    <KasbonRequestsTab v-if="tab === 'kasbon'" :venue-id="venueId" :is-manager="isManager"
+      :is-approver="isApprover" :can-manage="canManageHr" :venues="venues" />
+
+    <!-- ===== TAB KARYAWAN ===== -->
+    <div v-show="tab === 'karyawan'">
     <!-- Stiker info total karyawan -->
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       <div class="bg-white rounded-xl shadow-sm border p-4">
@@ -278,6 +296,8 @@ async function resetAccount(pinOnly) {
         </div>
       </div>
     </div>
+    </div>
+    <!-- ===== /TAB KARYAWAN ===== -->
 
     <!-- Form karyawan -->
     <div v-if="showForm" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">

@@ -24,7 +24,8 @@ const otPending = ref({ lembur: 0, reward: 0, tambahan: 0 })
 const OT_LABELS = { lembur: 'Lembur', reward: 'Reward', tambahan: 'Pekerjaan Tambahan' }
 const otPendingRows = computed(() => Object.entries(otPending.value).filter(([, n]) => n > 0).map(([k, n]) => ({ key: k, label: OT_LABELS[k], count: n })))
 const otPendingTotal = computed(() => Object.values(otPending.value).reduce((a, b) => a + b, 0))
-const notifTotal = computed(() => procPending.value.sale + procPending.value.ops + opsPending.value + otPendingTotal.value)
+const kasbonPending = ref(0)
+const notifTotal = computed(() => procPending.value.sale + procPending.value.ops + opsPending.value + otPendingTotal.value + kasbonPending.value)
 let procPendingTimer = null
 async function loadProcPending() {
   if (auth.hasPerm('proc.view')) {
@@ -48,6 +49,13 @@ async function loadProcPending() {
     try {
       const { data } = await client.get('/payroll/overtime/pending-count')
       if (data.counts) otPending.value = data.counts
+    } catch (_) { /* diam-diam gagal, bukan fitur kritis */ }
+  }
+  // pengajuan kasbon menunggu persetujuan HO
+  if (auth.user?.role === 'admin' || auth.user?.role === 'head_office') {
+    try {
+      const { data } = await client.get('/admin/kasbon-requests/pending-count')
+      kasbonPending.value = data.count
     } catch (_) { /* diam-diam gagal, bukan fitur kritis */ }
   }
 }
@@ -235,7 +243,7 @@ function toggleGroup(label) {
         <button class="lg:hidden text-2xl" @click="sidebarOpen = true">☰</button>
         <div class="flex-1" />
         <div class="flex items-center gap-3">
-          <div v-if="auth.hasPerm('proc.view') || auth.hasPerm('ops.view') || auth.hasPerm('payroll.approve')" class="relative">
+          <div v-if="auth.hasPerm('proc.view') || auth.hasPerm('ops.view') || auth.hasPerm('payroll.approve') || ['admin','head_office'].includes(auth.user?.role)" class="relative">
             <div v-if="showNotif" class="fixed inset-0 z-30" @click="showNotif = false" />
             <button
               @click="showNotif = !showNotif"
@@ -297,10 +305,19 @@ function toggleGroup(label) {
                   :to="{ name: 'payroll', query: { tab: row.key } }"
                   @click="showNotif = false"
                   class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
-                  :class="{ 'border-b': i < otPendingRows.length - 1 }"
+                  :class="{ 'border-b': i < otPendingRows.length - 1 || kasbonPending > 0 }"
                 >
                   <span class="text-sm text-slate-700">🕐 {{ row.label }}</span>
                   <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ row.count }} menunggu</span>
+                </RouterLink>
+                <RouterLink
+                  v-if="kasbonPending > 0"
+                  :to="{ name: 'employees', query: { tab: 'kasbon' } }"
+                  @click="showNotif = false"
+                  class="flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition"
+                >
+                  <span class="text-sm text-slate-700">💵 Kasbon</span>
+                  <span class="text-xs bg-red-50 text-red-600 font-semibold rounded-full px-2 py-0.5">{{ kasbonPending }} menunggu</span>
                 </RouterLink>
               </template>
             </div>
