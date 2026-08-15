@@ -126,12 +126,13 @@ watch(() => props.venueId, loadRequests)
             <th class="px-4 py-3 font-medium text-right">Jumlah</th>
             <th class="px-4 py-3 font-medium text-right">Cicilan/bln</th>
             <th class="px-4 py-3 font-medium text-center">Tenor</th>
+            <th class="px-4 py-3 font-medium text-right">Sisa Kasbon</th>
             <th class="px-4 py-3 font-medium text-center">Status</th>
             <th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!requests.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan kasbon.</td></tr>
+            <tr v-if="loading"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!requests.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan kasbon.</td></tr>
             <tr v-for="r in requests" :key="r.id" class="border-t">
               <td class="px-4 py-3 text-slate-700">{{ r.employee_name }}<div v-if="r.note" class="text-xs text-slate-400">{{ r.note }}</div>
                 <div v-if="r.status === 'rejected' && r.rejection_reason" class="text-xs text-red-500">Ditolak: {{ r.rejection_reason }}</div>
@@ -140,6 +141,7 @@ watch(() => props.venueId, loadRequests)
               <td class="px-4 py-3 text-right font-medium">{{ rupiah(r.amount) }}</td>
               <td class="px-4 py-3 text-right text-slate-600">{{ rupiah(r.installment) }}</td>
               <td class="px-4 py-3 text-center text-slate-500">{{ r.months }} bln</td>
+              <td class="px-4 py-3 text-right" :class="r.debt_balance > 0 ? 'text-amber-600 font-medium' : 'text-emerald-600'">{{ rupiah(r.debt_balance) }}</td>
               <td class="px-4 py-3 text-center"><span :class="statusMap[r.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[r.status]?.[0] }}</span></td>
               <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
                 <template v-if="r.status === 'submitted' && isApprover">

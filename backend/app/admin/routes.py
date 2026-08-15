@@ -855,10 +855,13 @@ def kasbon_requests_list():
     reqs = q.order_by(KasbonRequest.created_at.desc()).all()
     emps = {e.id: e.name for e in Employee.query.all()}
     vmap = {v.id: v.code for v in Venue.query.all()}
-    return jsonify(
-        count=len(reqs),
-        requests=[r.to_dict(emps.get(r.employee_id), vmap.get(r.venue_id)) for r in reqs],
-    ), 200
+    out = []
+    for r in reqs:
+        d = r.to_dict(emps.get(r.employee_id), vmap.get(r.venue_id))
+        # sisa kasbon = saldo hutang karyawan SAAT INI (berkurang otomatis via payroll)
+        d["debt_balance"] = _emp_debt_balance(r.employee_id)
+        out.append(d)
+    return jsonify(count=len(out), requests=out), 200
 
 
 @admin_bp.get("/kasbon-requests/pending-count")
