@@ -190,7 +190,11 @@ watch(() => props.venueId, () => loadRuns())
         </div>
 
         <div class="flex items-center justify-between flex-wrap gap-3 px-5 py-2 bg-slate-50 border-y">
-          <p class="text-sm font-semibold text-slate-700">Total: {{ rupiah(total) }}</p>
+          <div class="flex items-center gap-3">
+            <p class="text-sm font-semibold text-slate-700">Total: {{ rupiah(total) }}</p>
+            <button v-if="['draft','rejected'].includes(run.status) && canEdit" @click="deleteRun(detail)"
+              class="text-red-500 hover:text-red-600 text-sm hover:underline">Hapus</button>
+          </div>
           <div class="flex items-center gap-2">
             <template v-if="editable">
               <button @click="saveAll" :disabled="saving || !rows.length"
