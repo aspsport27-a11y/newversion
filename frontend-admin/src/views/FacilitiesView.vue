@@ -240,6 +240,29 @@ function fmtTgl(iso) {
   return d.toLocaleDateString('id-ID', { weekday: 'short', day: '2-digit', month: 'short' })
 }
 
+// --- tautan Papan Jadwal Layar (TV di venue) ---
+const showBoard = ref(false)
+const boardUrl = ref('')
+async function openBoardLink() {
+  if (!venueId.value) return
+  try {
+    const { data } = await client.get(`/admin/venues/${venueId.value}/board-link`)
+    boardUrl.value = data.url
+    showBoard.value = true
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal memuat tautan.') }
+}
+async function copyBoard() {
+  try { await navigator.clipboard.writeText(boardUrl.value); flash('Tautan disalin') }
+  catch { window.prompt('Salin tautan ini:', boardUrl.value) }
+}
+async function regenBoard() {
+  if (!window.confirm('Buat tautan baru? Tautan lama langsung tidak berfungsi.')) return
+  try {
+    const { data } = await client.post(`/admin/venues/${venueId.value}/board-link/regenerate`)
+    boardUrl.value = data.url; flash('Tautan diperbarui')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') }
+}
+
 // --- tautan jadwal pribadi coach ---
 function coachLink(c) {
   return c.schedule_token ? `https://jadwal.aspsports.id/?coach=${c.schedule_token}` : null
@@ -295,9 +318,32 @@ watch(venueId, reload)
         <h1 class="text-2xl font-bold text-slate-800">Lapangan &amp; Tiket</h1>
         <p class="text-slate-500 mt-1">Kelola lapangan (booking) atau tiket (waterpark) per venue.</p>
       </div>
-      <select v-if="!isManager" v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-        <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
-      </select>
+      <div class="flex items-center gap-2">
+        <button v-if="!isTicketVenue" @click="openBoardLink" class="text-sm text-brand-700 bg-brand-50 hover:bg-brand-100 border border-brand-100 rounded-lg px-3 py-2 transition">📺 Layar Jadwal</button>
+        <select v-if="!isManager" v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Modal tautan Papan Jadwal Layar -->
+    <div v-if="showBoard" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click.self="showBoard = false">
+      <div class="bg-white w-full max-w-md rounded-2xl p-5">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-lg font-bold text-slate-800">📺 Papan Jadwal Layar</h3>
+          <button @click="showBoard = false" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <p class="text-sm text-slate-500 mb-3">Buka tautan ini di TV/monitor venue. Menampilkan jadwal booking per lapangan hari ini (nama depan + jam), auto-refresh, tanpa login.</p>
+        <div class="flex gap-2 mb-3">
+          <input :value="boardUrl" readonly class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-slate-50 outline-none" />
+          <button @click="copyBoard" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-3 font-medium">Salin</button>
+        </div>
+        <div class="flex items-center justify-between">
+          <a :href="boardUrl" target="_blank" class="text-sm text-brand-600 hover:underline">Buka layar ↗</a>
+          <button @click="regenBoard" class="text-xs text-red-500 hover:underline">Ganti tautan (kalau bocor)</button>
+        </div>
+        <p class="text-xs text-amber-600 mt-3">⚠️ Tautan bersifat rahasia — siapa pun yang punya bisa melihat jadwal + nama depan. Bagikan hanya ke perangkat venue.</p>
+      </div>
     </div>
 
     <!-- Tabs (otomatis sesuai tipe venue) -->

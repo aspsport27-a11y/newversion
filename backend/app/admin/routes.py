@@ -4,6 +4,7 @@ Akses: admin & head_office (kelola); reports juga manager_unit.
 """
 import calendar
 import math
+import secrets
 from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request
@@ -826,6 +827,49 @@ def employee_debt_add(eid):
     ))
     db.session.commit()
     return jsonify(debt_balance=_emp_debt_balance(eid)), 201
+
+
+# ------------------------------------------------------------------
+# Papan Jadwal Layar Venue — tautan rahasia (display_token) utk TV di venue.
+# ------------------------------------------------------------------
+BOARD_BASE_URL = "https://jadwal.aspsports.id/layar.html"
+
+
+def _board_link_or_403(vid):
+    v = db.session.get(Venue, vid)
+    if not v:
+        return None, _err("Venue tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and vid not in vids:
+        return None, _err("Bukan venue Anda", "forbidden", 403)
+    return v, None
+
+
+@admin_bp.get("/venues/<int:vid>/board-link")
+@jwt_required()
+@VIEW
+def venue_board_link(vid):
+    """Ambil tautan papan jadwal layar venue (buat token bila belum ada)."""
+    v, err = _board_link_or_403(vid)
+    if err:
+        return err
+    if not v.display_token:
+        v.display_token = secrets.token_urlsafe(16)
+        db.session.commit()
+    return jsonify(url=f"{BOARD_BASE_URL}?token={v.display_token}"), 200
+
+
+@admin_bp.post("/venues/<int:vid>/board-link/regenerate")
+@jwt_required()
+@VIEW
+def venue_board_link_regen(vid):
+    """Ganti token (tautan lama langsung mati) — mis. kalau bocor."""
+    v, err = _board_link_or_403(vid)
+    if err:
+        return err
+    v.display_token = secrets.token_urlsafe(16)
+    db.session.commit()
+    return jsonify(url=f"{BOARD_BASE_URL}?token={v.display_token}"), 200
 
 
 # ------------------------------------------------------------------

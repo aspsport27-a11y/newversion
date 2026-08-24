@@ -46,6 +46,66 @@ def _t_mins_pub(t, as_end=False):
     return 24 * 60 if (as_end and m == 0) else m
 
 
+@public_bp.get("/board")
+@limiter.limit(RATE)
+def public_board():
+    """Papan jadwal layar venue (TV). Token-gated (venues.display_token) — SATU
+    PENGECUALIAN lain dari aturan anonim: menampilkan NAMA DEPAN customer, tapi
+    hanya bagi pemegang token rahasia venue (buat layar internal di venue).
+    Kembalikan lapangan aktif + booking hari ini (nama depan + jam)."""
+    token = (request.args.get("token") or "").strip()
+    if not token:
+        return _err("token wajib")
+    venue = Venue.query.filter_by(display_token=token).first()
+    if not venue:
+        return _err("Token tidak valid", "not_found", 404)
+
+    # "hari ini" waktu lokal WITA (UTC+8) — konsisten dgn modul absensi
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
+    d_arg = request.args.get("date")
+    if d_arg:
+        try:
+            today = date.fromisoformat(d_arg)
+        except ValueError:
+            pass
+
+    facs = (
+        Facility.query.filter_by(venue_id=venue.id, is_active=True)
+        .order_by(Facility.name).all()
+    )
+    courts = [{
+        "id": f.id, "name": f.name,
+        "open": f.open_time.strftime("%H:%M") if f.open_time else None,
+        "close": f.close_time.strftime("%H:%M") if f.close_time else None,
+    } for f in facs]
+
+    rows = (
+        db.session.query(FacilityBooking, Order.customer_name)
+        .outerjoin(OrderItem, FacilityBooking.order_item_id == OrderItem.id)
+        .outerjoin(Order, OrderItem.order_id == Order.id)
+        .filter(
+            FacilityBooking.venue_id == venue.id,
+            FacilityBooking.booking_date == today,
+            FacilityBooking.status != "cancelled",
+        ).all()
+    )
+    bookings = []
+    for fb, cname in rows:
+        name = (cname or "").strip()
+        first = name.split(" ")[0] if name else "Booking"  # NAMA DEPAN saja
+        bookings.append({
+            "court_id": fb.facility_id,
+            "start": fb.start_time.strftime("%H:%M"),
+            "end": fb.end_time.strftime("%H:%M"),
+            "name": first,
+            "coaching": fb.coach_id is not None,
+        })
+
+    return jsonify(
+        venue=venue.name, date=today.isoformat(), courts=courts, bookings=bookings,
+    ), 200
+
+
 @public_bp.get("/venues")
 @limiter.limit(RATE)
 def public_venues():

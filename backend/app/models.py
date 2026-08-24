@@ -30,6 +30,7 @@ class Venue(db.Model):
     facilities = db.Column(db.Text)
     active = db.Column(db.Boolean, default=True)
     area_id = db.Column(db.Integer, db.ForeignKey("areas.id", ondelete="SET NULL"))
+    display_token = db.Column(db.String(64), unique=True)  # token rahasia papan jadwal layar (migration 055)
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
 
