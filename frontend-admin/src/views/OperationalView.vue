@@ -171,6 +171,40 @@ async function revertRequest() {
     await loadRequests(); flash('Pengajuan dibatalkan — kembali ke Menunggu')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan.') } finally { busy.value = false }
 }
+// --- Realisasi / LPJ (pemakaian aktual setelah dicairkan) ---
+const showRealize = ref(false)
+const realizeMap = ref({})   // item_id -> nilai realisasi
+function openRealize() {
+  realizeMap.value = {}
+  for (const it of detail.value.items) realizeMap.value[it.id] = Number(it.amount) || 0 // default = rencana
+  showRealize.value = true
+}
+const realizeTotal = computed(() => Object.values(realizeMap.value).reduce((s, v) => s + (Number(v) || 0), 0))
+const realizeReturn = computed(() => Math.max(0, (Number(detail.value?.total_amount) || 0) - realizeTotal.value))
+async function saveRealize() {
+  if (realizeTotal.value > (Number(detail.value.total_amount) || 0)) { alert('Total terpakai melebihi dana yang dicairkan.'); return }
+  busy.value = true
+  try {
+    await client.post(`/ops/requests/${detail.value.id}/realize`, {
+      items: detail.value.items.map((it) => ({ item_id: it.id, realized_amount: Number(realizeMap.value[it.id]) || 0 })),
+    })
+    const { data } = await client.get(`/ops/requests/${detail.value.id}`); detail.value = data.request
+    showRealize.value = false
+    await loadRequests(); flash('Realisasi/LPJ tersimpan')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menyimpan LPJ.') } finally { busy.value = false }
+}
+async function cancelRealize() {
+  if (!window.confirm('Batalkan LPJ? Sisa yang sudah dikembalikan ke kas akan ditarik lagi.')) return
+  busy.value = true
+  try {
+    await client.post(`/ops/requests/${detail.value.id}/realize/cancel`)
+    const { data } = await client.get(`/ops/requests/${detail.value.id}`); detail.value = data.request
+    await loadRequests(); flash('LPJ dibatalkan')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
+}
+// boleh input LPJ: pengajuan sudah dicairkan & belum di-LPJ, oleh venue-nya (ops.create) / approver
+const canRealize = computed(() => auth.hasPerm('ops.create') || isApprover.value)
+
 const canDeleteRequest = (r) => ['submitted', 'approved', 'rejected'].includes(r.status)
 async function removeRequest(r, ev) {
   ev?.stopPropagation()
@@ -495,6 +529,58 @@ watch(statusFilter, loadRequests)
             </tbody>
             <tfoot><tr class="border-t bg-slate-50 font-semibold"><td class="px-3 py-2">Total</td><td class="px-3 py-2 text-right">{{ rupiah(detail.total_amount) }}</td><td></td></tr></tfoot>
           </table>
+        </div>
+
+        <!-- Realisasi / LPJ (setelah dicairkan) -->
+        <div v-if="detail.status === 'disbursed'" class="mb-3 border rounded-lg p-3">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-sm font-semibold text-slate-700">💸 Realisasi / LPJ</p>
+            <span v-if="detail.realized_at" class="text-xs bg-emerald-100 text-emerald-700 rounded-full px-2 py-0.5">Sudah LPJ</span>
+          </div>
+
+          <!-- sudah di-LPJ -->
+          <template v-if="detail.realized_at">
+            <table class="w-full text-sm mb-2">
+              <thead class="text-slate-400 text-left text-xs"><tr><th class="py-1">Kategori</th><th class="py-1 text-right">Diajukan</th><th class="py-1 text-right">Terpakai</th></tr></thead>
+              <tbody>
+                <tr v-for="it in detail.items" :key="it.id" class="border-t">
+                  <td class="py-1 text-slate-700">{{ it.category_name }}</td>
+                  <td class="py-1 text-right text-slate-400">{{ rupiah(it.amount) }}</td>
+                  <td class="py-1 text-right font-medium">{{ rupiah(it.realized_amount) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Total terpakai</span><span class="font-semibold">{{ rupiah(detail.realized_total) }}</span></div>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Sisa dikembalikan ke kas</span><span class="font-semibold text-emerald-600">{{ rupiah(detail.returned_amount) }}</span></div>
+            <p v-if="detail.realized_by_name" class="text-xs text-slate-400 mt-1">Dilaporkan oleh {{ detail.realized_by_name }}</p>
+            <button v-if="canRealize" @click="cancelRealize" :disabled="busy" class="text-xs text-red-500 hover:underline mt-2">Batalkan LPJ</button>
+          </template>
+
+          <!-- belum di-LPJ -->
+          <template v-else>
+            <template v-if="showRealize">
+              <table class="w-full text-sm mb-2">
+                <thead class="text-slate-400 text-left text-xs"><tr><th class="py-1">Kategori</th><th class="py-1 text-right">Diajukan</th><th class="py-1 text-right">Terpakai (Rp)</th></tr></thead>
+                <tbody>
+                  <tr v-for="it in detail.items" :key="it.id" class="border-t">
+                    <td class="py-1 text-slate-700">{{ it.category_name }}</td>
+                    <td class="py-1 text-right text-slate-400">{{ rupiah(it.amount) }}</td>
+                    <td class="py-1 text-right"><input v-model.number="realizeMap[it.id]" type="number" min="0" step="1000" class="w-28 text-right rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-brand-500" /></td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="flex justify-between text-sm"><span class="text-slate-500">Total terpakai</span><span class="font-semibold">{{ rupiah(realizeTotal) }}</span></div>
+              <div class="flex justify-between text-sm"><span class="text-slate-500">Sisa (kembali ke kas)</span><span class="font-semibold text-emerald-600">{{ rupiah(realizeReturn) }}</span></div>
+              <div class="flex gap-2 mt-3">
+                <button @click="saveRealize" :disabled="busy" class="flex-1 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-50">Simpan Realisasi</button>
+                <button @click="showRealize = false" class="px-4 py-2 rounded-lg border text-sm text-slate-600">Batal</button>
+              </div>
+            </template>
+            <template v-else>
+              <p class="text-xs text-slate-500 mb-2">Dana sudah dicairkan. Lapor pemakaian aktual per kategori — sisa otomatis kembali ke kas.</p>
+              <button v-if="canRealize" @click="openRealize" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">Lapor Penggunaan (LPJ)</button>
+            </template>
+          </template>
         </div>
 
         <div v-if="detail.rejection_reason" class="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2 mb-3">Ditolak: {{ detail.rejection_reason }}</div>

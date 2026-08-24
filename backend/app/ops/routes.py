@@ -180,8 +180,11 @@ def categories_update(cid):
 # Budget (plafon) + realisasi
 # ------------------------------------------------------------------
 def _used_by_category(venue_id, year, month):
+    # realisasi budget = pakai jumlah AKTUAL kalau sudah di-LPJ (realized_amount),
+    # kalau belum pakai jumlah rencana (amount). COALESCE menangani otomatis.
+    used_amt = func.coalesce(OpRequestItem.realized_amount, OpRequestItem.amount)
     rows = (
-        db.session.query(OpRequestItem.category_id, func.coalesce(func.sum(OpRequestItem.amount), 0))
+        db.session.query(OpRequestItem.category_id, func.coalesce(func.sum(used_amt), 0))
         .join(OpRequest, OpRequestItem.request_id == OpRequest.id)
         .filter(
             OpRequest.venue_id == venue_id,
@@ -438,6 +441,8 @@ def request_revert(rid):
         return _err("Bukan pengajuan dalam cakupan Anda", "forbidden", 403)
     if r.status == "submitted":
         return _err("Pengajuan sudah berstatus Menunggu", "bad_status", 409)
+    if r.realized_at:
+        return _err("Sudah di-LPJ (realisasi) — batalkan LPJ dulu", "bad_status", 409)
     uid = _user().id
 
     if r.status == "disbursed" and r.source_account_id:
@@ -455,6 +460,93 @@ def request_revert(rid):
     r.approved_by = None
     r.approved_at = None
     r.rejection_reason = None
+    r.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200
+
+
+@ops_bp.post("/requests/<int:rid>/realize")
+@jwt_required()
+@CREATE
+def request_realize(rid):
+    """Lapor realisasi/LPJ pemakaian dana yg sudah dicairkan (per kategori).
+    Sisa (dicairkan - terpakai) otomatis dikembalikan ke kas (rekening sumber
+    pencairan). Tanpa approval — venue lapor langsung."""
+    r = db.session.get(OpRequest, rid)
+    if not r:
+        return _err("Pengajuan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_user())
+    if vids is not None and r.venue_id not in vids:
+        return _err("Bukan pengajuan dalam cakupan Anda", "forbidden", 403)
+    if r.status != "disbursed":
+        return _err("Hanya pengajuan yg sudah dicairkan bisa di-LPJ", "bad_status", 409)
+    if r.realized_at:
+        return _err("Sudah di-LPJ", "bad_status", 409)
+
+    d = request.get_json(silent=True) or {}
+    realized_map = {int(it["item_id"]): _D(it.get("realized_amount")) for it in (d.get("items") or []) if it.get("item_id")}
+    total_realized = 0.0
+    for it in r.items:
+        val = realized_map.get(it.id, 0.0)
+        if val < 0:
+            return _err("Nilai realisasi tak boleh negatif")
+        it.realized_amount = val
+        total_realized += val
+
+    disbursed = float(r.total_amount or 0)
+    returned = round(disbursed - total_realized, 2)
+    if returned < 0:
+        return _err("Total terpakai melebihi dana yg dicairkan — periksa kembali")
+
+    uid = _user().id
+    # sisa dikembalikan ke kas (rekening sumber pencairan)
+    if returned > 0 and r.source_account_id:
+        from ..treasury.service import record_tx
+        record_tx(
+            r.source_account_id, "in", returned, "op_return",
+            ref_type="op_request", ref_id=r.id,
+            note=f"Sisa LPJ {r.code} dikembalikan", user_id=uid,
+        )
+        r.returned_account_id = r.source_account_id
+
+    r.realized_total = round(total_realized, 2)
+    r.returned_amount = returned
+    r.realized_at = datetime.utcnow()
+    r.realized_by = uid
+    r.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200
+
+
+@ops_bp.post("/requests/<int:rid>/realize/cancel")
+@jwt_required()
+@CREATE
+def request_realize_cancel(rid):
+    """Batalkan LPJ (kalau salah input) — tarik balik sisa yg tadi dikembalikan."""
+    r = db.session.get(OpRequest, rid)
+    if not r:
+        return _err("Pengajuan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_user())
+    if vids is not None and r.venue_id not in vids:
+        return _err("Bukan pengajuan dalam cakupan Anda", "forbidden", 403)
+    if not r.realized_at:
+        return _err("Belum ada LPJ untuk dibatalkan", "bad_status", 409)
+    uid = _user().id
+    # kalau tadi ada sisa yg dikembalikan → tarik lagi (kas keluar) supaya seimbang
+    if r.returned_amount and float(r.returned_amount) > 0 and r.returned_account_id:
+        from ..treasury.service import record_tx
+        record_tx(
+            r.returned_account_id, "out", float(r.returned_amount), "op_return_cancel",
+            ref_type="op_request", ref_id=r.id,
+            note=f"Batal LPJ {r.code} — sisa ditarik kembali", user_id=uid,
+        )
+    for it in r.items:
+        it.realized_amount = None
+    r.realized_at = None
+    r.realized_by = None
+    r.realized_total = None
+    r.returned_amount = None
+    r.returned_account_id = None
     r.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200

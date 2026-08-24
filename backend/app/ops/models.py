@@ -53,6 +53,12 @@ class OpRequest(db.Model):
     disbursed_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     disbursed_at = db.Column(db.DateTime)
     source_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"))
+    # Realisasi / LPJ (migration 056): pemakaian aktual setelah dicairkan.
+    realized_at = db.Column(db.DateTime)
+    realized_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    realized_total = db.Column(db.Numeric(15, 2))
+    returned_amount = db.Column(db.Numeric(15, 2))  # sisa yg dikembalikan ke kas
+    returned_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -77,6 +83,10 @@ class OpRequest(db.Model):
             "approved_at": self.approved_at.isoformat() if self.approved_at else None,
             "disbursed_by_name": uname(self.disbursed_by),
             "disbursed_at": self.disbursed_at.isoformat() if self.disbursed_at else None,
+            "realized_at": self.realized_at.isoformat() if self.realized_at else None,
+            "realized_by_name": uname(self.realized_by),
+            "realized_total": f(self.realized_total),
+            "returned_amount": f(self.returned_amount),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "items": [i.to_dict(categories) for i in self.items],
             "attachments": [a.to_dict() for a in self.attachments],
@@ -90,6 +100,7 @@ class OpRequestItem(db.Model):
     request_id = db.Column(db.Integer, db.ForeignKey("op_requests.id", ondelete="CASCADE"), nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey("expense_categories.id"), nullable=False)
     amount = db.Column(db.Numeric(15, 2), nullable=False)
+    realized_amount = db.Column(db.Numeric(15, 2))  # pemakaian aktual (LPJ, migration 056)
     note = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -100,6 +111,7 @@ class OpRequestItem(db.Model):
             "category_id": self.category_id,
             "category_name": cat_name,
             "amount": float(self.amount),
+            "realized_amount": float(self.realized_amount) if self.realized_amount is not None else None,
             "note": self.note,
         }
 
