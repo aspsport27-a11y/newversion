@@ -64,6 +64,7 @@ class OpRequest(db.Model):
 
     items = db.relationship("OpRequestItem", backref="request", lazy="selectin", cascade="all, delete-orphan")
     attachments = db.relationship("OpRequestAttachment", backref="request", lazy="selectin", cascade="all, delete-orphan")
+    realization_lines = db.relationship("OpRealizationLine", backref="request", lazy="selectin", cascade="all, delete-orphan")
 
     def to_dict(self, categories=None, users=None):
         f = lambda v: float(v) if v is not None else None
@@ -90,6 +91,7 @@ class OpRequest(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "items": [i.to_dict(categories) for i in self.items],
             "attachments": [a.to_dict() for a in self.attachments],
+            "realization_lines": [rl.to_dict(categories) for rl in self.realization_lines],
         }
 
 
@@ -113,6 +115,30 @@ class OpRequestItem(db.Model):
             "amount": float(self.amount),
             "realized_amount": float(self.realized_amount) if self.realized_amount is not None else None,
             "note": self.note,
+        }
+
+
+class OpRealizationLine(db.Model):
+    """Rincian LPJ per baris (migration 057) — 1 pengeluaran nyata."""
+    __tablename__ = "op_realization_lines"
+
+    id = db.Column(db.Integer, primary_key=True)
+    request_id = db.Column(db.Integer, db.ForeignKey("op_requests.id", ondelete="CASCADE"), nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey("expense_categories.id"), nullable=False)
+    line_date = db.Column(db.Date)
+    description = db.Column(db.String(200))
+    amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self, categories=None):
+        return {
+            "id": self.id,
+            "category_id": self.category_id,
+            "category_name": categories.get(self.category_id) if categories else None,
+            "date": self.line_date.isoformat() if self.line_date else None,
+            "description": self.description,
+            "amount": float(self.amount),
         }
 
 

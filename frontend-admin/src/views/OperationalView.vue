@@ -171,22 +171,41 @@ async function revertRequest() {
     await loadRequests(); flash('Pengajuan dibatalkan — kembali ke Menunggu')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan.') } finally { busy.value = false }
 }
-// --- Realisasi / LPJ (pemakaian aktual setelah dicairkan) ---
+// --- Realisasi / LPJ (rincian pemakaian aktual per baris, setelah dicairkan) ---
 const showRealize = ref(false)
-const realizeMap = ref({})   // item_id -> nilai realisasi
-function openRealize() {
-  realizeMap.value = {}
-  for (const it of detail.value.items) realizeMap.value[it.id] = Number(it.amount) || 0 // default = rencana
-  showRealize.value = true
+const realizeLines = ref([])
+// kategori dropdown dibatasi ke kategori yang ada di pengajuan
+const reqCategories = computed(() => {
+  if (!detail.value) return []
+  const seen = new Map()
+  for (const it of detail.value.items) if (!seen.has(it.category_id)) seen.set(it.category_id, it.category_name)
+  return [...seen].map(([id, name]) => ({ id, name }))
+})
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-const realizeTotal = computed(() => Object.values(realizeMap.value).reduce((s, v) => s + (Number(v) || 0), 0))
+function newRealizeRow() { return { date: todayStr(), description: '', category_id: reqCategories.value[0]?.id || null, amount: null } }
+function openRealize() { realizeLines.value = [newRealizeRow()]; showRealize.value = true }
+function addRealizeRow() { realizeLines.value.push(newRealizeRow()) }
+function removeRealizeRow(i) { realizeLines.value.splice(i, 1) }
+const realizeTotal = computed(() => realizeLines.value.reduce((s, l) => s + (Number(l.amount) || 0), 0))
 const realizeReturn = computed(() => Math.max(0, (Number(detail.value?.total_amount) || 0) - realizeTotal.value))
+// ringkasan per kategori (rollup) utk preview
+const realizeByCat = computed(() => {
+  const m = {}
+  for (const l of realizeLines.value) if (l.category_id) m[l.category_id] = (m[l.category_id] || 0) + (Number(l.amount) || 0)
+  return m
+})
 async function saveRealize() {
+  const valid = realizeLines.value.filter((l) => Number(l.amount) > 0)
+  if (!valid.length) { alert('Isi minimal 1 rincian pemakaian.'); return }
+  if (valid.some((l) => !l.category_id)) { alert('Setiap baris harus pilih kategori.'); return }
   if (realizeTotal.value > (Number(detail.value.total_amount) || 0)) { alert('Total terpakai melebihi dana yang dicairkan.'); return }
   busy.value = true
   try {
     await client.post(`/ops/requests/${detail.value.id}/realize`, {
-      items: detail.value.items.map((it) => ({ item_id: it.id, realized_amount: Number(realizeMap.value[it.id]) || 0 })),
+      lines: valid.map((l) => ({ category_id: l.category_id, date: l.date || null, description: l.description || null, amount: Number(l.amount) || 0 })),
     })
     const { data } = await client.get(`/ops/requests/${detail.value.id}`); detail.value = data.request
     showRealize.value = false
@@ -538,9 +557,9 @@ watch(statusFilter, loadRequests)
             <span v-if="detail.realized_at" class="text-xs bg-emerald-100 text-emerald-700 rounded-full px-2 py-0.5">Sudah LPJ</span>
           </div>
 
-          <!-- sudah di-LPJ -->
+          <!-- sudah di-LPJ: ringkasan per kategori + rincian baris -->
           <template v-if="detail.realized_at">
-            <table class="w-full text-sm mb-2">
+            <table class="w-full text-sm mb-3">
               <thead class="text-slate-400 text-left text-xs"><tr><th class="py-1">Kategori</th><th class="py-1 text-right">Diajukan</th><th class="py-1 text-right">Terpakai</th></tr></thead>
               <tbody>
                 <tr v-for="it in detail.items" :key="it.id" class="border-t">
@@ -550,6 +569,16 @@ watch(statusFilter, loadRequests)
                 </tr>
               </tbody>
             </table>
+            <div v-if="detail.realization_lines && detail.realization_lines.length" class="mb-2">
+              <p class="text-xs font-medium text-slate-500 mb-1">Rincian pemakaian</p>
+              <div class="border rounded-lg divide-y">
+                <div v-for="l in detail.realization_lines" :key="l.id" class="flex items-center justify-between px-3 py-1.5 text-xs">
+                  <div class="min-w-0"><span class="text-slate-700">{{ l.description || '—' }}</span>
+                    <span class="text-slate-400"> · {{ l.category_name }}<template v-if="l.date"> · {{ l.date }}</template></span></div>
+                  <span class="font-medium text-slate-700 shrink-0 ml-2">{{ rupiah(l.amount) }}</span>
+                </div>
+              </div>
+            </div>
             <div class="flex justify-between text-sm"><span class="text-slate-500">Total terpakai</span><span class="font-semibold">{{ rupiah(detail.realized_total) }}</span></div>
             <div class="flex justify-between text-sm"><span class="text-slate-500">Sisa dikembalikan ke kas</span><span class="font-semibold text-emerald-600">{{ rupiah(detail.returned_amount) }}</span></div>
             <p v-if="detail.realized_by_name" class="text-xs text-slate-400 mt-1">Dilaporkan oleh {{ detail.realized_by_name }}</p>
@@ -559,16 +588,19 @@ watch(statusFilter, loadRequests)
           <!-- belum di-LPJ -->
           <template v-else>
             <template v-if="showRealize">
-              <table class="w-full text-sm mb-2">
-                <thead class="text-slate-400 text-left text-xs"><tr><th class="py-1">Kategori</th><th class="py-1 text-right">Diajukan</th><th class="py-1 text-right">Terpakai (Rp)</th></tr></thead>
-                <tbody>
-                  <tr v-for="it in detail.items" :key="it.id" class="border-t">
-                    <td class="py-1 text-slate-700">{{ it.category_name }}</td>
-                    <td class="py-1 text-right text-slate-400">{{ rupiah(it.amount) }}</td>
-                    <td class="py-1 text-right"><input v-model.number="realizeMap[it.id]" type="number" min="0" step="1000" class="w-28 text-right rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-brand-500" /></td>
-                  </tr>
-                </tbody>
-              </table>
+              <p class="text-xs text-slate-500 mb-2">Tambah rincian pemakaian nyata. Kategori dibatasi ke yang diajukan. Sisa otomatis kembali ke kas.</p>
+              <div class="space-y-2 mb-2">
+                <div v-for="(l, i) in realizeLines" :key="i" class="flex gap-1.5 items-center">
+                  <input v-model="l.date" type="date" class="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500 w-32" />
+                  <input v-model="l.description" placeholder="Keterangan" class="flex-1 min-w-0 rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-500" />
+                  <select v-model="l.category_id" class="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500 w-32">
+                    <option v-for="c in reqCategories" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  </select>
+                  <input v-model.number="l.amount" type="number" min="0" step="1000" placeholder="Rp" class="w-24 text-right rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-500" />
+                  <button @click="removeRealizeRow(i)" class="text-red-400 hover:text-red-600 text-sm px-1" title="Hapus baris">✕</button>
+                </div>
+              </div>
+              <button @click="addRealizeRow" class="text-brand-600 text-xs mb-3">+ Tambah Baris</button>
               <div class="flex justify-between text-sm"><span class="text-slate-500">Total terpakai</span><span class="font-semibold">{{ rupiah(realizeTotal) }}</span></div>
               <div class="flex justify-between text-sm"><span class="text-slate-500">Sisa (kembali ke kas)</span><span class="font-semibold text-emerald-600">{{ rupiah(realizeReturn) }}</span></div>
               <div class="flex gap-2 mt-3">
@@ -577,7 +609,7 @@ watch(statusFilter, loadRequests)
               </div>
             </template>
             <template v-else>
-              <p class="text-xs text-slate-500 mb-2">Dana sudah dicairkan. Lapor pemakaian aktual per kategori — sisa otomatis kembali ke kas.</p>
+              <p class="text-xs text-slate-500 mb-2">Dana sudah dicairkan. Lapor rincian pemakaian nyata — sisa otomatis kembali ke kas.</p>
               <button v-if="canRealize" @click="openRealize" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">Lapor Penggunaan (LPJ)</button>
             </template>
           </template>

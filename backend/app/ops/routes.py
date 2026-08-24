@@ -21,6 +21,7 @@ from ..security import (
 from .models import (
     Budget,
     ExpenseCategory,
+    OpRealizationLine,
     OpRequest,
     OpRequestAttachment,
     OpRequestItem,
@@ -484,21 +485,44 @@ def request_realize(rid):
         return _err("Sudah di-LPJ", "bad_status", 409)
 
     d = request.get_json(silent=True) or {}
-    realized_map = {int(it["item_id"]): _D(it.get("realized_amount")) for it in (d.get("items") or []) if it.get("item_id")}
-    total_realized = 0.0
+    uid = _user().id
+    allowed_cats = {it.category_id for it in r.items}  # kategori dibatasi ke yg diajukan
+
+    # tulis ulang rincian LPJ (aman kalau ada sisa lama)
+    OpRealizationLine.query.filter_by(request_id=r.id).delete()
+    per_cat, total_realized = {}, 0.0
+    for ln in (d.get("lines") or []):
+        cid = ln.get("category_id")
+        if not cid or int(cid) not in allowed_cats:
+            return _err("Kategori rincian harus salah satu kategori yang diajukan")
+        cid = int(cid)
+        amt = _D(ln.get("amount"))
+        if amt < 0:
+            return _err("Jumlah rincian tak boleh negatif")
+        ld = None
+        if ln.get("date"):
+            try:
+                ld = date.fromisoformat(ln["date"])
+            except (ValueError, TypeError):
+                ld = None
+        db.session.add(OpRealizationLine(
+            request_id=r.id, category_id=cid, line_date=ld,
+            description=(ln.get("description") or None), amount=amt, created_by=uid,
+        ))
+        per_cat[cid] = per_cat.get(cid, 0.0) + amt
+        total_realized += amt
+
+    if total_realized <= 0:
+        return _err("Isi minimal 1 rincian pemakaian")
+
+    # rollup per kategori → isi realized_amount tiap item pengajuan
     for it in r.items:
-        val = realized_map.get(it.id, 0.0)
-        if val < 0:
-            return _err("Nilai realisasi tak boleh negatif")
-        it.realized_amount = val
-        total_realized += val
+        it.realized_amount = round(per_cat.get(it.category_id, 0.0), 2)
 
     disbursed = float(r.total_amount or 0)
     returned = round(disbursed - total_realized, 2)
     if returned < 0:
         return _err("Total terpakai melebihi dana yg dicairkan — periksa kembali")
-
-    uid = _user().id
     # sisa dikembalikan ke kas (rekening sumber pencairan)
     if returned > 0 and r.source_account_id:
         from ..treasury.service import record_tx
@@ -540,6 +564,7 @@ def request_realize_cancel(rid):
             ref_type="op_request", ref_id=r.id,
             note=f"Batal LPJ {r.code} — sisa ditarik kembali", user_id=uid,
         )
+    OpRealizationLine.query.filter_by(request_id=r.id).delete()
     for it in r.items:
         it.realized_amount = None
     r.realized_at = None
