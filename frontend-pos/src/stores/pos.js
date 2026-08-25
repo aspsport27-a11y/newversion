@@ -291,6 +291,11 @@ export const usePosStore = defineStore('pos', {
         items: this._cartItems(),
       }
       const { data: created } = await client.post('/orders', payload)
+      // Tanpa DP (amount 0): order dibuat 'open', TAK dibayar sekarang → masuk menu
+      // Pelunasan. (Backend menganggap amount 0 = bayar penuh, jadi jangan panggil /pay.)
+      if (Number(extra.amount) === 0) {
+        return { order: created.order, payment: null }
+      }
       const { data: paid } = await client.post(`/orders/${created.order.id}/pay`, {
         method,
         amount: extra.amount ?? null,

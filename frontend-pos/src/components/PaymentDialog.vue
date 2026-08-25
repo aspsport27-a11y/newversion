@@ -33,18 +33,25 @@ function onProofChange(e) {
 
 const sisa = computed(() => Math.max(0, props.total - (Number(amount.value) || 0)))
 const change = computed(() => Math.max(0, (Number(received.value) || 0) - (Number(amount.value) || 0)))
+// bayar 0 = booking tanpa DP → order dibuat 'open' & masuk menu Pelunasan (tak ada
+// pembayaran/metode yg diproses sekarang)
+const noPay = computed(() => (Number(amount.value) || 0) === 0)
 const validAmount = computed(() => {
   const a = Number(amount.value) || 0
-  return a > 0 && a <= props.total
+  return a >= 0 && a <= props.total
 })
-const canPayCash = computed(() => validAmount.value && (Number(received.value) || 0) >= (Number(amount.value) || 0))
+const canPayCash = computed(() => noPay.value || (validAmount.value && (Number(received.value) || 0) >= (Number(amount.value) || 0)))
 // QRIS manual (bukan dinamis) butuh bukti sama seperti transfer
 const qrisManual = computed(() => !props.qrisDynamic)
-const canPayQrisManual = computed(() => validAmount.value && !!proofPreview.value)
+const canPayQrisDynamic = computed(() => noPay.value || validAmount.value)
+const canPayQrisManual = computed(() => noPay.value || (validAmount.value && !!proofPreview.value))
+const canPayTransfer = computed(() => noPay.value || (validAmount.value && !!proofPreview.value))
+const payLabel = computed(() => noPay.value ? 'Simpan Booking (Tanpa DP)' : (sisa.value > 0 ? 'Bayar DP & Cetak' : 'Bayar & Cetak Struk'))
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 function setDp() { amount.value = Math.round(props.total / 2) }
 function setFull() { amount.value = props.total }
+function setNoDp() { amount.value = 0 }
 function quickReceived(v) { received.value = String(v) }
 
 async function confirm() {
@@ -79,15 +86,24 @@ async function confirm() {
         <div class="flex justify-between items-center mb-1">
           <label class="text-sm text-slate-600">Jumlah dibayar sekarang</label>
           <div class="flex gap-1">
+            <button @click="setNoDp" class="text-xs bg-slate-100 text-slate-600 rounded px-2 py-1">Tanpa DP</button>
             <button @click="setDp" class="text-xs bg-amber-100 text-amber-700 rounded px-2 py-1">DP 50%</button>
             <button @click="setFull" class="text-xs bg-slate-100 text-slate-600 rounded px-2 py-1">Penuh</button>
           </div>
         </div>
         <input v-model.number="amount" type="number" inputmode="numeric"
           class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-lg text-right outline-none focus:border-brand-500" />
-        <p v-if="sisa > 0" class="text-sm text-amber-600 mt-1 text-right">Sisa (DP): {{ rupiah(sisa) }}</p>
+        <p v-if="noPay" class="text-sm text-slate-500 mt-1 text-right">Tanpa DP — masuk menu Pelunasan (bayar penuh nanti)</p>
+        <p v-else-if="sisa > 0" class="text-sm text-amber-600 mt-1 text-right">Sisa (DP): {{ rupiah(sisa) }}</p>
       </div>
 
+      <!-- Tanpa DP: langsung simpan booking, tanpa metode bayar -->
+      <button v-if="noPay" @click="confirm" :disabled="submitting"
+        class="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50">
+        {{ submitting ? 'Memproses…' : 'Simpan Booking (Tanpa DP)' }}
+      </button>
+
+      <template v-if="!noPay">
       <div class="grid grid-cols-3 gap-2 mb-4">
         <button @click="method = 'cash'" :class="method === 'cash' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium text-sm">💵 Cash</button>
         <button @click="method = 'qris'" :class="method === 'qris' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium text-sm">📱 QRIS</button>
@@ -169,6 +185,7 @@ async function confirm() {
           {{ submitting ? 'Memproses…' : (sisa > 0 ? 'Bayar DP & Cetak' : 'Bayar & Cetak Struk') }}
         </button>
       </div>
+      </template>
     </div>
   </div>
 </template>
