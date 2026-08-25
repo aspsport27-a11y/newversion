@@ -166,7 +166,7 @@ onMounted(loadVenues)
             class="text-left rounded-xl bg-white border border-slate-200 p-4 hover:border-brand-500 hover:shadow-md transition"
           >
             <p class="font-semibold text-slate-800">{{ f.name }}</p>
-            <p class="text-xs text-slate-400 mt-0.5">{{ f.type }} · Rp {{ f.hourly_rate.toLocaleString('id-ID') }}/jam</p>
+            <p class="text-xs text-slate-400 mt-0.5">{{ f.type }}</p>
             <p class="text-xs text-slate-400 mt-1">Buka {{ f.open_time }} – {{ f.close_time }}</p>
           </button>
         </div>
