@@ -325,6 +325,7 @@ async function toggleCat(c) {
 }
 
 // ringkas budget utk panel di tab Pengajuan (butuh venue spesifik)
+const showBudgetDetail = ref(false)
 const budgetSisa = computed(() => (Number(budgetTotals.value.budget) || 0) - (Number(budgetTotals.value.used) || 0))
 function loadBudgetForRequests() {
   const hasVenue = isManager.value || venueId.value
@@ -445,10 +446,10 @@ watch(statusFilter, loadRequests)
         </div>
       </div>
 
-      <!-- Ringkasan budget bulan ini (butuh venue spesifik) -->
-      <div v-if="isManager || venueId" class="bg-white rounded-xl shadow-sm border p-4 mb-4">
+      <!-- Ringkasan budget bulan ini (butuh venue spesifik) — klik utk rincian -->
+      <div v-if="isManager || venueId" @click="showBudgetDetail = true" class="bg-white rounded-xl shadow-sm border p-4 mb-4 cursor-pointer hover:border-brand-300 transition" title="Klik untuk rincian per kategori">
         <div class="flex items-center justify-between flex-wrap gap-3">
-          <p class="text-sm font-semibold text-slate-700">📊 Budget periode {{ ym().month }}/{{ ym().year }}</p>
+          <p class="text-sm font-semibold text-slate-700">📊 Budget periode {{ ym().month }}/{{ ym().year }} <span class="text-xs text-slate-400 font-normal">· klik untuk rincian</span></p>
           <div class="flex items-center gap-6 text-sm">
             <div><span class="text-slate-400 text-xs">Plafon</span><div class="font-bold text-slate-700">{{ rupiah(budgetTotals.budget) }}</div></div>
             <div><span class="text-slate-400 text-xs">Terpakai</span><div class="font-bold text-amber-600">{{ rupiah(budgetTotals.used) }}</div></div>
@@ -459,6 +460,40 @@ watch(statusFilter, loadRequests)
           <div class="h-full rounded-full" :class="budgetSisa < 0 ? 'bg-red-500' : 'bg-brand-500'" :style="{ width: Math.min(100, (budgetTotals.used / budgetTotals.budget) * 100) + '%' }"></div>
         </div>
         <p v-else class="text-xs text-slate-400 mt-1">Plafon budget belum diatur untuk periode ini (lihat tab Budget).</p>
+      </div>
+
+      <!-- Modal rincian budget per kategori -->
+      <div v-if="showBudgetDetail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="showBudgetDetail = false">
+        <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
+          <div class="flex justify-between items-start mb-3">
+            <div><h3 class="text-lg font-bold text-slate-800">Rincian Budget</h3><p class="text-sm text-slate-500">Periode {{ ym().month }}/{{ ym().year }}</p></div>
+            <button @click="showBudgetDetail = false" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+          </div>
+          <div class="border rounded-lg overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 text-slate-500 text-left text-xs"><tr>
+                <th class="px-3 py-2">Kategori</th><th class="px-3 py-2 text-right">Plafon</th><th class="px-3 py-2 text-right">Terpakai</th><th class="px-3 py-2 text-right">Sisa</th>
+              </tr></thead>
+              <tbody>
+                <tr v-for="r in budgetRows" :key="r.category_id" class="border-t">
+                  <td class="px-3 py-2 text-slate-700">{{ r.category_name }}</td>
+                  <td class="px-3 py-2 text-right text-slate-600">{{ rupiah(r.budget) }}</td>
+                  <td class="px-3 py-2 text-right text-amber-600">{{ rupiah(r.used) }}</td>
+                  <td class="px-3 py-2 text-right font-medium" :class="r.remaining < 0 ? 'text-red-600' : 'text-emerald-600'">{{ rupiah(r.remaining) }}</td>
+                </tr>
+                <tr v-if="!budgetRows.length"><td colspan="4" class="px-3 py-6 text-center text-slate-400">Belum ada kategori.</td></tr>
+              </tbody>
+              <tfoot><tr class="border-t bg-slate-50 font-semibold">
+                <td class="px-3 py-2">Total</td>
+                <td class="px-3 py-2 text-right">{{ rupiah(budgetTotals.budget) }}</td>
+                <td class="px-3 py-2 text-right text-amber-600">{{ rupiah(budgetTotals.used) }}</td>
+                <td class="px-3 py-2 text-right" :class="budgetSisa < 0 ? 'text-red-600' : 'text-emerald-600'">{{ rupiah(budgetSisa) }}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+          <p class="text-xs text-slate-400 mt-3">Terpakai = dana yang sudah diajukan/dicairkan (committed); berubah ke nilai aktual setelah LPJ diselesaikan.</p>
+          <button v-if="canBudget" @click="tab = 'budget'; showBudgetDetail = false" class="mt-3 text-sm text-brand-600 hover:underline">Atur plafon di tab Budget →</button>
+        </div>
       </div>
 
       <!-- Ringkasan per venue (admin/HO, saat >1 venue) -->
