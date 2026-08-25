@@ -196,7 +196,7 @@ class FacilityRateRule(db.Model):
         }
 
 
-DAY_TYPES = ("weekday", "saturday", "sunday", "holiday", "thursday")
+DAY_TYPES = ("weekday", "saturday", "sunday", "holiday", "thursday", "friday")
 
 
 def day_type_for_date(d):
@@ -207,9 +207,11 @@ def day_type_for_date(d):
         return "weekday"
     if Holiday.query.filter_by(date=d).first() is not None:
         return "holiday"
-    wd = d.weekday()  # 3=Kamis, 5=Sabtu, 6=Minggu
+    wd = d.weekday()  # 3=Kamis, 4=Jumat, 5=Sabtu, 6=Minggu
     if wd == 3:
         return "thursday"
+    if wd == 4:
+        return "friday"
     if wd == 5:
         return "saturday"
     if wd == 6:
@@ -240,9 +242,9 @@ def facility_rate_for_hour(facility, hour, day_type="weekday"):
     # TEPAT tercakup band Kamis; jam lain jatuh ke tarif weekday biasa (tanpa
     # carry-forward, supaya band tunggal spt 'Kamis Malam' 20-23 tak menodai jam
     # pagi/siang yg mestinya ikut weekday).
-    if day_type == "thursday":
+    if day_type in ("thursday", "friday"):
         for r in facility.rate_rules:
-            if (r.day_type or "weekday") != "thursday":
+            if (r.day_type or "weekday") != day_type:
                 continue
             sh, eh = _expand_range(r.start_time, r.end_time)
             hh = hour if hour >= sh else hour + 24

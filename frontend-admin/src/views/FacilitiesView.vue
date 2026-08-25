@@ -74,7 +74,7 @@ const showRates = ref(false)
 const rateFac = ref(null)
 const rateRules = ref([])
 const rateForm = ref({ label: '', day_type: 'weekday', start_time: '', end_time: '', hourly_rate: 0 })
-const DAY_LABELS = { weekday: 'Weekday', thursday: 'Kamis', saturday: 'Sabtu', sunday: 'Minggu', holiday: 'Libur' }
+const DAY_LABELS = { weekday: 'Weekday', thursday: 'Kamis', friday: 'Jumat', saturday: 'Sabtu', sunday: 'Minggu', holiday: 'Libur' }
 const rateErr = ref('')
 const savingRate = ref(false)
 async function openRates(f) {
@@ -667,6 +667,7 @@ watch(venueId, reload)
             <select v-model="rateForm.day_type" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
               <option value="weekday">Weekday (Senin–Jumat)</option>
               <option value="thursday">Kamis (khusus — override weekday)</option>
+              <option value="friday">Jumat (khusus — override weekday)</option>
               <option value="saturday">Sabtu</option>
               <option value="sunday">Minggu</option>
               <option value="holiday">Hari Libur Nasional</option>

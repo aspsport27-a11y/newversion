@@ -13,19 +13,20 @@ export function dayTypeFor(iso, holidays = []) {
   if (!iso) return 'weekday'
   if ((holidays || []).includes(iso)) return 'holiday'
   const [y, m, d] = iso.split('-').map(Number)
-  const wd = new Date(y, m - 1, d).getDay() // 0=Minggu, 4=Kamis, 6=Sabtu
+  const wd = new Date(y, m - 1, d).getDay() // 0=Minggu, 4=Kamis, 5=Jumat, 6=Sabtu
   if (wd === 4) return 'thursday'
+  if (wd === 5) return 'friday'
   if (wd === 6) return 'saturday'
   if (wd === 0) return 'sunday'
   return 'weekday'
 }
 
 export function rateForHour(f, h, dt) {
-  // 'thursday' = override khusus Kamis: hanya jam yg TEPAT tercakup band Kamis;
-  // jam lain pakai tarif weekday (tanpa carry-forward antar-band Kamis).
-  if (dt === 'thursday') {
+  // 'thursday'/'friday' = override khusus (Kamis/Jumat): hanya jam yg TEPAT
+  // tercakup band hari itu; jam lain pakai tarif weekday (tanpa carry-forward).
+  if (dt === 'thursday' || dt === 'friday') {
     for (const r of f.rate_rules || []) {
-      if ((r.day_type || 'weekday') !== 'thursday') continue
+      if ((r.day_type || 'weekday') !== dt) continue
       const [sh, eh] = expandRange(r.start_time, r.end_time)
       const hh = h >= sh ? h : h + 24
       if (hh >= sh && hh < eh) return Number(r.hourly_rate)
