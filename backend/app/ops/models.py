@@ -128,6 +128,9 @@ class OpRealizationLine(db.Model):
     line_date = db.Column(db.Date)
     description = db.Column(db.String(200))
     amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    attachment_stored = db.Column(db.String(255))  # nota per baris (migration 058)
+    attachment_name = db.Column(db.String(255))
+    attachment_type = db.Column(db.String(100))
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -139,6 +142,8 @@ class OpRealizationLine(db.Model):
             "date": self.line_date.isoformat() if self.line_date else None,
             "description": self.description,
             "amount": float(self.amount),
+            "attachment_stored": self.attachment_stored,
+            "attachment_name": self.attachment_name,
         }
 
 

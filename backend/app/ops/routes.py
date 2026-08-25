@@ -520,6 +520,9 @@ def realize_lines_save(rid):
         db.session.add(OpRealizationLine(
             request_id=r.id, category_id=cid, line_date=ld,
             description=(ln.get("description") or None), amount=amt, created_by=uid,
+            attachment_stored=(ln.get("attachment_stored") or None),
+            attachment_name=(ln.get("attachment_name") or None),
+            attachment_type=(ln.get("attachment_type") or None),
         ))
         per_cat[cid] = per_cat.get(cid, 0.0) + amt
         total += amt
@@ -571,6 +574,42 @@ def realize_finalize(rid):
     r.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200
+
+
+@ops_bp.post("/realization/upload")
+@jwt_required()
+@CREATE
+def realization_upload():
+    """Unggah 1 nota utk baris rincian LPJ — kembalikan referensi file (dipasang
+    ke baris saat draft disimpan). File di folder yg sama dgn lampiran ops."""
+    if "file" not in request.files:
+        return _err("File tidak ada")
+    f = request.files["file"]
+    if not f.filename:
+        return _err("Nama file kosong")
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ALLOWED_EXT:
+        return _err(f"Tipe tidak didukung ({', '.join(sorted(ALLOWED_EXT))})")
+    stored = f"{uuid.uuid4().hex}.{ext}"
+    f.save(os.path.join(_upload_dir(), stored))
+    return jsonify(attachment_stored=stored, attachment_name=secure_filename(f.filename), attachment_type=f.content_type), 201
+
+
+@ops_bp.get("/realization/attachment/<stored>")
+@jwt_required()
+@VIEW
+def realization_attachment(stored):
+    ln = OpRealizationLine.query.filter_by(attachment_stored=stored).first()
+    if not ln:
+        return _err("Nota tidak ditemukan", "not_found", 404)
+    r = db.session.get(OpRequest, ln.request_id)
+    vids = _scope_vids(_user())
+    if vids is not None and r and r.venue_id not in vids:
+        return _err("Bukan dalam cakupan Anda", "forbidden", 403)
+    path = os.path.join(_upload_dir(), stored)
+    if not os.path.exists(path):
+        return _err("File hilang", "not_found", 404)
+    return send_file(path, mimetype=ln.attachment_type or None, download_name=ln.attachment_name or stored)
 
 
 @ops_bp.post("/requests/<int:rid>/realize/reopen")

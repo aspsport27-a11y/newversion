@@ -188,8 +188,30 @@ function todayStr() {
 function newRealizeRow() { return { date: todayStr(), description: '', category_id: reqCategories.value[0]?.id || null, amount: null } }
 // muat rincian draft yang sudah tersimpan (utk lanjut entry bertahap)
 function linesFromDetail() {
-  const ls = (detail.value?.realization_lines || []).map((l) => ({ date: l.date || todayStr(), description: l.description || '', category_id: l.category_id, amount: l.amount }))
+  const ls = (detail.value?.realization_lines || []).map((l) => ({
+    date: l.date || todayStr(), description: l.description || '', category_id: l.category_id, amount: l.amount,
+    attachment_stored: l.attachment_stored || null, attachment_name: l.attachment_name || null,
+  }))
   return ls.length ? ls : [newRealizeRow()]
+}
+async function uploadLineReceipt(line, e) {
+  const f = e.target.files[0]; e.target.value = ''
+  if (!f) return
+  const fd = new FormData(); fd.append('file', f)
+  try {
+    const { data } = await client.post('/ops/realization/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+    line.attachment_stored = data.attachment_stored
+    line.attachment_name = data.attachment_name
+    line.attachment_type = data.attachment_type
+    flash('Nota terunggah — jangan lupa Simpan Draft')
+  } catch (err) { alert(err?.response?.data?.message || 'Gagal unggah nota.') }
+}
+function removeLineReceipt(line) { line.attachment_stored = null; line.attachment_name = null; line.attachment_type = null }
+async function viewLineReceipt(stored) {
+  try {
+    const res = await client.get(`/ops/realization/attachment/${stored}`, { responseType: 'blob' })
+    window.open(URL.createObjectURL(res.data), '_blank')
+  } catch { alert('Nota belum tersimpan (Simpan Draft dulu) atau tidak ditemukan.') }
 }
 function addRealizeRow() { realizeLines.value.push(newRealizeRow()) }
 function removeRealizeRow(i) { realizeLines.value.splice(i, 1) }
@@ -198,7 +220,7 @@ const realizeReturn = computed(() => Math.max(0, (Number(detail.value?.total_amo
 function _validLines() {
   const valid = realizeLines.value.filter((l) => Number(l.amount) > 0)
   if (valid.some((l) => !l.category_id)) { alert('Setiap baris harus pilih kategori.'); return null }
-  return valid.map((l) => ({ category_id: l.category_id, date: l.date || null, description: l.description || null, amount: Number(l.amount) || 0 }))
+  return valid.map((l) => ({ category_id: l.category_id, date: l.date || null, description: l.description || null, amount: Number(l.amount) || 0, attachment_stored: l.attachment_stored || null, attachment_name: l.attachment_name || null, attachment_type: l.attachment_type || null }))
 }
 async function reloadDetail() {
   const { data } = await client.get(`/ops/requests/${detail.value.id}`); detail.value = data.request
@@ -535,7 +557,7 @@ watch(statusFilter, loadRequests)
 
     <!-- Detail modal -->
     <div v-if="detail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="detail = null">
-      <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
+      <div class="bg-white w-full max-w-3xl rounded-2xl p-5 max-h-[90vh] overflow-auto">
         <div class="flex justify-between items-start mb-3">
           <div><h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3><p class="text-sm text-slate-500">Periode {{ detail.period_month }}/{{ detail.period_year }}</p></div>
           <div class="flex items-center gap-2">
@@ -585,7 +607,10 @@ watch(statusFilter, loadRequests)
                 <div v-for="l in detail.realization_lines" :key="l.id" class="flex items-center justify-between px-3 py-1.5 text-xs">
                   <div class="min-w-0"><span class="text-slate-700">{{ l.description || '—' }}</span>
                     <span class="text-slate-400"> · {{ l.category_name }}<template v-if="l.date"> · {{ l.date }}</template></span></div>
-                  <span class="font-medium text-slate-700 shrink-0 ml-2">{{ rupiah(l.amount) }}</span>
+                  <div class="flex items-center gap-2 shrink-0 ml-2">
+                    <button v-if="l.attachment_stored" @click="viewLineReceipt(l.attachment_stored)" class="text-emerald-600" :title="l.attachment_name || 'Lihat nota'">📎</button>
+                    <span class="font-medium text-slate-700">{{ rupiah(l.amount) }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -600,13 +625,21 @@ watch(statusFilter, loadRequests)
             <p class="text-xs text-slate-500 mb-2">Catat pemakaian nyata bertahap (bisa disimpan berkali-kali). Klik <b>Selesaikan LPJ</b> kalau sudah beres — sisa otomatis kembali ke kas.</p>
             <div class="space-y-2 mb-2">
               <div v-for="(l, i) in realizeLines" :key="i" class="flex gap-1.5 items-center">
-                <input v-model="l.date" type="date" class="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500 w-32" />
+                <input v-model="l.date" type="date" class="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500 w-32 shrink-0" />
                 <input v-model="l.description" placeholder="Keterangan" class="flex-1 min-w-0 rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-500" />
-                <select v-model="l.category_id" class="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500 w-32">
+                <select v-model="l.category_id" class="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500 w-32 shrink-0">
                   <option v-for="c in reqCategories" :key="c.id" :value="c.id">{{ c.name }}</option>
                 </select>
-                <input v-model.number="l.amount" type="number" min="0" step="1000" placeholder="Rp" class="w-24 text-right rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-500" />
-                <button @click="removeRealizeRow(i)" class="text-red-400 hover:text-red-600 text-sm px-1" title="Hapus baris">✕</button>
+                <input v-model.number="l.amount" type="number" min="0" step="1000" placeholder="Rp" class="w-24 text-right rounded border border-slate-300 px-2 py-1 text-xs outline-none focus:border-brand-500 shrink-0" />
+                <!-- nota per baris -->
+                <template v-if="l.attachment_stored">
+                  <button @click="viewLineReceipt(l.attachment_stored)" class="text-emerald-600 text-sm shrink-0" :title="l.attachment_name || 'Lihat nota'">📎</button>
+                  <button @click="removeLineReceipt(l)" class="text-slate-300 hover:text-red-500 text-xs shrink-0" title="Hapus nota">✕</button>
+                </template>
+                <label v-else class="text-slate-400 hover:text-brand-600 text-sm cursor-pointer shrink-0" title="Unggah nota">
+                  📎<input type="file" accept="image/*,.pdf" class="hidden" @change="uploadLineReceipt(l, $event)" />
+                </label>
+                <button @click="removeRealizeRow(i)" class="text-red-400 hover:text-red-600 text-sm px-1 shrink-0" title="Hapus baris">✕</button>
               </div>
             </div>
             <button @click="addRealizeRow" class="text-brand-600 text-xs mb-3">+ Tambah Baris</button>
