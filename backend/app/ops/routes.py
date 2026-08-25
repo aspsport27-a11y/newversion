@@ -181,14 +181,10 @@ def categories_update(cid):
 # Budget (plafon) + realisasi
 # ------------------------------------------------------------------
 def _used_by_category(venue_id, year, month):
-    # realisasi budget = pakai jumlah AKTUAL hanya kalau LPJ sudah DISELESAIKAN
-    # (realized_at terisi & sisa sudah balik ke kas). Selama masih draft/belum LPJ,
-    # pakai jumlah yg diajukan/dicairkan (committed) — uang masih di tangan venue.
-    from sqlalchemy import case
-    used_amt = case(
-        (OpRequest.realized_at.isnot(None), func.coalesce(OpRequestItem.realized_amount, 0)),
-        else_=OpRequestItem.amount,
-    )
+    # realisasi budget = pakai jumlah AKTUAL dari LPJ begitu sudah diisi
+    # (realized_amount, walau masih draft); kalau belum ada LPJ sama sekali pakai
+    # jumlah yang diajukan/dicairkan. COALESCE menangani otomatis.
+    used_amt = func.coalesce(OpRequestItem.realized_amount, OpRequestItem.amount)
     rows = (
         db.session.query(OpRequestItem.category_id, func.coalesce(func.sum(used_amt), 0))
         .join(OpRequest, OpRequestItem.request_id == OpRequest.id)
