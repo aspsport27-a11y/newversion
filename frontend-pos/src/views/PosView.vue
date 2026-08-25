@@ -351,7 +351,8 @@ function logout() {
           class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">🕐 Absen</button>
         <button v-if="pos.openShift" @click="showClose = true"
           class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">Tutup Shift</button>
-        <button @click="logout" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">Keluar</button>
+        <!-- Keluar disembunyikan selama shift terbuka — kasir wajib Tutup Shift dulu -->
+        <button v-if="!pos.openShift" @click="logout" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">Keluar</button>
       </div>
     </header>
 

@@ -82,7 +82,10 @@ async function submit() {
       <textarea v-model="notes" placeholder="Catatan (opsional)" rows="2"
         class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-4"></textarea>
 
-      <button @click="submit" :disabled="submitting"
+      <p v-if="variance !== 0" class="text-xs text-red-500 mb-2 text-center">
+        Uang tunai dihitung harus sama dengan kas seharusnya (selisih Rp 0) untuk menutup shift.
+      </p>
+      <button @click="submit" :disabled="submitting || variance !== 0"
         class="w-full py-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold disabled:opacity-50">
         {{ submitting ? 'Menutup…' : 'Tutup Shift' }}
       </button>
