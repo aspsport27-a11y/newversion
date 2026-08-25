@@ -2630,7 +2630,7 @@ def bookings_list():
 
     today = date.today()
     d_from = request.args.get("from") or today.isoformat()
-    d_to = request.args.get("to") or (today + timedelta(days=30)).isoformat()
+    d_to = request.args.get("to") or (today + timedelta(days=90)).isoformat()
     forced = _forced_venue()
     vid = forced if forced is not None else request.args.get("venue_id", type=int)
     fid = request.args.get("facility_id", type=int)

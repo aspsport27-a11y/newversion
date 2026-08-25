@@ -18,9 +18,11 @@ const detailVenueId = ref(null)
 const venues = ref([])
 const venueId = ref('')
 const today = new Date().toISOString().slice(0, 10)
-const in30 = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10)
+// default 90 hari ke depan — booking member (berulang mingguan sebulanan) sering
+// melewati 30 hari, jangan sampai sesi terakhir kepotong dari daftar
+const in90 = new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10)
 const from = ref(today)
-const to = ref(in30)
+const to = ref(in90)
 const onlyUnpaid = ref(false)
 const showVoid = ref(false) // sembunyikan booking Batal secara default
 // filter coach: '' = semua, 'any' = semua yg pakai coach, atau id coach tertentu
