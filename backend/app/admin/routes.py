@@ -1320,6 +1320,27 @@ def facilities_update(fid):
     return jsonify(facility=fac.to_dict()), 200
 
 
+@admin_bp.delete("/facilities/<int:fid>")
+@jwt_required()
+@FACILITY_MANAGE
+def facilities_delete(fid):
+    fac = db.session.get(Facility, fid)
+    if not fac:
+        return _err("Lapangan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_current_user())
+    if vids is not None and fac.venue_id not in vids:
+        return _err("Bukan lapangan venue cakupan Anda", "forbidden", 403)
+    # jangan hapus kalau sudah ada riwayat booking → sarankan nonaktifkan
+    if FacilityBooking.query.filter_by(facility_id=fid).first():
+        return _err(
+            "Lapangan sudah punya riwayat booking — nonaktifkan saja (Edit → Nonaktif), jangan dihapus.",
+            "has_bookings", 409,
+        )
+    db.session.delete(fac)  # rate_rules ikut terhapus (cascade)
+    db.session.commit()
+    return jsonify(ok=True), 200
+
+
 # ------------------------------------------------------------------
 # Tarif per rentang jam (facility_rate_rules) — 1 lapangan bisa punya
 # harga beda2 tergantung jam (mis. malam lebih mahal dari siang).

@@ -61,6 +61,14 @@ async function saveFac() {
   } catch (e) { facErr.value = e?.response?.data?.message || 'Gagal.' } finally { savingFac.value = false }
 }
 
+async function delFacility(f) {
+  if (!window.confirm(`Hapus lapangan "${f.name}"? Tarif per jam ikut terhapus. (Kalau sudah pernah ada booking, tidak bisa dihapus — nonaktifkan saja lewat Edit.)`)) return
+  try {
+    await client.delete(`/admin/facilities/${f.id}`)
+    await loadFacilities(); flash('Lapangan dihapus')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
+}
+
 // ---------------- TARIF PER JAM (facility_rate_rules) ----------------
 const showRates = ref(false)
 const rateFac = ref(null)
@@ -390,6 +398,7 @@ watch(venueId, reload)
               <td class="px-4 py-3 text-right whitespace-nowrap">
                 <button @click="openRates(f)" class="text-amber-600 text-sm hover:underline mr-3">Tarif</button>
                 <button @click="openFac(f)" class="text-brand-600 text-sm hover:underline">Edit</button>
+                <button @click="delFacility(f)" class="text-red-500 text-sm hover:underline ml-3">Hapus</button>
               </td>
             </tr>
           </tbody>
