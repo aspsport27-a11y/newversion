@@ -234,6 +234,10 @@ def _sup_map():
     return {s.id: s.name for s in Supplier.query.all()}
 
 
+def _sup_bank_map():
+    return {s.id: s.bank_account for s in Supplier.query.all()}
+
+
 def _gen_po_code(venue, kind="sale"):
     # ops pakai prefix POO- biar beda dari procurement biasa (PO-). Nomor urut
     # dari MAX yg ada +1 (bukan count) → kebal gap kalau ada PO dihapus.
@@ -289,7 +293,8 @@ def pos_list():
         q = q.filter_by(status=request.args.get("status"))
     pos = q.order_by(PurchaseOrder.created_at.desc()).all()
     sm = _sup_map()
-    return jsonify(count=len(pos), pos=[p.to_dict(sm.get(p.supplier_id)) for p in pos]), 200
+    bm = _sup_bank_map()
+    return jsonify(count=len(pos), pos=[p.to_dict(sm.get(p.supplier_id), bm.get(p.supplier_id)) for p in pos]), 200
 
 
 @proc_bp.get("/pos/<int:pid>")

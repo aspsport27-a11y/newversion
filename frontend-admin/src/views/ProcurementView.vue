@@ -437,7 +437,10 @@ watch(tab, reloadTab)
               <tr v-for="p in filteredPos" :key="p.id" @click="openDetail(p)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ p.code }}</td>
                 <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===p.venue_id)?.code || '—' }}</td>
-                <td class="px-4 py-3 text-slate-600">{{ p.supplier_name || '—' }}</td>
+                <td class="px-4 py-3 text-slate-600">
+                  <div>{{ p.supplier_name || '—' }}</div>
+                  <div v-if="p.supplier_bank" class="text-xs text-slate-400 font-mono">💳 {{ p.supplier_bank }}</div>
+                </td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(p.total_amount) }}</td>
                 <td class="px-4 py-3 text-center"><span :class="statusMap[p.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[p.status]?.[0] }}</span></td>
                 <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
