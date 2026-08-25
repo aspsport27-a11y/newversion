@@ -628,15 +628,21 @@ watch(statusFilter, loadRequests)
 
         <div class="border rounded-lg overflow-hidden mb-3">
           <table class="w-full text-sm">
-            <thead class="bg-slate-50 text-slate-500 text-left text-xs"><tr><th class="px-3 py-2">Kategori</th><th class="px-3 py-2 text-right">Jumlah</th><th class="px-3 py-2 text-right">Sisa budget</th></tr></thead>
+            <thead class="bg-slate-50 text-slate-500 text-left text-xs"><tr><th class="px-3 py-2">Kategori</th><th class="px-3 py-2 text-right">{{ detail.status === 'disbursed' ? 'Dicairkan' : 'Jumlah' }}</th><th class="px-3 py-2 text-right">Terpakai</th><th class="px-3 py-2 text-right">Sisa</th></tr></thead>
             <tbody>
               <tr v-for="it in detail.items" :key="it.id" class="border-t">
                 <td class="px-3 py-2 text-slate-700">{{ it.category_name }}<div v-if="it.note" class="text-xs text-slate-400">{{ it.note }}</div></td>
                 <td class="px-3 py-2 text-right">{{ rupiah(it.amount) }}</td>
-                <td class="px-3 py-2 text-right text-xs" :class="it.budget_remaining < 0 ? 'text-red-600' : 'text-slate-400'">{{ it.budget != null ? rupiah(it.budget_remaining) : '—' }}</td>
+                <td class="px-3 py-2 text-right text-amber-600">{{ it.realized_amount != null ? rupiah(it.realized_amount) : '—' }}</td>
+                <td class="px-3 py-2 text-right font-medium" :class="(it.amount - (it.realized_amount || 0)) < 0 ? 'text-red-600' : 'text-emerald-600'">{{ rupiah(it.amount - (it.realized_amount || 0)) }}</td>
               </tr>
             </tbody>
-            <tfoot><tr class="border-t bg-slate-50 font-semibold"><td class="px-3 py-2">Total</td><td class="px-3 py-2 text-right">{{ rupiah(detail.total_amount) }}</td><td></td></tr></tfoot>
+            <tfoot><tr class="border-t bg-slate-50 font-semibold">
+              <td class="px-3 py-2">Total</td>
+              <td class="px-3 py-2 text-right">{{ rupiah(detail.total_amount) }}</td>
+              <td class="px-3 py-2 text-right text-amber-600">{{ rupiah(detail.realized_total || 0) }}</td>
+              <td class="px-3 py-2 text-right" :class="(detail.total_amount - (detail.realized_total || 0)) < 0 ? 'text-red-600' : 'text-emerald-600'">{{ rupiah(detail.total_amount - (detail.realized_total || 0)) }}</td>
+            </tr></tfoot>
           </table>
         </div>
 
