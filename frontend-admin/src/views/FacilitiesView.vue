@@ -632,7 +632,7 @@ watch(venueId, reload)
 
     <!-- Modal Tarif per Jam -->
     <div v-if="showRates" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
-      <div class="bg-white w-full max-w-lg rounded-2xl p-5">
+      <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
         <div class="flex justify-between items-center mb-1">
           <h3 class="text-lg font-bold text-slate-800">Tarif per Jam — {{ rateFac?.name }}</h3>
           <button @click="showRates = false" class="text-slate-400 text-xl">✕</button>
