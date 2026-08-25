@@ -299,6 +299,30 @@ async function loadCats() {
   const { data } = await client.get('/ops/categories', { params: { all: 1 } })
   catsAll.value = data.categories
 }
+// filter + paging kategori
+const catSearch = ref('')
+const catStatus = ref('')   // '' | 'active' | 'inactive'
+const catVenueFilter = ref('')  // '' semua | 'global' | id venue
+const catPage = ref(1)
+const catPerPage = ref(10)
+const filteredCats = computed(() => {
+  const q = catSearch.value.trim().toLowerCase()
+  return catsAll.value.filter((c) => {
+    if (q && !c.name.toLowerCase().includes(q)) return false
+    if (catStatus.value === 'active' && !c.is_active) return false
+    if (catStatus.value === 'inactive' && c.is_active) return false
+    if (catVenueFilter.value === 'global' && c.venue_id) return false
+    if (catVenueFilter.value && catVenueFilter.value !== 'global' && c.venue_id !== Number(catVenueFilter.value)) return false
+    return true
+  })
+})
+const catTotalPages = computed(() => Math.max(1, Math.ceil(filteredCats.value.length / catPerPage.value)))
+const pagedCats = computed(() => {
+  const start = (catPage.value - 1) * catPerPage.value
+  return filteredCats.value.slice(start, start + catPerPage.value)
+})
+watch([catSearch, catStatus, catVenueFilter], () => { catPage.value = 1 })
+watch(filteredCats, () => { if (catPage.value > catTotalPages.value) catPage.value = catTotalPages.value })
 async function addCat() {
   if (!newCatName.value.trim()) return
   savingCat.value = true
@@ -381,6 +405,21 @@ watch(statusFilter, loadRequests)
         </select>
         <button @click="addCat" :disabled="savingCat" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50">+ Tambah</button>
       </div>
+      <!-- Filter kategori -->
+      <div class="flex flex-wrap gap-2 mb-3 max-w-2xl">
+        <input v-model="catSearch" placeholder="Cari nama kategori…" class="flex-1 min-w-[160px] rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        <select v-model="catStatus" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="">Semua status</option>
+          <option value="active">Aktif</option>
+          <option value="inactive">Nonaktif</option>
+        </select>
+        <select v-if="isApprover" v-model="catVenueFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+          <option value="">Semua venue</option>
+          <option value="global">Global</option>
+          <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }}</option>
+        </select>
+      </div>
+
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden max-w-2xl">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
@@ -389,8 +428,8 @@ watch(statusFilter, loadRequests)
             <th class="px-4 py-2 font-medium text-center">Status</th><th class="px-4 py-2"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="!catsAll.length"><td colspan="4" class="px-4 py-6 text-center text-slate-400">Belum ada kategori.</td></tr>
-            <tr v-for="c in catsAll" :key="c.id" class="border-t">
+            <tr v-if="!filteredCats.length"><td colspan="4" class="px-4 py-6 text-center text-slate-400">{{ catsAll.length ? 'Tidak ada kategori yang cocok.' : 'Belum ada kategori.' }}</td></tr>
+            <tr v-for="c in pagedCats" :key="c.id" class="border-t">
               <td class="px-4 py-2 text-slate-700" :class="{ 'text-slate-400 line-through': !c.is_active }">{{ c.name }}</td>
               <td class="px-4 py-2">
                 <select v-if="isApprover" :value="c.venue_id || ''" @change="setCatVenue(c, $event.target.value)" class="text-xs rounded-lg border border-slate-300 px-2 py-1 outline-none focus:border-brand-500">
@@ -412,6 +451,21 @@ watch(statusFilter, loadRequests)
             </tr>
           </tbody>
         </table>
+        <!-- Paging kategori -->
+        <div v-if="filteredCats.length" class="flex items-center justify-between gap-3 flex-wrap px-4 py-3 border-t bg-slate-50 text-sm text-slate-600">
+          <div class="flex items-center gap-2">
+            <span>Per halaman</span>
+            <select v-model.number="catPerPage" class="rounded-lg border border-slate-300 px-2 py-1 outline-none focus:border-brand-500">
+              <option :value="10">10</option><option :value="25">25</option><option :value="50">50</option>
+            </select>
+            <span class="text-slate-400">·</span><span>{{ filteredCats.length }} kategori</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="catPage--" :disabled="catPage <= 1" class="rounded-lg border border-slate-300 px-3 py-1 disabled:opacity-40 hover:bg-white">‹</button>
+            <span>Hal. {{ catPage }} / {{ catTotalPages }}</span>
+            <button @click="catPage++" :disabled="catPage >= catTotalPages" class="rounded-lg border border-slate-300 px-3 py-1 disabled:opacity-40 hover:bg-white">›</button>
+          </div>
+        </div>
       </div>
     </div>
 
