@@ -324,12 +324,20 @@ async function toggleCat(c) {
   catch (e) { alert('Gagal.') }
 }
 
+// ringkas budget utk panel di tab Pengajuan (butuh venue spesifik)
+const budgetSisa = computed(() => (Number(budgetTotals.value.budget) || 0) - (Number(budgetTotals.value.used) || 0))
+function loadBudgetForRequests() {
+  const hasVenue = isManager.value || venueId.value
+  if (hasVenue) loadBudget().catch(() => { budgetTotals.value = { budget: 0, used: 0 } })
+  else budgetTotals.value = { budget: 0, used: 0 }
+}
+
 function reloadTab() {
-  if (tab.value === 'requests') loadRequests()
+  if (tab.value === 'requests') { loadRequests(); loadBudgetForRequests() }
   else if (tab.value === 'budget') loadBudget()
   else if (tab.value === 'categories') loadCats()
 }
-onMounted(async () => { await loadBase(); await loadRequests() })
+onMounted(async () => { await loadBase(); await loadRequests(); loadBudgetForRequests() })
 watch([venueId, period], reloadTab)
 watch(tab, reloadTab)
 watch(statusFilter, loadRequests)
@@ -435,6 +443,22 @@ watch(statusFilter, loadRequests)
           <p class="text-xs text-slate-400 mb-1">Ditolak ({{ reqSummary.rejected.count }})</p>
           <p class="text-lg font-bold text-red-500">{{ rupiah(reqSummary.rejected.total) }}</p>
         </div>
+      </div>
+
+      <!-- Ringkasan budget bulan ini (butuh venue spesifik) -->
+      <div v-if="isManager || venueId" class="bg-white rounded-xl shadow-sm border p-4 mb-4">
+        <div class="flex items-center justify-between flex-wrap gap-3">
+          <p class="text-sm font-semibold text-slate-700">📊 Budget periode {{ ym().month }}/{{ ym().year }}</p>
+          <div class="flex items-center gap-6 text-sm">
+            <div><span class="text-slate-400 text-xs">Plafon</span><div class="font-bold text-slate-700">{{ rupiah(budgetTotals.budget) }}</div></div>
+            <div><span class="text-slate-400 text-xs">Terpakai</span><div class="font-bold text-amber-600">{{ rupiah(budgetTotals.used) }}</div></div>
+            <div><span class="text-slate-400 text-xs">Sisa</span><div class="font-bold" :class="budgetSisa < 0 ? 'text-red-600' : 'text-emerald-600'">{{ rupiah(budgetSisa) }}</div></div>
+          </div>
+        </div>
+        <div v-if="budgetTotals.budget > 0" class="mt-2 h-2 rounded-full bg-slate-100 overflow-hidden">
+          <div class="h-full rounded-full" :class="budgetSisa < 0 ? 'bg-red-500' : 'bg-brand-500'" :style="{ width: Math.min(100, (budgetTotals.used / budgetTotals.budget) * 100) + '%' }"></div>
+        </div>
+        <p v-else class="text-xs text-slate-400 mt-1">Plafon budget belum diatur untuk periode ini (lihat tab Budget).</p>
       </div>
 
       <!-- Ringkasan per venue (admin/HO, saat >1 venue) -->
