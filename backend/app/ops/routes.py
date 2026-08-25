@@ -7,6 +7,7 @@ from datetime import date, datetime
 from flask import Blueprint, current_app, jsonify, request, send_file
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from werkzeug.utils import secure_filename
 
 from ..extensions import db
@@ -136,7 +137,11 @@ def categories_create():
         return _err("Kategori sudah ada", "duplicate", 409)
     c = ExpenseCategory(name=name, venue_id=venue_id, sort_order=int(d.get("sort_order", 99)))
     db.session.add(c)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return _err("Kategori dengan nama itu sudah ada", "duplicate", 409)
     return jsonify(category=c.to_dict()), 201
 
 
