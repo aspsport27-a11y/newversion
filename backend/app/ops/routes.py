@@ -367,6 +367,17 @@ def request_create():
         total += amt
         r.items.append(OpRequestItem(category_id=it["category_id"], amount=amt, note=it.get("note")))
     r.total_amount = total
+    # Cek melebihi sisa budget (tidak diblok — hanya ditandai supaya HO tahu).
+    # Sisa = plafon − dana yg sudah diajukan/dicairkan sebelum pengajuan ini.
+    plafon = {b.category_id: float(b.amount) for b in Budget.query.filter_by(venue_id=vid, year=year, month=month).all()}
+    used = _used_by_category(vid, year, month)
+    req_by_cat = {}
+    for it in r.items:
+        req_by_cat[it.category_id] = req_by_cat.get(it.category_id, 0.0) + float(it.amount)
+    r.over_budget = any(
+        plafon.get(cid, 0) > 0 and (used.get(cid, 0.0) + amt) > plafon.get(cid, 0) + 1e-6
+        for cid, amt in req_by_cat.items()
+    )
     db.session.add(r)
     db.session.commit()
     return jsonify(request=r.to_dict(_cat_map(), _user_map())), 201

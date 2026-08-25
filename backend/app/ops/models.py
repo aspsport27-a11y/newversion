@@ -59,6 +59,7 @@ class OpRequest(db.Model):
     realized_total = db.Column(db.Numeric(15, 2))
     returned_amount = db.Column(db.Numeric(15, 2))  # sisa yg dikembalikan ke kas
     returned_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"))
+    over_budget = db.Column(db.Boolean, nullable=False, default=False)  # migration 060: melebihi sisa plafon
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -78,6 +79,7 @@ class OpRequest(db.Model):
             "total_amount": f(self.total_amount),
             "description": self.description,
             "status": self.status,
+            "over_budget": bool(self.over_budget),
             "rejection_reason": self.rejection_reason,
             "created_by_name": uname(self.created_by),
             "approved_by_name": uname(self.approved_by),

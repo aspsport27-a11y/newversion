@@ -55,6 +55,7 @@ async function loadCategoriesForVenue(vid) {
 async function onModalVenueChange() {
   await loadCategoriesForVenue(cForm.value.venue_id)
   for (const it of cForm.value.items) it.category_id = categories.value[0]?.id
+  await loadCreateBudget(cForm.value.venue_id)
 }
 
 // ---------- Pengajuan ----------
@@ -115,18 +116,54 @@ const cFiles = ref([])
 const cErr = ref('')
 const saving = ref(false)
 const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.amount) || 0), 0))
+// Sisa budget per kategori utk form pengajuan (category_id -> {budget, used, remaining})
+const cBudget = ref({})
+async function loadCreateBudget(vid) {
+  cBudget.value = {}
+  if (!vid) return
+  try {
+    const { year, month } = ym()
+    const { data } = await client.get('/ops/budgets', { params: { venue_id: vid, year, month } })
+    const m = {}
+    for (const r of data.rows) m[r.category_id] = r
+    cBudget.value = m
+  } catch { cBudget.value = {} }
+}
+// jumlah yg diminta per kategori (jumlah semua baris dgn kategori sama)
+const cReqByCat = computed(() => {
+  const m = {}
+  for (const it of cForm.value.items) {
+    if (!it.category_id) continue
+    m[it.category_id] = (m[it.category_id] || 0) + (Number(it.amount) || 0)
+  }
+  return m
+})
+// info sisa budget utk 1 baris: null jika kategori belum punya plafon
+function rowBudget(it) {
+  const b = cBudget.value[it.category_id]
+  if (!b || Number(b.budget) <= 0) return null
+  const req = cReqByCat.value[it.category_id] || 0
+  const sisa = Number(b.remaining) - req            // sisa setelah pengajuan ini
+  return { plafon: Number(b.budget), remaining: Number(b.remaining), req, sisa, over: sisa < -1e-6 }
+}
+const cHasOver = computed(() => cForm.value.items.some((it) => rowBudget(it)?.over))
 async function openCreate() {
   const vid = isManager.value ? auth.user?.venue_id : (venueId.value || venues.value[0]?.id)
   cForm.value = { venue_id: vid, description: '', items: [{ category_id: null, amount: null, note: '' }] }
   cFiles.value = []; cErr.value = ''
   await loadCategoriesForVenue(vid)
   cForm.value.items[0].category_id = categories.value[0]?.id
+  await loadCreateBudget(vid)
   showCreate.value = true
 }
 function addRow() { cForm.value.items.push({ category_id: categories.value[0]?.id, amount: null, note: '' }) }
 function rmRow(i) { cForm.value.items.splice(i, 1) }
 function onFiles(e) { cFiles.value = Array.from(e.target.files) }
 async function submitCreate() {
+  if (cHasOver.value && !cForm.value.description?.trim()) {
+    cErr.value = 'Pengajuan melebihi sisa budget — wajib isi catatan/alasan pada Deskripsi.'
+    return
+  }
   saving.value = true; cErr.value = ''
   try {
     const payload = { ...ym(), description: cForm.value.description, items: cForm.value.items.filter((i) => i.category_id && i.amount > 0) }
@@ -587,7 +624,7 @@ watch(statusFilter, loadRequests)
               <tr v-if="loadingReq"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
               <tr v-else-if="!requests.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan.</td></tr>
               <tr v-for="r in requests" :key="r.id" @click="openDetail(r)" class="border-t hover:bg-slate-50 cursor-pointer">
-                <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ r.code }}</td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-500 whitespace-nowrap">{{ r.code }}<span v-if="r.over_budget" title="Melebihi budget" class="ml-1 align-middle inline-block rounded bg-red-100 text-red-700 text-[10px] font-sans font-semibold px-1 py-0.5">⚠ Over</span></td>
                 <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===r.venue_id)?.code || '—' }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ r.period_month }}/{{ r.period_year }}</td>
                 <td class="px-4 py-3 text-slate-600 max-w-xs truncate">{{ r.description || '—' }}</td>
@@ -654,16 +691,27 @@ watch(statusFilter, loadRequests)
             <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
           </select>
         </div>
-        <textarea v-model="cForm.description" placeholder="Deskripsi / keterangan" rows="2" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3"></textarea>
+        <label class="block text-xs font-medium mb-1" :class="cHasOver ? 'text-red-600' : 'text-slate-500'">Deskripsi / keterangan<span v-if="cHasOver"> — wajib (catatan melebihi budget)</span></label>
+        <textarea v-model="cForm.description" placeholder="Deskripsi / keterangan" rows="2" class="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3" :class="cHasOver && !cForm.description?.trim() ? 'border-red-400 bg-red-50' : 'border-slate-300'"></textarea>
         <p class="text-xs font-medium text-slate-500 mb-1">Rincian</p>
-        <div v-for="(it, i) in cForm.items" :key="i" class="flex gap-2 mb-2">
-          <select v-model="it.category_id" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none w-40">
-            <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
-          </select>
-          <input v-model.number="it.amount" type="number" placeholder="Jumlah" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
-          <button @click="rmRow(i)" class="text-red-400 px-1">✕</button>
+        <div v-for="(it, i) in cForm.items" :key="i" class="mb-2">
+          <div class="flex gap-2">
+            <select v-model="it.category_id" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none w-40">
+              <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+            </select>
+            <input v-model.number="it.amount" type="number" placeholder="Jumlah" class="flex-1 rounded-lg border px-2 py-1.5 text-sm text-right outline-none" :class="rowBudget(it)?.over ? 'border-red-400 bg-red-50' : 'border-slate-300'" />
+            <button @click="rmRow(i)" class="text-red-400 px-1">✕</button>
+          </div>
+          <div v-if="rowBudget(it)" class="text-xs mt-0.5 ml-1" :class="rowBudget(it).over ? 'text-red-600 font-medium' : 'text-slate-400'">
+            <template v-if="rowBudget(it).over">⚠️ Melebihi sisa budget {{ rupiah(rowBudget(it).remaining) }} — kelebihan {{ rupiah(-rowBudget(it).sisa) }}</template>
+            <template v-else>Sisa budget: {{ rupiah(rowBudget(it).remaining) }} → tersisa {{ rupiah(rowBudget(it).sisa) }}</template>
+          </div>
+          <div v-else-if="it.category_id" class="text-xs mt-0.5 ml-1 text-slate-300">Belum ada plafon budget</div>
         </div>
         <button @click="addRow" class="text-brand-600 text-sm mb-3">+ baris</button>
+        <div v-if="cHasOver" class="mb-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          ⚠️ <b>Melebihi budget.</b> Pengajuan tetap boleh dikirim, tapi ditandai khusus & wajib menuliskan alasan pada Deskripsi.
+        </div>
         <div class="flex justify-between font-semibold mb-3"><span>Total</span><span class="text-brand-700">{{ rupiah(cTotal) }}</span></div>
         <label class="block text-xs text-slate-500 mb-1">Bukti (foto/PDF, boleh &gt;1)</label>
         <input type="file" multiple accept="image/*,.pdf" @change="onFiles" class="w-full text-sm mb-3" />
@@ -678,10 +726,12 @@ watch(statusFilter, loadRequests)
         <div class="flex justify-between items-start mb-3">
           <div><h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3><p class="text-sm text-slate-500">Periode {{ detail.period_month }}/{{ detail.period_year }}</p></div>
           <div class="flex items-center gap-2">
+            <span v-if="detail.over_budget" class="text-xs rounded-full px-2 py-1 bg-red-100 text-red-700 font-medium">⚠ Melebihi budget</span>
             <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
             <button @click="detail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
           </div>
         </div>
+        <div v-if="detail.over_budget" class="mb-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">⚠️ Pengajuan ini melebihi sisa plafon budget kategorinya. Alasan tercatat di deskripsi.</div>
         <p v-if="detail.description" class="text-sm text-slate-600 mb-3">{{ detail.description }}</p>
 
         <div class="border rounded-lg overflow-hidden mb-3">
