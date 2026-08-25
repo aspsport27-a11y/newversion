@@ -526,17 +526,21 @@ watch(statusFilter, loadRequests)
               <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
               <th class="px-4 py-3 font-medium">Periode</th>
               <th class="px-4 py-3 font-medium">Deskripsi</th><th class="px-4 py-3 font-medium text-right">Total</th>
+              <th class="px-4 py-3 font-medium text-right">Sisa (LPJ)</th>
               <th class="px-4 py-3 font-medium text-center">Status</th><th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="loadingReq"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!requests.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan.</td></tr>
+              <tr v-if="loadingReq"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!requests.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan.</td></tr>
               <tr v-for="r in requests" :key="r.id" @click="openDetail(r)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ r.code }}</td>
                 <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===r.venue_id)?.code || '—' }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ r.period_month }}/{{ r.period_year }}</td>
                 <td class="px-4 py-3 text-slate-600 max-w-xs truncate">{{ r.description || '—' }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(r.total_amount) }}</td>
+                <td class="px-4 py-3 text-right text-sm" :class="r.status !== 'disbursed' ? 'text-slate-300' : ((r.total_amount - (r.realized_total || 0)) < 0 ? 'text-red-600' : 'text-emerald-600')">
+                  {{ r.status === 'disbursed' ? rupiah(r.total_amount - (r.realized_total || 0)) : '—' }}
+                </td>
                 <td class="px-4 py-3 text-center"><span :class="statusMap[r.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[r.status]?.[0] }}</span></td>
                 <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
                   <span class="text-brand-600">Detail</span>
