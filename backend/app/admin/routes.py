@@ -2282,7 +2282,9 @@ def _date_range():
 @VIEW
 def report_sales():
     d_from, d_to = _date_range()
-    vid = request.args.get("venue_id", type=int)
+    # manajer DIPAKSA ke venue-nya (tak boleh lihat venue lain); admin/HO bebas
+    forced = _forced_venue()
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
 
     # --- basis kas: pembayaran yang DITERIMA dalam rentang (DP + pelunasan) ---
     pay_q = (
@@ -2370,7 +2372,8 @@ def report_sales():
 @VIEW
 def report_shifts():
     d_from, d_to = _date_range()
-    vid = request.args.get("venue_id", type=int)
+    forced = _forced_venue()  # manajer dipaksa ke venue-nya
+    vid = forced if forced is not None else request.args.get("venue_id", type=int)
     q = Shift.query.filter(func.date(Shift.opened_at).between(d_from, d_to))
     if vid:
         q = q.filter(Shift.venue_id == vid)

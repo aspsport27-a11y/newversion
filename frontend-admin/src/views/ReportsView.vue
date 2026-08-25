@@ -10,6 +10,7 @@ const auth = useAuthStore()
 const toastStore = useToastStore()
 function flash(m) { toastStore.show(m) }
 const canDeleteShift = computed(() => auth.hasPerm('order.cancel'))
+const isManager = computed(() => auth.user?.role === 'manager_unit')
 
 const venues = ref([])
 const venueId = ref('')
@@ -83,7 +84,7 @@ onMounted(async () => { await loadVenues(); await run() })
         <input v-model="from" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
       <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
         <input v-model="to" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
-      <div><label class="block text-xs text-slate-500 mb-1">Venue</label>
+      <div v-if="!isManager"><label class="block text-xs text-slate-500 mb-1">Venue</label>
         <select v-model="venueId" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
           <option value="">Semua venue</option>
           <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
