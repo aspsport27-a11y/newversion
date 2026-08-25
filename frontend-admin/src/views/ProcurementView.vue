@@ -145,9 +145,12 @@ const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.q
 // dipakai produk venue ini; kalau venue belum punya supplier terkait sama sekali
 // (venue baru dsb), tetap tampilkan semua supplier biar tak menghalangi PO ke supplier baru
 const availablePoSuppliers = computed(() => {
+  // tampilkan SEMUA supplier (bisa order ke supplier mana pun); yg sudah terkait
+  // produk venue ini ditaruh di atas biar gampang dipilih.
   const ids = new Set(products.value.filter((p) => p.supplier_id).map((p) => p.supplier_id))
-  const scoped = suppliers.value.filter((s) => ids.has(s.id))
-  return scoped.length ? scoped : suppliers.value
+  const relevant = suppliers.value.filter((s) => ids.has(s.id))
+  const rest = suppliers.value.filter((s) => !ids.has(s.id))
+  return [...relevant, ...rest]
 })
 async function openCreate() {
   const vid = venueId.value || venues.value[0]?.id
