@@ -621,7 +621,11 @@ watch(tab, reloadTab)
     <div v-if="detail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="detail = null">
       <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
         <div class="flex justify-between items-start mb-3">
-          <div><h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3><p class="text-sm text-slate-500">{{ detail.supplier_name || 'Tanpa supplier' }}</p></div>
+          <div>
+            <h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3>
+            <p class="text-sm text-slate-500">{{ detail.supplier_name || 'Tanpa supplier' }}</p>
+            <p v-if="detail.supplier_bank" class="text-xs text-slate-500 mt-0.5">💳 Rek: <span class="font-mono text-slate-700">{{ detail.supplier_bank }}</span></p>
+          </div>
           <div class="flex items-center gap-2">
             <span :class="statusMap[detail.status]?.[1]" class="text-xs rounded-full px-2 py-1">{{ statusMap[detail.status]?.[0] }}</span>
             <button @click="detail = null" class="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
@@ -659,6 +663,12 @@ watch(tab, reloadTab)
           <button v-else-if="detail.status === 'approved'" @click="act('receive')" :disabled="busy" class="w-full py-2.5 rounded-lg bg-violet-600 text-white font-medium disabled:opacity-50">Barang Diterima (stok masuk)</button>
           <template v-else-if="detail.status === 'received' && isApprover">
             <div class="w-full">
+              <div v-if="detail.supplier_bank" class="mb-2 rounded-lg bg-brand-50 border border-brand-200 px-3 py-2 text-sm">
+                <span class="text-slate-500 text-xs">Transfer ke rekening</span>
+                <div class="font-mono font-semibold text-brand-800">{{ detail.supplier_bank }}</div>
+                <div class="text-xs text-slate-500">a.n. {{ detail.supplier_name }}</div>
+              </div>
+              <div v-else class="mb-2 text-xs text-amber-600">⚠️ Supplier belum punya no. rekening — lengkapi di tab Supplier.</div>
               <label class="block text-xs text-slate-500 mb-1">Sumber dana</label>
               <select v-model="sourceAccount" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-2">
                 <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }} ({{ rupiah(a.balance) }})</option>

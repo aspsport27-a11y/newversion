@@ -302,7 +302,8 @@ def po_detail(pid):
     err = _check_venue(po)
     if err:
         return err
-    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
+    sup = db.session.get(Supplier, po.supplier_id) if po.supplier_id else None
+    return jsonify(po=po.to_dict(sup.name if sup else None, sup.bank_account if sup else None)), 200
 
 
 @proc_bp.post("/pos")

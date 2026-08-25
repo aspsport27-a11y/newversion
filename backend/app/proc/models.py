@@ -32,7 +32,7 @@ class PurchaseOrder(db.Model):
     items = db.relationship("PurchaseOrderItem", backref="po", lazy="selectin", cascade="all, delete-orphan")
     attachments = db.relationship("PoAttachment", backref="po", lazy="selectin", cascade="all, delete-orphan")
 
-    def to_dict(self, supplier_name=None):
+    def to_dict(self, supplier_name=None, supplier_bank=None):
         f = lambda v: float(v) if v is not None else None
         return {
             "id": self.id,
@@ -41,6 +41,7 @@ class PurchaseOrder(db.Model):
             "venue_id": self.venue_id,
             "supplier_id": self.supplier_id,
             "supplier_name": supplier_name,
+            "supplier_bank": supplier_bank,
             "total_amount": f(self.total_amount),
             "notes": self.notes,
             "status": self.status,
