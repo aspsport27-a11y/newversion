@@ -249,6 +249,11 @@ export const usePosStore = defineStore('pos', {
       item.quantity -= 1
       if (item.quantity <= 0) this.removeItem(item)
     },
+    // ketik jumlah langsung (min 1; kosong/invalid → 1)
+    setQty(item, val) {
+      const q = Math.floor(Number(val))
+      item.quantity = q > 0 ? q : 1
+    },
     removeItem(item) {
       this.cart = this.cart.filter((i) => i !== item)
     },

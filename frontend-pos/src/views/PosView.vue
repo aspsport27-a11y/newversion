@@ -534,7 +534,8 @@ function logout() {
             </div>
             <div v-if="it.item_type === 'product' || it.item_type === 'ticket'" class="flex items-center gap-1.5">
               <button @click="pos.decQty(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-600 font-bold">−</button>
-              <span class="w-6 text-center text-sm">{{ it.quantity }}</span>
+              <input :value="it.quantity" @change="pos.setQty(it, $event.target.value)" type="number" min="1" inputmode="numeric"
+                class="w-12 h-7 text-center text-sm rounded border border-slate-200 outline-none focus:border-brand-500" />
               <button @click="pos.incQty(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-600 font-bold">+</button>
             </div>
             <button v-else @click="pos.removeItem(it)" class="h-7 w-7 rounded bg-slate-100 text-slate-400 shrink-0">✕</button>
