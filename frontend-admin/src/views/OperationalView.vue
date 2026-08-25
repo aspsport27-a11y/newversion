@@ -545,7 +545,7 @@ watch(statusFilter, loadRequests)
               </tr></tfoot>
             </table>
           </div>
-          <p class="text-xs text-slate-400 mt-3">Terpakai = pemakaian aktual dari LPJ begitu diisi; kalau belum ada LPJ, pakai jumlah yang dicairkan.</p>
+          <p class="text-xs text-slate-400 mt-3">Terpakai = dana yang sudah diajukan/dicairkan (bukan nilai pemakaian LPJ).</p>
           <button v-if="canBudget" @click="tab = 'budget'; showBudgetDetail = false" class="mt-3 text-sm text-brand-600 hover:underline">Atur plafon di tab Budget →</button>
         </div>
       </div>

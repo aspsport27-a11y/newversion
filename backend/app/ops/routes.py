@@ -186,12 +186,11 @@ def categories_update(cid):
 # Budget (plafon) + realisasi
 # ------------------------------------------------------------------
 def _used_by_category(venue_id, year, month):
-    # realisasi budget = pakai jumlah AKTUAL dari LPJ begitu sudah diisi
-    # (realized_amount, walau masih draft); kalau belum ada LPJ sama sekali pakai
-    # jumlah yang diajukan/dicairkan. COALESCE menangani otomatis.
-    used_amt = func.coalesce(OpRequestItem.realized_amount, OpRequestItem.amount)
+    # "Terpakai" budget = dana yg sudah DIAJUKAN/DICAIRKAN (jumlah pengajuan),
+    # BUKAN nilai pemakaian LPJ. (Realisasi LPJ dipakai terpisah di kolom Terpakai
+    # per-pengajuan di modal detail.)
     rows = (
-        db.session.query(OpRequestItem.category_id, func.coalesce(func.sum(used_amt), 0))
+        db.session.query(OpRequestItem.category_id, func.coalesce(func.sum(OpRequestItem.amount), 0))
         .join(OpRequest, OpRequestItem.request_id == OpRequest.id)
         .filter(
             OpRequest.venue_id == venue_id,
