@@ -24,6 +24,21 @@ const orders = ref([])
 const loading = ref(false)
 const detail = ref(null)
 
+// Tab: transaksi vs riwayat hapus
+const tab = ref('tx')
+const delLogs = ref([])
+const delLoading = ref(false)
+async function loadDelLogs() {
+  delLoading.value = true
+  try {
+    const params = {}
+    if (!isManager.value && venueId.value) params.venue_id = venueId.value
+    const { data } = await client.get('/admin/deleted-orders', { params })
+    delLogs.value = data.logs
+  } catch { delLogs.value = [] } finally { delLoading.value = false }
+}
+function switchTab(t) { tab.value = t; if (t === 'deleted') loadDelLogs() }
+
 const statusMap = { paid: ['Lunas', 'bg-emerald-100 text-emerald-700'], open: ['Belum Lunas', 'bg-amber-100 text-amber-700'], void: ['Dibatalkan', 'bg-red-100 text-red-600'] }
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
@@ -131,13 +146,20 @@ async function cancelOrder(o, ev) {
 
 async function deleteOrder(o, ev) {
   ev?.stopPropagation()
-  if (!window.confirm(`Hapus PERMANEN transaksi ${o.order_number}? Tindakan ini tidak bisa dibatalkan.`)) return
+  const dp = Number(o.forfeited_dp) || 0
+  let warn = `Hapus PERMANEN transaksi ${o.order_number}? Tindakan ini tidak bisa dibatalkan.`
+  if (dp > 0) {
+    warn = `⚠️ Transaksi ${o.order_number} punya DP HANGUS ${rupiah(dp)} yang sudah masuk kas.\n\n` +
+      `Menghapus permanen akan MENGHAPUS data DP hangus ini juga (hilang dari tab DP Hangus). ` +
+      `Jejaknya tetap tercatat di tab "Riwayat Hapus".\n\nLanjutkan hapus permanen?`
+  }
+  if (!window.confirm(warn)) return
   busy.value = true
   try {
-    await client.delete(`/admin/orders/${o.id}`)
+    const { data } = await client.delete(`/admin/orders/${o.id}`)
     if (detail.value?.id === o.id) detail.value = null
     await loadOrders()
-    flash('Transaksi dihapus')
+    flash(data?.message || 'Transaksi dihapus')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') } finally { busy.value = false }
 }
 </script>
@@ -151,8 +173,14 @@ async function deleteOrder(o, ev) {
       </div>
     </div>
 
+    <!-- Tabs -->
+    <div class="flex gap-1 border-b border-slate-200 mb-5">
+      <button @click="switchTab('tx')" :class="tab === 'tx' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Transaksi</button>
+      <button @click="switchTab('deleted')" :class="tab === 'deleted' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">🗑️ Riwayat Hapus</button>
+    </div>
+
     <!-- Filter -->
-    <div class="bg-white rounded-xl shadow-sm border p-4 mb-5 flex flex-wrap items-end gap-3">
+    <div v-show="tab === 'tx'" class="bg-white rounded-xl shadow-sm border p-4 mb-5 flex flex-wrap items-end gap-3">
       <div><label class="block text-xs text-slate-500 mb-1">Dari</label>
         <input v-model="from" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
       <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
@@ -174,7 +202,7 @@ async function deleteOrder(o, ev) {
       <button @click="applyFilter" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
     </div>
 
-    <div class="mb-3 flex flex-wrap gap-2">
+    <div v-show="tab === 'tx'" class="mb-3 flex flex-wrap gap-2">
       <input v-model="search" type="text" placeholder="🔍 Cari kode order / kasir…"
         class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
       <select v-model="categoryFilter" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
@@ -184,7 +212,7 @@ async function deleteOrder(o, ev) {
     </div>
 
     <!-- Stiker info -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+    <div v-show="tab === 'tx'" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
       <div class="bg-white rounded-xl shadow-sm border p-4">
         <p class="text-xs text-slate-500">Transaksi</p>
         <p class="text-2xl font-bold text-brand-700 mt-1">{{ stats.count }}</p>
@@ -204,7 +232,7 @@ async function deleteOrder(o, ev) {
       </div>
     </div>
 
-    <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+    <div v-show="tab === 'tx'" class="bg-white rounded-xl shadow-sm border overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
@@ -260,6 +288,41 @@ async function deleteOrder(o, ev) {
           <span class="text-xs text-slate-500">Halaman {{ page }} / {{ totalPages }}</span>
           <button @click="page++" :disabled="page === totalPages" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">Berikutnya ›</button>
           <button @click="page = totalPages" :disabled="page === totalPages" class="text-xs px-2 py-1.5 rounded-lg border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50">»</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Riwayat Hapus (audit log) ===== -->
+    <div v-show="tab === 'deleted'">
+      <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800 mb-4">
+        Jejak transaksi yang <b>dihapus permanen</b> dari Riwayat Transaksi. Termasuk nilai <b>DP hangus</b> yang ikut terhapus — catatan ini tetap tersimpan meski ordernya sudah hilang.
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-3 font-medium">Kode Order</th>
+              <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
+              <th class="px-4 py-3 font-medium">Pelanggan</th>
+              <th class="px-4 py-3 font-medium text-right">Total</th>
+              <th class="px-4 py-3 font-medium text-right">DP Hangus</th>
+              <th class="px-4 py-3 font-medium">Dihapus oleh</th>
+              <th class="px-4 py-3 font-medium">Waktu Hapus</th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="delLoading"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!delLogs.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada transaksi yang dihapus permanen.</td></tr>
+              <tr v-for="l in delLogs" :key="l.id" class="border-t hover:bg-slate-50">
+                <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ l.order_number }}</td>
+                <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venueName(l.venue_id) }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ l.customer_name || '—' }}</td>
+                <td class="px-4 py-3 text-right">{{ rupiah(l.total_amount) }}</td>
+                <td class="px-4 py-3 text-right font-medium" :class="l.forfeited_dp > 0 ? 'text-red-600' : 'text-slate-300'">{{ l.forfeited_dp > 0 ? rupiah(l.forfeited_dp) : '—' }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ l.deleted_by_name || '—' }}</td>
+                <td class="px-4 py-3 text-slate-500 whitespace-nowrap">{{ fmtTime(l.deleted_at) }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

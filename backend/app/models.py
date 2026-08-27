@@ -542,3 +542,38 @@ class Approval(db.Model):
     rejection_reason = db.Column(db.Text)
     created_at = db.Column(db.DateTime)
     updated_at = db.Column(db.DateTime)
+
+
+class DeletedOrderLog(db.Model):
+    """Jejak audit transaksi yg DIHAPUS PERMANEN dari Riwayat Transaksi
+    (migration 061). Order aslinya sudah tak ada, jadi kolom disimpan snapshot.
+    Penting utk transaksi yg DP-nya hangus (uang sudah masuk kas) — biar tetap
+    ada catatan meski ordernya dibuang."""
+
+    __tablename__ = "deleted_order_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    order_number = db.Column(db.String(30), nullable=False)
+    venue_id = db.Column(db.Integer)
+    customer_name = db.Column(db.String(100))
+    status_before = db.Column(db.String(10))
+    total_amount = db.Column(db.Numeric(15, 2), default=0)
+    forfeited_dp = db.Column(db.Numeric(15, 2), default=0)  # DP hangus yg ikut terhapus
+    deleted_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    deleted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    note = db.Column(db.Text)
+
+    def to_dict(self, users=None):
+        f = lambda v: float(v) if v is not None else 0.0
+        return {
+            "id": self.id,
+            "order_number": self.order_number,
+            "venue_id": self.venue_id,
+            "customer_name": self.customer_name,
+            "status_before": self.status_before,
+            "total_amount": f(self.total_amount),
+            "forfeited_dp": f(self.forfeited_dp),
+            "deleted_by_name": (users or {}).get(self.deleted_by),
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
+            "note": self.note,
+        }

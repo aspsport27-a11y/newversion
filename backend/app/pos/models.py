@@ -372,9 +372,12 @@ class Order(db.Model):
         f = lambda v: float(v) if v is not None else None
         total = float(self.total_amount or 0)
         paid = float(self.amount_paid or 0)
+        # DP hangus = pembayaran yg sudah masuk (paid) pada order yg dibatalkan.
+        kept = round(sum(float(p.amount) for p in self.payments if p.status == "paid"), 2)
         return {
             "id": self.id,
             "order_number": self.order_number,
+            "forfeited_dp": kept if self.status == "void" else 0.0,
             "venue_id": self.venue_id,
             "status": self.status,
             "is_member": self.is_member,

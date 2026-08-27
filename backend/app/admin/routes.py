@@ -12,7 +12,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Area, Employee, EmployeeDebt, KasbonRequest, Supplier, User, Venue
+from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, Supplier, User, Venue
 from ..security import (
     ROLE_ADMIN,
     ROLE_ADMIN_UNIT,
@@ -3178,20 +3178,41 @@ def order_delete_admin(order_id):
             "Hanya transaksi berstatus Dibatalkan yang bisa dihapus permanen.",
             "bad_status", 409,
         )
-    # order void yg DP-nya SUDAH masuk & tidak direfund (payment tetap 'paid' =
-    # DP hangus, pendapatan sah yg sudah masuk kas/setoran) TAK BOLEH dihapus —
-    # nanti jejak pendapatan hilang & bikin selisih rekonsiliasi. Lihat tab
-    # "DP Hangus". Yg boleh dihapus cuma yg tak ada uang tersangkut.
+    # DP hangus = pembayaran yg sudah masuk (paid) tapi tak direfund. Boleh
+    # dihapus permanen (atas permintaan), TAPI dicatat dulu di jejak audit
+    # (deleted_order_logs) supaya tetap ada bukti — termasuk nilai DP hangus
+    # yg ikut terhapus. Lihat tab "Riwayat Hapus".
     kept = round(sum(float(p.amount) for p in order.payments if p.status == "paid"), 2)
-    if kept > 0:
-        return _err(
-            "Order ini punya DP hangus yang sudah masuk kas — tak bisa dihapus permanen. "
-            "Sembunyikan saja; datanya tetap ada di tab DP Hangus.",
-            "has_forfeited_dp", 409,
-        )
+    db.session.add(DeletedOrderLog(
+        order_number=order.order_number, venue_id=order.venue_id,
+        customer_name=order.customer_name, status_before=order.status,
+        total_amount=order.total_amount, forfeited_dp=kept,
+        deleted_by=_current_user().id,
+        note=("Termasuk DP hangus yang ikut terhapus." if kept > 0 else None),
+    ))
     db.session.delete(order)  # order_items & payments ikut terhapus (ondelete=CASCADE)
     db.session.commit()
-    return jsonify(message="Transaksi dihapus permanen"), 200
+    msg = "Transaksi dihapus permanen"
+    if kept > 0:
+        msg = f"Transaksi & DP hangus Rp {int(kept):,} dihapus permanen".replace(",", ".")
+    return jsonify(message=msg, forfeited_dp=kept), 200
+
+
+@admin_bp.get("/deleted-orders")
+@jwt_required()
+@ORDER_CANCEL
+def deleted_orders_list():
+    """Jejak audit transaksi yg dihapus permanen (tab 'Riwayat Hapus').
+    Manager unit hanya lihat venue-nya."""
+    q = DeletedOrderLog.query
+    forced = _forced_venue()
+    if forced is not None:
+        q = q.filter(DeletedOrderLog.venue_id == forced)
+    elif request.args.get("venue_id", type=int):
+        q = q.filter(DeletedOrderLog.venue_id == request.args.get("venue_id", type=int))
+    rows = q.order_by(DeletedOrderLog.deleted_at.desc()).limit(500).all()
+    users = {u.id: (u.name or u.username) for u in User.query.all()}
+    return jsonify(logs=[r.to_dict(users) for r in rows]), 200
 
 
 @admin_bp.get("/reports/outstanding")
