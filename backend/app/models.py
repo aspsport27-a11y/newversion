@@ -609,3 +609,35 @@ class ShiftReopenLog(db.Model):
             "reopened_by_name": (users or {}).get(self.reopened_by),
             "reopened_at": self.reopened_at.isoformat() if self.reopened_at else None,
         }
+
+
+class ShiftAdjustLog(db.Model):
+    """Jejak audit penyesuaian shift cepat (+/- per metode) — migration 063."""
+
+    __tablename__ = "shift_adjust_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    shift_id = db.Column(db.Integer)
+    venue_id = db.Column(db.Integer)
+    cash_delta = db.Column(db.Numeric(15, 2), default=0)
+    qris_delta = db.Column(db.Numeric(15, 2), default=0)
+    transfer_delta = db.Column(db.Numeric(15, 2), default=0)
+    note = db.Column(db.Text, nullable=False)
+    order_number = db.Column(db.String(30))
+    adjusted_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    adjusted_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self, users=None):
+        f = lambda v: float(v) if v is not None else 0.0
+        return {
+            "id": self.id,
+            "shift_id": self.shift_id,
+            "venue_id": self.venue_id,
+            "cash_delta": f(self.cash_delta),
+            "qris_delta": f(self.qris_delta),
+            "transfer_delta": f(self.transfer_delta),
+            "note": self.note,
+            "order_number": self.order_number,
+            "adjusted_by_name": (users or {}).get(self.adjusted_by),
+            "adjusted_at": self.adjusted_at.isoformat() if self.adjusted_at else None,
+        }

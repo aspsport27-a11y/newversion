@@ -71,6 +71,37 @@ async function reopenShift(s) {
     alert(e?.response?.data?.message || 'Gagal membuka shift.')
   }
 }
+// ---- Penyesuaian shift cepat (+/- per metode) ----
+const showAdj = ref(false)
+const adjShift = ref(null)
+const adjForm = ref({ cash: null, qris: null, transfer: null, note: '' })
+const adjSaving = ref(false)
+const adjErr = ref('')
+function openAdjust(s) {
+  adjShift.value = s
+  adjForm.value = { cash: null, qris: null, transfer: null, note: '' }
+  adjErr.value = ''
+  showAdj.value = true
+}
+function adjNewTotal(s, field, delta) { return (Number(s?.[field]) || 0) + (Number(delta) || 0) }
+async function submitAdjust() {
+  const anyVal = ['cash', 'qris', 'transfer'].some((k) => Number(adjForm.value[k]))
+  if (!anyVal) { adjErr.value = 'Isi minimal satu nominal (boleh minus).'; return }
+  if (!adjForm.value.note.trim()) { adjErr.value = 'Catatan/alasan wajib diisi.'; return }
+  adjSaving.value = true; adjErr.value = ''
+  try {
+    const { data } = await client.post(`/admin/shifts/${adjShift.value.id}/adjust`, {
+      cash: Number(adjForm.value.cash) || 0,
+      qris: Number(adjForm.value.qris) || 0,
+      transfer: Number(adjForm.value.transfer) || 0,
+      note: adjForm.value.note.trim(),
+    })
+    showAdj.value = false
+    await run()
+    flash(data?.message || 'Penyesuaian tersimpan')
+  } catch (e) { adjErr.value = e?.response?.data?.message || 'Gagal.' } finally { adjSaving.value = false }
+}
+
 // ---- Entri koreksi back-date ----
 const showCorr = ref(false)
 const corrShift = ref(null)
@@ -295,7 +326,8 @@ onMounted(async () => { await loadVenues(); await run() })
                   <span v-if="s.deposited" title="Sudah disetor" class="ml-1 text-xs text-emerald-600">💰</span>
                 </td>
                 <td v-if="canDeleteShift || canReopen" class="px-4 py-2 text-right whitespace-nowrap">
-                  <button v-if="canReopen && s.status === 'closed' && !s.deposited" @click="reopenShift(s)" class="text-brand-600 text-xs hover:underline">↻ Buka Kembali</button>
+                  <button v-if="canReopen && !s.deposited" @click="openAdjust(s)" class="text-indigo-600 text-xs hover:underline">⇅ Sesuaikan</button>
+                  <button v-if="canReopen && s.status === 'closed' && !s.deposited" @click="reopenShift(s)" class="text-brand-600 text-xs hover:underline ml-3">↻ Buka Kembali</button>
                   <button v-if="canReopen && s.status === 'open'" @click="openCorrection(s)" class="text-brand-600 text-xs hover:underline">+ Koreksi</button>
                   <button v-if="canReopen && s.status === 'open'" @click="closeShiftAdmin(s)" class="text-emerald-600 text-xs hover:underline ml-3">Tutup</button>
                   <button v-if="canDeleteShift" @click="deleteShift(s)" class="text-red-500 text-xs hover:underline ml-3">Hapus</button>
@@ -337,6 +369,31 @@ onMounted(async () => { await loadVenues(); await run() })
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal: Penyesuaian shift cepat -->
+    <div v-if="showAdj" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="showAdj = false">
+      <div class="bg-white w-full max-w-md rounded-2xl p-5 max-h-[90vh] overflow-auto">
+        <div class="flex justify-between items-center mb-1">
+          <h3 class="text-lg font-bold text-slate-800">Sesuaikan Shift</h3>
+          <button @click="showAdj = false" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <p class="text-xs text-slate-500 mb-3">{{ adjShift?.cashier || '—' }} · {{ adjShift && adjShift.opened_at ? parseUTC(adjShift.opened_at).toLocaleDateString('id-ID') : '—' }}</p>
+        <div class="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 text-xs text-indigo-800 mb-3">
+          Isi <b>+/‑ per metode</b> (boleh minus untuk mengurangi). Dicatat sbg penyesuaian back-date sehingga <b>Laporan Shift & Laporan Penjualan tetap cocok</b> dan ter-audit.
+        </div>
+        <div class="space-y-2 mb-3">
+          <div v-for="m in [['cash','Tunai (Cash)','total_cash_sales'],['qris','QRIS','total_qris_sales'],['transfer','Transfer','total_transfer_sales']]" :key="m[0]" class="flex items-center gap-2">
+            <label class="w-28 text-sm text-slate-600">{{ m[1] }}</label>
+            <input v-model.number="adjForm[m[0]]" type="number" placeholder="0 (± )" class="w-32 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none focus:border-brand-500" />
+            <span class="text-xs text-slate-400">→ {{ rupiah(adjNewTotal(adjShift, m[2], adjForm[m[0]])) }}</span>
+          </div>
+        </div>
+        <label class="block text-xs text-slate-500 mb-1">Catatan / alasan (wajib)</label>
+        <textarea v-model="adjForm.note" rows="2" placeholder="mis. koreksi salah metode bayar / lupa input tunai" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3"></textarea>
+        <p v-if="adjErr" class="text-sm text-red-600 mb-2">{{ adjErr }}</p>
+        <button @click="submitAdjust" :disabled="adjSaving" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ adjSaving ? 'Menyimpan…' : 'Simpan Penyesuaian' }}</button>
       </div>
     </div>
 

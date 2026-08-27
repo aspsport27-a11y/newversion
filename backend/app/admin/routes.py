@@ -12,7 +12,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, ShiftReopenLog, Supplier, User, Venue
+from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, ShiftAdjustLog, ShiftReopenLog, Supplier, User, Venue
 from ..security import (
     ROLE_ADMIN,
     ROLE_ADMIN_UNIT,
@@ -2693,6 +2693,86 @@ def shift_close_admin(shift_id):
     return jsonify(message="Shift ditutup.", shift=shift.to_dict()), 200
 
 
+@admin_bp.post("/shifts/<int:shift_id>/adjust")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def shift_adjust(shift_id):
+    """Penyesuaian shift CEPAT (+/- per metode) langsung dari tabel rekonsiliasi.
+    Dibuat sbg order+payment back-date (tgl shift) supaya Laporan Shift &
+    Laporan Penjualan tetap konsisten. Shift ditutup pun boleh (tak perlu buka
+    dulu); expected_cash & selisih dihitung ulang. Ditolak jika sudah disetor."""
+    shift = db.session.get(Shift, shift_id)
+    if not shift:
+        return _err("Shift tidak ditemukan", "not_found", 404)
+    if shift.deposit_id is not None:
+        return _err("Kas shift sudah DISETOR — tarik setoran dulu.", "already_deposited", 409)
+    d = request.get_json(silent=True) or {}
+    note = (d.get("note") or "").strip()
+    if not note:
+        return _err("Catatan/alasan penyesuaian wajib diisi.")
+    deltas = {
+        "cash": float(_D(d.get("cash"))),
+        "qris": float(_D(d.get("qris"))),
+        "transfer": float(_D(d.get("transfer"))),
+    }
+    if all(abs(v) < 0.005 for v in deltas.values()):
+        return _err("Isi minimal satu nominal penyesuaian (boleh minus).")
+
+    back_dt = shift.opened_at or datetime.utcnow()
+    venue = db.session.get(Venue, shift.venue_id)
+    prefix = f"{venue.code}-{back_dt:%Y%m%d}-"
+    existing = db.session.query(Order.order_number).filter(Order.order_number.like(prefix + "%")).all()
+    max_seq = 0
+    for (num,) in existing:
+        try:
+            max_seq = max(max_seq, int(num.rsplit("-", 1)[-1]))
+        except ValueError:
+            continue
+    order_number = f"ADJ-{prefix}{max_seq + 1:04d}"[:30]
+    net = sum(deltas.values())
+
+    order = Order(
+        order_number=order_number, venue_id=shift.venue_id, terminal_id=shift.terminal_id,
+        shift_id=shift.id, cashier_id=shift.cashier_id, customer_name="[PENYESUAIAN]",
+        status="paid", subtotal=net, discount_amount=0, total_amount=net, amount_paid=net,
+        notes=f"Penyesuaian shift oleh {_current_user().username}: {note}",
+        created_at=back_dt, updated_at=datetime.utcnow(),
+    )
+    order.items.append(OrderItem(
+        item_type="product", name_snapshot=f"Penyesuaian shift: {note}"[:120],
+        unit_price=net, quantity=1, line_total=net, created_at=back_dt,
+    ))
+    for method, amt in deltas.items():
+        if abs(amt) < 0.005:
+            continue
+        order.payments.append(Payment(
+            method=method, provider=method, amount=amt, status="paid",
+            shift_id=shift.id, paid_at=back_dt, created_at=back_dt,
+            confirmed_by=_current_user().id, reference=f"Penyesuaian: {note}"[:100],
+        ))
+    # terapkan ke akumulasi shift
+    shift.total_cash_sales = float(shift.total_cash_sales or 0) + deltas["cash"]
+    shift.total_qris_sales = float(shift.total_qris_sales or 0) + deltas["qris"]
+    shift.total_transfer_sales = float(shift.total_transfer_sales or 0) + deltas["transfer"]
+    shift.total_sales = float(shift.total_sales or 0) + net
+    # hitung ulang expected & selisih (kalau sudah pernah dihitung)
+    shift.expected_cash = (
+        float(shift.opening_cash or 0) + float(shift.total_cash_sales or 0)
+        + float(shift.cash_in or 0) - float(shift.cash_out or 0)
+    )
+    if shift.counted_cash is not None:
+        shift.cash_variance = float(shift.counted_cash) - float(shift.expected_cash)
+    db.session.add(order)
+    db.session.add(ShiftAdjustLog(
+        shift_id=shift.id, venue_id=shift.venue_id, cash_delta=deltas["cash"],
+        qris_delta=deltas["qris"], transfer_delta=deltas["transfer"], note=note,
+        order_number=order_number, adjusted_by=_current_user().id,
+    ))
+    db.session.commit()
+    return jsonify(message="Penyesuaian shift tersimpan (konsisten dgn laporan penjualan).",
+                   shift=shift.to_dict()), 201
+
+
 @admin_bp.post("/shifts/<int:shift_id>/correction-entry")
 @jwt_required()
 @roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
@@ -2793,6 +2873,20 @@ def shift_reopen_logs():
     if request.args.get("venue_id", type=int):
         q = q.filter(ShiftReopenLog.venue_id == request.args.get("venue_id", type=int))
     rows = q.order_by(ShiftReopenLog.reopened_at.desc()).limit(500).all()
+    emp_names = {e.id: e.name for e in Employee.query.all()}
+    users = {u.id: (emp_names.get(u.employee_id) or u.username) for u in User.query.all()}
+    return jsonify(logs=[r.to_dict(users) for r in rows]), 200
+
+
+@admin_bp.get("/shifts/adjust-logs")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def shift_adjust_logs():
+    """Jejak audit penyesuaian shift (+/- per metode)."""
+    q = ShiftAdjustLog.query
+    if request.args.get("venue_id", type=int):
+        q = q.filter(ShiftAdjustLog.venue_id == request.args.get("venue_id", type=int))
+    rows = q.order_by(ShiftAdjustLog.adjusted_at.desc()).limit(500).all()
     emp_names = {e.id: e.name for e in Employee.query.all()}
     users = {u.id: (emp_names.get(u.employee_id) or u.username) for u in User.query.all()}
     return jsonify(logs=[r.to_dict(users) for r in rows]), 200
