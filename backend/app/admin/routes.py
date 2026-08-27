@@ -2623,16 +2623,19 @@ def shift_delete(shift_id):
 
 @admin_bp.post("/shifts/<int:shift_id>/reopen")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
 def shift_reopen(shift_id):
-    """Buka kembali shift yang sudah ditutup untuk koreksi (Admin/HO saja).
-    Setelah dibuka: status → open, kasir/admin bisa tambah/batalkan/ubah
-    transaksi (total shift ikut menyesuaikan), lalu TUTUP LAGI (expected_cash &
-    selisih dihitung ulang otomatis). Wajib alasan; dicatat di jejak audit.
+    """Buka kembali shift yang sudah ditutup untuk koreksi. Admin/HO: semua
+    venue; manajer: venue-nya. Setelah dibuka: status → open, transaksi bisa
+    ditambah/dibatalkan/diubah (total ikut menyesuaikan), lalu TUTUP LAGI
+    (expected_cash & selisih dihitung ulang). Wajib alasan; dicatat di audit.
     Ditolak kalau kas shift sudah DISETOR (tarik setoran dulu)."""
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and shift.venue_id != forced:
+        return _err("Bukan shift venue Anda", "forbidden", 403)
     if shift.status != "closed":
         return _err("Shift belum ditutup — tak perlu dibuka.", "not_closed", 409)
     if shift.deposit_id is not None:
@@ -2667,16 +2670,19 @@ def shift_reopen(shift_id):
 
 @admin_bp.post("/shifts/<int:shift_id>/close")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
 def shift_close_admin(shift_id):
-    """Tutup shift oleh Admin/HO (mis. setelah dibuka kembali & dikoreksi dari
-    back office, tanpa harus lewat terminal kasir). expected_cash & selisih
-    dihitung ulang otomatis oleh close_shift."""
+    """Tutup shift dari back office (mis. setelah dibuka kembali & dikoreksi,
+    tanpa lewat terminal kasir). Admin/HO: semua venue; manajer: venue-nya.
+    expected_cash & selisih dihitung ulang otomatis oleh close_shift."""
     from ..pos.services import PosError, close_shift
 
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and shift.venue_id != forced:
+        return _err("Bukan shift venue Anda", "forbidden", 403)
     if shift.status != "open":
         return _err("Shift tidak dalam keadaan terbuka.", "not_open", 409)
     d = request.get_json(silent=True) or {}
@@ -3027,11 +3033,14 @@ def shift_correction_entry(shift_id):
 
 @admin_bp.get("/shifts/reopen-logs")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
 def shift_reopen_logs():
-    """Jejak audit buka-kembali shift (tab riwayat)."""
+    """Jejak audit buka-kembali shift (tab riwayat). Manajer: venue-nya saja."""
     q = ShiftReopenLog.query
-    if request.args.get("venue_id", type=int):
+    forced = _forced_venue()
+    if forced is not None:
+        q = q.filter(ShiftReopenLog.venue_id == forced)
+    elif request.args.get("venue_id", type=int):
         q = q.filter(ShiftReopenLog.venue_id == request.args.get("venue_id", type=int))
     rows = q.order_by(ShiftReopenLog.reopened_at.desc()).limit(500).all()
     emp_names = {e.id: e.name for e in Employee.query.all()}
