@@ -149,9 +149,10 @@ async function deleteOrder(o, ev) {
   const dp = Number(o.forfeited_dp) || 0
   let warn = `Hapus PERMANEN transaksi ${o.order_number}? Tindakan ini tidak bisa dibatalkan.`
   if (dp > 0) {
-    warn = `⚠️ Transaksi ${o.order_number} punya DP HANGUS ${rupiah(dp)} yang sudah masuk kas.\n\n` +
-      `Menghapus permanen akan MENGHAPUS data DP hangus ini juga (hilang dari tab DP Hangus). ` +
-      `Jejaknya tetap tercatat di tab "Riwayat Hapus".\n\nLanjutkan hapus permanen?`
+    warn = `⚠️ Transaksi ${o.order_number} punya uang ${rupiah(dp)} yang sudah masuk kas (di shift tertutup).\n\n` +
+      `Hapus permanen = KOREKSI: uang ini akan DIKELUARKAN dari kas — total shift terkait ikut dikoreksi turun ` +
+      `sehingga Laporan Penjualan & Laporan Shift tetap konsisten.\n\n` +
+      `Gunakan hanya untuk kesalahan input / dobel. Jejaknya tercatat di tab "Riwayat Hapus".\n\nLanjutkan?`
   }
   if (!window.confirm(warn)) return
   busy.value = true
@@ -295,7 +296,7 @@ async function deleteOrder(o, ev) {
     <!-- ===== Riwayat Hapus (audit log) ===== -->
     <div v-show="tab === 'deleted'">
       <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800 mb-4">
-        Jejak transaksi yang <b>dihapus permanen</b> dari Riwayat Transaksi. Termasuk nilai <b>DP hangus</b> yang ikut terhapus — catatan ini tetap tersimpan meski ordernya sudah hilang.
+        Jejak transaksi yang <b>dihapus permanen</b> dari Riwayat Transaksi. Kolom <b>Dikeluarkan dari Kas</b> = uang yang ikut dikoreksi keluar saat penghapusan (total shift terkait sudah disesuaikan). Catatan ini tetap tersimpan meski ordernya sudah hilang.
       </div>
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <div class="overflow-x-auto">
@@ -305,7 +306,7 @@ async function deleteOrder(o, ev) {
               <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
               <th class="px-4 py-3 font-medium">Pelanggan</th>
               <th class="px-4 py-3 font-medium text-right">Total</th>
-              <th class="px-4 py-3 font-medium text-right">DP Hangus</th>
+              <th class="px-4 py-3 font-medium text-right">Dikeluarkan dari Kas</th>
               <th class="px-4 py-3 font-medium">Dihapus oleh</th>
               <th class="px-4 py-3 font-medium">Waktu Hapus</th>
             </tr></thead>

@@ -3178,23 +3178,40 @@ def order_delete_admin(order_id):
             "Hanya transaksi berstatus Dibatalkan yang bisa dihapus permanen.",
             "bad_status", 409,
         )
-    # DP hangus = pembayaran yg sudah masuk (paid) tapi tak direfund. Boleh
-    # dihapus permanen (atas permintaan), TAPI dicatat dulu di jejak audit
-    # (deleted_order_logs) supaya tetap ada bukti — termasuk nilai DP hangus
-    # yg ikut terhapus. Lihat tab "Riwayat Hapus".
+    # DP/pendapatan hangus = pembayaran yg masih 'paid' pada order batal (uang
+    # ada di shift yg sudah ditutup). Kebijakan: hapus permanen dipakai utk
+    # KOREKSI (salah input/dobel) → keluarkan dari kas juga supaya semua laporan
+    # konsisten. Maka total shift terkait ikut DIKOREKSI TURUN di sini (bukan
+    # cuma buang baris payment). Shift yg masih buka tak ada di sini karena
+    # payment-nya sudah di-void & totalnya sudah dibalik saat pembatalan.
     kept = round(sum(float(p.amount) for p in order.payments if p.status == "paid"), 2)
+    for p in order.payments:
+        if p.status != "paid" or not p.shift_id:
+            continue
+        shift = db.session.get(Shift, p.shift_id)
+        if not shift:
+            continue
+        amt = float(p.amount)
+        shift.total_sales = float(shift.total_sales or 0) - amt
+        if p.method == "cash":
+            shift.total_cash_sales = float(shift.total_cash_sales or 0) - amt
+        elif p.method == "qris":
+            shift.total_qris_sales = float(shift.total_qris_sales or 0) - amt
+        elif p.method == "transfer":
+            shift.total_transfer_sales = float(shift.total_transfer_sales or 0) - amt
     db.session.add(DeletedOrderLog(
         order_number=order.order_number, venue_id=order.venue_id,
         customer_name=order.customer_name, status_before=order.status,
         total_amount=order.total_amount, forfeited_dp=kept,
         deleted_by=_current_user().id,
-        note=("Termasuk DP hangus yang ikut terhapus." if kept > 0 else None),
+        note=("Koreksi: Rp %s dikeluarkan dari kas (total shift ikut dikoreksi)."
+              % f"{int(kept):,}".replace(",", ".") if kept > 0 else None),
     ))
     db.session.delete(order)  # order_items & payments ikut terhapus (ondelete=CASCADE)
     db.session.commit()
     msg = "Transaksi dihapus permanen"
     if kept > 0:
-        msg = f"Transaksi & DP hangus Rp {int(kept):,} dihapus permanen".replace(",", ".")
+        msg = f"Transaksi dihapus permanen — Rp {int(kept):,} dikeluarkan dari kas (koreksi)".replace(",", ".")
     return jsonify(message=msg, forfeited_dp=kept), 200
 
 
