@@ -151,7 +151,7 @@ async function confirm() {
           Customer scan QRIS (kartu). <span class="font-medium">Pastikan dana masuk</span>
           (cek BRImo/notifikasi), lalu foto/upload bukti sebelum konfirmasi.
         </div>
-        <input ref="fileInput" type="file" accept="image/*" capture="environment" class="hidden" @change="onProofChange" />
+        <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onProofChange" />
         <button @click="pickProof" type="button"
           class="w-full py-3 rounded-lg border-2 border-dashed border-slate-300 hover:border-brand-400 text-sm text-slate-500">
           {{ proofPreview ? '✅ Bukti terpilih — ganti foto?' : '📎 Pilih / Foto Bukti QRIS' }}
@@ -171,7 +171,7 @@ async function confirm() {
         <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm text-slate-600">
           Cek dulu bukti transfer dari customer, lalu upload sebelum konfirmasi.
         </div>
-        <input ref="fileInput" type="file" accept="image/*" capture="environment" class="hidden" @change="onProofChange" />
+        <input ref="fileInput" type="file" accept="image/*" class="hidden" @change="onProofChange" />
         <button @click="pickProof" type="button"
           class="w-full py-3 rounded-lg border-2 border-dashed border-slate-300 hover:border-brand-400 text-sm text-slate-500">
           {{ proofPreview ? '✅ Bukti terpilih — ganti foto?' : '📎 Pilih / Foto Bukti Transfer' }}
