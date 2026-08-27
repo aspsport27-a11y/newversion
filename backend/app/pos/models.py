@@ -301,6 +301,7 @@ class Shift(db.Model):
     cash_variance = db.Column(db.Numeric(15, 2))
     deposit_amount = db.Column(db.Numeric(15, 2))
     deposit_id = db.Column(db.Integer, db.ForeignKey("cash_deposits.id"))  # sudah disetor?
+    reopened_count = db.Column(db.Integer, nullable=False, default=0)  # migration 062
     notes = db.Column(db.Text)
 
     def to_dict(self):
@@ -311,6 +312,8 @@ class Shift(db.Model):
             "venue_id": self.venue_id,
             "cashier_id": self.cashier_id,
             "status": self.status,
+            "deposited": self.deposit_id is not None,
+            "reopened_count": self.reopened_count or 0,
             "opened_at": self.opened_at.isoformat() if self.opened_at else None,
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
             "opening_cash": f(self.opening_cash),

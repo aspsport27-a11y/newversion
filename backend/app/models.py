@@ -577,3 +577,35 @@ class DeletedOrderLog(db.Model):
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
             "note": self.note,
         }
+
+
+class ShiftReopenLog(db.Model):
+    """Jejak audit 'Buka Kembali Shift' (migration 062). Dicatat tiap kali
+    Admin/HO membuka lagi shift yang sudah ditutup — beserta alasan & kondisi
+    kas sebelum dibuka."""
+
+    __tablename__ = "shift_reopen_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    shift_id = db.Column(db.Integer)
+    venue_id = db.Column(db.Integer)
+    reason = db.Column(db.Text, nullable=False)
+    variance_before = db.Column(db.Numeric(15, 2))
+    counted_before = db.Column(db.Numeric(15, 2))
+    deposit_before = db.Column(db.Numeric(15, 2))
+    reopened_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    reopened_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self, users=None):
+        f = lambda v: float(v) if v is not None else None
+        return {
+            "id": self.id,
+            "shift_id": self.shift_id,
+            "venue_id": self.venue_id,
+            "reason": self.reason,
+            "variance_before": f(self.variance_before),
+            "counted_before": f(self.counted_before),
+            "deposit_before": f(self.deposit_before),
+            "reopened_by_name": (users or {}).get(self.reopened_by),
+            "reopened_at": self.reopened_at.isoformat() if self.reopened_at else None,
+        }

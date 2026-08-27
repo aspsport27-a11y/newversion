@@ -12,7 +12,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, Supplier, User, Venue
+from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, ShiftReopenLog, Supplier, User, Venue
 from ..security import (
     ROLE_ADMIN,
     ROLE_ADMIN_UNIT,
@@ -2619,6 +2619,92 @@ def shift_delete(shift_id):
     db.session.delete(shift)
     db.session.commit()
     return jsonify(message="Shift dihapus"), 200
+
+
+@admin_bp.post("/shifts/<int:shift_id>/reopen")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def shift_reopen(shift_id):
+    """Buka kembali shift yang sudah ditutup untuk koreksi (Admin/HO saja).
+    Setelah dibuka: status → open, kasir/admin bisa tambah/batalkan/ubah
+    transaksi (total shift ikut menyesuaikan), lalu TUTUP LAGI (expected_cash &
+    selisih dihitung ulang otomatis). Wajib alasan; dicatat di jejak audit.
+    Ditolak kalau kas shift sudah DISETOR (tarik setoran dulu)."""
+    shift = db.session.get(Shift, shift_id)
+    if not shift:
+        return _err("Shift tidak ditemukan", "not_found", 404)
+    if shift.status != "closed":
+        return _err("Shift belum ditutup — tak perlu dibuka.", "not_closed", 409)
+    if shift.deposit_id is not None:
+        return _err(
+            "Kas shift ini sudah DISETOR — tarik/batalkan setoran dulu sebelum "
+            "membuka kembali, supaya kas bank tidak kacau.",
+            "already_deposited", 409,
+        )
+    d = request.get_json(silent=True) or {}
+    reason = (d.get("reason") or "").strip()
+    if not reason:
+        return _err("Alasan buka kembali wajib diisi.")
+    # snapshot kondisi kas sebelum dibuka (utk audit)
+    db.session.add(ShiftReopenLog(
+        shift_id=shift.id, venue_id=shift.venue_id, reason=reason,
+        variance_before=shift.cash_variance, counted_before=shift.counted_cash,
+        deposit_before=shift.deposit_amount, reopened_by=_current_user().id,
+    ))
+    # kembalikan ke status buka; kunci-kunci penutupan direset (akan dihitung
+    # ulang saat ditutup lagi). Total penjualan DIBIARKAN — akan menyesuaikan
+    # sendiri saat ada transaksi ditamb/dibatalkan.
+    shift.status = "open"
+    shift.closed_at = None
+    shift.counted_cash = None
+    shift.cash_variance = None
+    shift.expected_cash = 0
+    shift.deposit_amount = None
+    shift.reopened_count = (shift.reopened_count or 0) + 1
+    db.session.commit()
+    return jsonify(message="Shift dibuka kembali — silakan koreksi lalu tutup lagi.", shift=shift.to_dict()), 200
+
+
+@admin_bp.post("/shifts/<int:shift_id>/close")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def shift_close_admin(shift_id):
+    """Tutup shift oleh Admin/HO (mis. setelah dibuka kembali & dikoreksi dari
+    back office, tanpa harus lewat terminal kasir). expected_cash & selisih
+    dihitung ulang otomatis oleh close_shift."""
+    from ..pos.services import PosError, close_shift
+
+    shift = db.session.get(Shift, shift_id)
+    if not shift:
+        return _err("Shift tidak ditemukan", "not_found", 404)
+    if shift.status != "open":
+        return _err("Shift tidak dalam keadaan terbuka.", "not_open", 409)
+    d = request.get_json(silent=True) or {}
+    if d.get("counted_cash") in (None, ""):
+        return _err("Uang tunai dihitung (counted_cash) wajib diisi.")
+    try:
+        close_shift(
+            shift, d.get("counted_cash"),
+            deposit_amount=d.get("deposit_amount"),
+            notes=d.get("notes"),
+        )
+    except PosError as e:
+        return _err(e.message, e.code, e.status)
+    return jsonify(message="Shift ditutup.", shift=shift.to_dict()), 200
+
+
+@admin_bp.get("/shifts/reopen-logs")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def shift_reopen_logs():
+    """Jejak audit buka-kembali shift (tab riwayat)."""
+    q = ShiftReopenLog.query
+    if request.args.get("venue_id", type=int):
+        q = q.filter(ShiftReopenLog.venue_id == request.args.get("venue_id", type=int))
+    rows = q.order_by(ShiftReopenLog.reopened_at.desc()).limit(500).all()
+    emp_names = {e.id: e.name for e in Employee.query.all()}
+    users = {u.id: (emp_names.get(u.employee_id) or u.username) for u in User.query.all()}
+    return jsonify(logs=[r.to_dict(users) for r in rows]), 200
 
 
 @admin_bp.get("/bookings")

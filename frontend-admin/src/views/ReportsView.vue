@@ -10,6 +10,7 @@ const auth = useAuthStore()
 const toastStore = useToastStore()
 function flash(m) { toastStore.show(m) }
 const canDeleteShift = computed(() => auth.hasPerm('order.cancel'))
+const canReopen = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 
 const venues = ref([])
@@ -53,6 +54,37 @@ async function deleteShift(s) {
     flash('Shift dihapus')
   } catch (e) {
     alert(e?.response?.data?.message || 'Gagal menghapus shift.')
+  }
+}
+async function reopenShift(s) {
+  const reason = window.prompt(
+    `Buka kembali shift ${s.cashier || ''} (${s.opened_at ? parseUTC(s.opened_at).toLocaleString('id-ID') : ''})?\n\n` +
+    `Shift akan kembali TERBUKA agar bisa dikoreksi (tambah/batalkan transaksi), lalu tutup lagi.\n` +
+    `Tulis ALASAN (wajib, tercatat di audit):`)
+  if (reason === null) return
+  if (!reason.trim()) { alert('Alasan wajib diisi.'); return }
+  try {
+    const { data } = await client.post(`/admin/shifts/${s.id}/reopen`, { reason: reason.trim() })
+    await run()
+    flash(data?.message || 'Shift dibuka kembali')
+  } catch (e) {
+    alert(e?.response?.data?.message || 'Gagal membuka shift.')
+  }
+}
+async function closeShiftAdmin(s) {
+  const raw = window.prompt(
+    `Tutup shift ${s.cashier || ''}.\n\n` +
+    `Masukkan jumlah UANG TUNAI yang dihitung (untuk hitung selisih kas):`,
+    String(Number(s.expected_cash) || 0))
+  if (raw === null) return
+  const counted = Number(raw)
+  if (isNaN(counted) || counted < 0) { alert('Nominal tidak valid.'); return }
+  try {
+    const { data } = await client.post(`/admin/shifts/${s.id}/close`, { counted_cash: counted })
+    await run()
+    flash(data?.message || 'Shift ditutup')
+  } catch (e) {
+    alert(e?.response?.data?.message || 'Gagal menutup shift.')
   }
 }
 function renderChart() {
@@ -167,10 +199,11 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-2 font-medium text-right">Seharusnya</th>
               <th class="px-4 py-2 font-medium text-right">Dihitung</th>
               <th class="px-4 py-2 font-medium text-right">Selisih</th>
-              <th v-if="canDeleteShift" class="px-4 py-2"></th>
+              <th class="px-4 py-2 font-medium text-center">Status</th>
+              <th v-if="canDeleteShift || canReopen" class="px-4 py-2"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="!shifts.length"><td :colspan="canDeleteShift ? 9 : 8" class="px-4 py-6 text-center text-slate-400">Tidak ada shift.</td></tr>
+              <tr v-if="!shifts.length"><td :colspan="(canDeleteShift || canReopen) ? 10 : 9" class="px-4 py-6 text-center text-slate-400">Tidak ada shift.</td></tr>
               <tr v-for="s in shifts" :key="s.id" class="border-t">
                 <td class="px-4 py-2 text-slate-700">{{ s.cashier || '—' }}</td>
                 <td class="px-4 py-2 text-slate-500">{{ s.opened_at ? parseUTC(s.opened_at).toLocaleString('id-ID') : '—' }}</td>
@@ -182,8 +215,16 @@ onMounted(async () => { await loadVenues(); await run() })
                 <td class="px-4 py-2 text-right font-medium" :class="s.cash_variance === 0 ? 'text-emerald-600' : (s.cash_variance == null ? 'text-slate-400' : 'text-red-600')">
                   {{ s.cash_variance != null ? rupiah(s.cash_variance) : '—' }}
                 </td>
-                <td v-if="canDeleteShift" class="px-4 py-2 text-right">
-                  <button @click="deleteShift(s)" class="text-red-500 text-xs hover:underline">Hapus</button>
+                <td class="px-4 py-2 text-center whitespace-nowrap">
+                  <span v-if="s.status === 'open'" class="text-xs rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">Terbuka</span>
+                  <span v-else class="text-xs rounded-full px-2 py-0.5 bg-slate-100 text-slate-500">Tertutup</span>
+                  <span v-if="s.reopened_count > 0" :title="`Pernah dibuka kembali ${s.reopened_count}×`" class="ml-1 text-xs text-brand-600">↻{{ s.reopened_count }}</span>
+                  <span v-if="s.deposited" title="Sudah disetor" class="ml-1 text-xs text-emerald-600">💰</span>
+                </td>
+                <td v-if="canDeleteShift || canReopen" class="px-4 py-2 text-right whitespace-nowrap">
+                  <button v-if="canReopen && s.status === 'closed' && !s.deposited" @click="reopenShift(s)" class="text-brand-600 text-xs hover:underline">↻ Buka Kembali</button>
+                  <button v-if="canReopen && s.status === 'open'" @click="closeShiftAdmin(s)" class="text-emerald-600 text-xs hover:underline">Tutup</button>
+                  <button v-if="canDeleteShift" @click="deleteShift(s)" class="text-red-500 text-xs hover:underline ml-3">Hapus</button>
                 </td>
               </tr>
             </tbody>
