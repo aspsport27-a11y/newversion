@@ -3211,7 +3211,8 @@ def deleted_orders_list():
     elif request.args.get("venue_id", type=int):
         q = q.filter(DeletedOrderLog.venue_id == request.args.get("venue_id", type=int))
     rows = q.order_by(DeletedOrderLog.deleted_at.desc()).limit(500).all()
-    users = {u.id: (u.name or u.username) for u in User.query.all()}
+    emp_names = {e.id: e.name for e in Employee.query.all()}
+    users = {u.id: (emp_names.get(u.employee_id) or u.username) for u in User.query.all()}
     return jsonify(logs=[r.to_dict(users) for r in rows]), 200
 
 
