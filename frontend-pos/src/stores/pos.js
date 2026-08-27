@@ -93,7 +93,7 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.get(`/facilities/${facilityId}/bookings`, {
         params: { date },
       })
-      return data.bookings
+      return data // { facility, bookings, events }
     },
     // coaching (padel): tarif + daftar coach. Kalau slot dikirim, tiap coach
     // dapat flag `available` (coach yg sedang mengajar di jam itu = false).
@@ -317,6 +317,30 @@ export const usePosStore = defineStore('pos', {
     async settleSplit(orderId, splits) {
       const { data } = await client.post(`/orders/${orderId}/pay-split`, { splits })
       return data // { order }
+    },
+    // --- Event (borong semua lapangan) ---
+    async eventQuote(params) {
+      const { data } = await client.get('/events/quote', { params })
+      return data // { suggested_price, facility_count, conflict_count }
+    },
+    async createEvent(form, payment) {
+      const body = { ...form }
+      if (payment && !payment.splits && payment.method && Number(payment.amount) > 0) {
+        body.payment = { method: payment.method, amount: payment.amount, reference: payment.reference || null, proof_image: payment.proof_image || null }
+      }
+      const { data } = await client.post('/events', body)
+      if (payment && payment.splits && payment.splits.length >= 2) {
+        await client.post(`/orders/${data.order.id}/pay-split`, { splits: payment.splits })
+      }
+      return data // { event, order, conflicts }
+    },
+    async eventDetail(id) {
+      const { data } = await client.get(`/events/${id}`)
+      return data // { event, conflicts }
+    },
+    async getOrder(id) {
+      const { data } = await client.get(`/orders/${id}`)
+      return data.order
     },
     // Buka bill: buat order TERBUKA dari keranjang tanpa dibayar (open bill)
     async openBill() {

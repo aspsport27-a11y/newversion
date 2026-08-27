@@ -195,15 +195,17 @@ onMounted(loadVenues)
             v-for="s in slots" :key="s.start_time"
             :class="[
               'rounded-lg border px-3 py-2.5 text-sm',
-              s.status === 'available' ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-100 border-slate-200 text-slate-400',
+              s.status === 'available' ? 'bg-emerald-50 border-emerald-200'
+                : (s.status === 'event' ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-slate-100 border-slate-200 text-slate-400'),
             ]"
           >
             <p class="font-medium">{{ s.start_time }}–{{ s.end_time }}</p>
-            <p v-if="s.status === 'booked'" class="text-xs mt-1">
+            <p v-if="s.status === 'event'" class="text-xs mt-1 font-medium">🏆 EVENT<span v-if="s.event_name"> · {{ s.event_name }}</span></p>
+            <p v-else-if="s.status === 'booked'" class="text-xs mt-1">
               Terisi
               <span v-if="s.coaching" class="ml-1 bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-[10px] font-medium">🎾 Coaching</span>
             </p>
-            <template v-else>
+            <template v-else-if="s.status === 'available'">
               <span v-if="s.coach_available" class="inline-block bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-[10px] font-medium mt-1">🎾 Coaching tersedia</span>
               <a
                 :href="bookLink(s)" target="_blank" rel="noopener"

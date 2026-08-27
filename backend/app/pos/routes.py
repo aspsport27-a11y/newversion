@@ -1,7 +1,7 @@
 """Endpoint POS — Fase M1. Prefix: /api/pos"""
 import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, jsonify, request
@@ -19,7 +19,7 @@ from ..perms import has_perm
 from ..security import verify_password
 from ..stations.models import GameStation
 from . import briapi
-from .models import Attendance, Coach, CoachingRate, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift, coach_declared_available, coaching_price_per_hour
+from .models import Attendance, Coach, CoachingRate, Event, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift, coach_declared_available, coaching_price_per_hour, day_type_for_date, facility_booking_price
 from .services import (
     PosError,
     add_cash_movement,
@@ -29,6 +29,7 @@ from .services import (
     confirm_qris_payment,
     create_order,
     expire_stale_qris,
+    generate_order_number,
     is_coach_available,
     open_shift,
     pay_order,
@@ -63,6 +64,15 @@ def _current_open_shift(terminal_id: int) -> Shift:
     if shift is None:
         raise PosError("Belum ada shift terbuka. Buka shift dulu.", "no_open_shift", 409)
     return shift
+
+
+def _D(v, default=0):
+    try:
+        if v in (None, ""):
+            return Decimal(str(default))
+        return Decimal(str(v))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(str(default))
 
 
 # ------------------------------------------------------------------
@@ -350,7 +360,7 @@ def pos_products():
 # ------------------------------------------------------------------
 _REPORT_LABELS = {
     "ticket": "Tiket Masuk", "booking": "Booking Lapangan",
-    "rental": "Station Gaming", "coaching": "Coaching",
+    "rental": "Station Gaming", "coaching": "Coaching", "event": "Event",
 }
 
 
@@ -564,9 +574,24 @@ def pos_facility_bookings(facility_id):
     if day:
         q = q.filter_by(booking_date=day)
     bookings = q.order_by(FacilityBooking.start_time).all()
+    # slot yg terkunci event (borong semua lapangan) pada venue+tanggal ini
+    events = []
+    if day:
+        try:
+            _d = datetime.strptime(day, "%Y-%m-%d").date()
+            events = [
+                {"start_time": e.start_time.strftime("%H:%M"), "end_time": e.end_time.strftime("%H:%M"), "name": e.name}
+                for e in Event.query.filter(
+                    Event.venue_id == facility.venue_id, Event.status == "active",
+                    Event.date_from <= _d, Event.date_to >= _d,
+                ).all()
+            ]
+        except ValueError:
+            pass
     return jsonify(
         facility=facility.to_dict(),
         bookings=[b.to_dict() for b in bookings],
+        events=events,
     ), 200
 
 
@@ -1628,3 +1653,200 @@ def _amount_matches(notified_value, payment_amount) -> bool:
         return Decimal(str(notified_value)) == Decimal(str(payment_amount))
     except (InvalidOperation, TypeError):
         return False
+
+
+# ======================================================================
+# EVENT (borong semua lapangan) — turnamen/sewa besar. Migration 064.
+# ======================================================================
+def _hhmm(s):
+    return datetime.strptime(s, "%H:%M").time()
+
+
+def _mins_ev(t, as_end=False):
+    m = t.hour * 60 + t.minute
+    return 24 * 60 if (as_end and m == 0) else m
+
+
+def _venue_facilities(venue_id):
+    return Facility.query.filter_by(venue_id=venue_id, is_active=True).all()
+
+
+def _event_quote(venue_id, date_from, date_to, start_t, end_t):
+    """Harga usulan = tarif normal semua lapangan × jam × jumlah hari."""
+    facs = _venue_facilities(venue_id)
+    sh, eh = start_t.hour, (end_t.hour if end_t.hour != 0 else 24)
+    total = 0.0
+    d = date_from
+    while d <= date_to:
+        dt = day_type_for_date(d)
+        for f in facs:
+            total += float(facility_booking_price(f, sh, eh, dt))
+        d += timedelta(days=1)
+    return round(total, 2), len(facs)
+
+
+def _event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_event_order_id=None):
+    """Booking (member/reguler) yang bentrok dgn jam event pd rentang tanggal."""
+    fac_ids = [f.id for f in Facility.query.filter_by(venue_id=venue_id).all()]
+    if not fac_ids:
+        return []
+    e_min, s_min = _mins_ev(end_t, as_end=True), _mins_ev(start_t)
+    rows = (
+        FacilityBooking.query.filter(
+            FacilityBooking.facility_id.in_(fac_ids),
+            FacilityBooking.booking_date >= date_from,
+            FacilityBooking.booking_date <= date_to,
+            FacilityBooking.status == "booked",
+        ).all()
+    )
+    fac_names = {f.id: f.name for f in Facility.query.filter(Facility.id.in_(fac_ids)).all()}
+    out = []
+    for b in rows:
+        if not (_mins_ev(b.start_time) < e_min and _mins_ev(b.end_time, as_end=True) > s_min):
+            continue
+        oi = db.session.get(OrderItem, b.order_item_id) if b.order_item_id else None
+        order = oi.order if oi else None
+        if order is None or order.status == "void":
+            continue
+        if exclude_event_order_id and order.id == exclude_event_order_id:
+            continue
+        out.append({
+            "booking_id": b.id,
+            "order_id": order.id,
+            "order_item_id": b.order_item_id,
+            "order_number": order.order_number,
+            "customer_name": order.customer_name,
+            "is_member": order.is_member,
+            "status": order.status,
+            "facility_name": fac_names.get(b.facility_id),
+            "booking_date": b.booking_date.isoformat(),
+            "start_time": b.start_time.strftime("%H:%M"),
+            "end_time": b.end_time.strftime("%H:%M"),
+        })
+    out.sort(key=lambda x: (x["booking_date"], x["start_time"]))
+    return out
+
+
+@pos_bp.get("/events/quote")
+@jwt_required()
+def event_quote():
+    terminal = _current_terminal()
+    try:
+        df = datetime.strptime(request.args["date_from"], "%Y-%m-%d").date()
+        dt = datetime.strptime(request.args["date_to"], "%Y-%m-%d").date()
+        st = _hhmm(request.args["start_time"])
+        et = _hhmm(request.args["end_time"])
+    except (KeyError, ValueError):
+        raise PosError("Parameter tanggal/jam tidak lengkap/valid", "bad_params")
+    if dt < df:
+        raise PosError("Tanggal selesai sebelum tanggal mulai", "bad_range")
+    price, n_fac = _event_quote(terminal.venue_id, df, dt, st, et)
+    conflicts = _event_conflicts(terminal.venue_id, df, dt, st, et)
+    return jsonify(suggested_price=price, facility_count=n_fac, conflict_count=len(conflicts)), 200
+
+
+@pos_bp.post("/events")
+@jwt_required()
+def event_create():
+    terminal = _current_terminal()
+    shift = _current_open_shift(terminal.id)
+    d = request.get_json(silent=True) or {}
+    name = (d.get("name") or "").strip()
+    if not name:
+        raise PosError("Nama event wajib", "bad_name")
+    try:
+        df = datetime.strptime(d["date_from"], "%Y-%m-%d").date()
+        dto = datetime.strptime(d["date_to"], "%Y-%m-%d").date()
+        st = _hhmm(d["start_time"])
+        et = _hhmm(d["end_time"])
+    except (KeyError, ValueError):
+        raise PosError("Tanggal/jam tidak lengkap/valid", "bad_params")
+    if dto < df:
+        raise PosError("Tanggal selesai sebelum tanggal mulai", "bad_range")
+    if _mins_ev(et, as_end=True) <= _mins_ev(st):
+        raise PosError("Jam selesai harus setelah jam mulai", "bad_time")
+    price = _D(d.get("price"))
+    if price < 0:
+        raise PosError("Harga tidak valid", "bad_price")
+
+    venue = db.session.get(Venue, terminal.venue_id)
+    uid = int(get_jwt_identity())
+    label = f"Sewa Event: {name} ({df.isoformat()}"
+    label += f"–{dto.isoformat()}" if dto != df else ""
+    label += f" {st.strftime('%H:%M')}-{et.strftime('%H:%M')})"
+
+    order = Order(
+        order_number=generate_order_number(venue), venue_id=venue.id,
+        terminal_id=terminal.id, shift_id=shift.id, cashier_id=uid,
+        customer_name=(d.get("renter") or name), status="open",
+        subtotal=price, discount_amount=0, total_amount=price, amount_paid=0,
+    )
+    order.items.append(OrderItem(
+        item_type="event", name_snapshot=label[:120], unit_price=price,
+        quantity=1, line_total=price,
+    ))
+    db.session.add(order)
+    db.session.flush()
+
+    ev = Event(
+        venue_id=venue.id, name=name, renter=d.get("renter"), phone=d.get("phone"),
+        date_from=df, date_to=dto, start_time=st, end_time=et, price=price,
+        order_id=order.id, status="active", notes=d.get("notes"), created_by=uid,
+    )
+    db.session.add(ev)
+
+    # pembayaran opsional (DP/lunas). amount 0 / kosong = belum bayar → Pelunasan.
+    pay = d.get("payment") or {}
+    amt = _D(pay.get("amount"))
+    if pay.get("method") and amt > 0:
+        pdata = {"method": pay.get("method"), "amount": amt, "reference": pay.get("reference")}
+        if pdata["method"] in ("transfer", "qris") and pay.get("proof_image"):
+            fn = _save_payment_proof(pay["proof_image"])
+            if not fn:
+                raise PosError("Gagal simpan bukti (maks 3MB)", "bad_proof")
+            pdata["proof_filename"] = fn
+        pay_order(order, shift, uid, pdata)  # commit di dalam
+    else:
+        db.session.commit()
+
+    conflicts = _event_conflicts(venue.id, df, dto, st, et, exclude_event_order_id=order.id)
+    return jsonify(event=ev.to_dict(), order=order.to_dict(), conflicts=conflicts), 201
+
+
+@pos_bp.get("/events")
+@jwt_required()
+def event_list():
+    terminal = _current_terminal()
+    q = Event.query.filter(Event.venue_id == terminal.venue_id, Event.status == "active")
+    frm = request.args.get("date_from")
+    if frm:
+        try:
+            q = q.filter(Event.date_to >= datetime.strptime(frm, "%Y-%m-%d").date())
+        except ValueError:
+            pass
+    else:
+        q = q.filter(Event.date_to >= date.today())
+    events = q.order_by(Event.date_from).all()
+    return jsonify(events=[e.to_dict() for e in events]), 200
+
+
+@pos_bp.get("/events/<int:event_id>")
+@jwt_required()
+def event_detail(event_id):
+    ev = db.session.get(Event, event_id)
+    if not ev:
+        raise PosError("Event tidak ditemukan", "not_found", 404)
+    conflicts = _event_conflicts(ev.venue_id, ev.date_from, ev.date_to, ev.start_time, ev.end_time,
+                                 exclude_event_order_id=ev.order_id)
+    return jsonify(event=ev.to_dict(), conflicts=conflicts), 200
+
+
+@pos_bp.post("/events/<int:event_id>/cancel")
+@jwt_required()
+def event_cancel(event_id):
+    ev = db.session.get(Event, event_id)
+    if not ev:
+        raise PosError("Event tidak ditemukan", "not_found", 404)
+    ev.status = "cancelled"
+    db.session.commit()
+    return jsonify(message="Event dibatalkan (jadwal terbuka kembali).", event=ev.to_dict()), 200

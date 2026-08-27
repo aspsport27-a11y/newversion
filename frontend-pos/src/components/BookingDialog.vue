@@ -13,6 +13,7 @@ const date = ref(new Date().toISOString().slice(0, 10))
 const startH = ref(null)
 const endH = ref(null)
 const bookings = ref([])
+const events = ref([])
 const loadingBookings = ref(false)
 const error = ref('')
 
@@ -119,21 +120,24 @@ const grandTotal = computed(() => price.value + coachingTotal.value)
 function overlaps(sH, eH) {
   const sMin = sH * 60
   const eMin = eH * 60
-  return bookings.value.some((b) => {
+  const hit = (rows) => rows.some((b) => {
     const bs = toMinutes(b.start_time)
     let be = toMinutes(b.end_time)
-    if (be <= bs) be += 24 * 60 // booking lain yg juga berakhir tengah malam
+    if (be <= bs) be += 24 * 60 // rentang yg juga berakhir tengah malam
     return bs < eMin && be > sMin
   })
+  return hit(bookings.value) || hit(events.value)
 }
 
 async function loadBookings() {
   if (!facilityId.value || !date.value) return
   loadingBookings.value = true
   try {
-    bookings.value = await pos.fetchFacilityBookings(facilityId.value, date.value)
+    const data = await pos.fetchFacilityBookings(facilityId.value, date.value)
+    bookings.value = data.bookings || []
+    events.value = data.events || []
   } catch (_) {
-    bookings.value = []
+    bookings.value = []; events.value = []
   } finally {
     loadingBookings.value = false
   }
@@ -252,8 +256,11 @@ function add() {
         <div class="bg-slate-50 rounded-lg p-3 mb-3">
           <p class="text-xs font-medium text-slate-500 mb-1.5">Jadwal terisi ({{ date }})</p>
           <p v-if="loadingBookings" class="text-xs text-slate-400">Memuat…</p>
-          <p v-else-if="!bookings.length" class="text-xs text-emerald-600">Kosong — semua jam tersedia ✅</p>
+          <p v-else-if="!bookings.length && !events.length" class="text-xs text-emerald-600">Kosong — semua jam tersedia ✅</p>
           <div v-else class="flex flex-wrap gap-1.5">
+            <span v-for="(e, i) in events" :key="'ev'+i" class="text-xs bg-rose-100 text-rose-700 rounded px-2 py-0.5 font-medium">
+              🏆 {{ e.start_time }}–{{ e.end_time }} {{ e.name }}
+            </span>
             <span v-for="b in bookings" :key="b.id" class="text-xs bg-red-100 text-red-700 rounded px-2 py-0.5">
               {{ b.start_time }}–{{ b.end_time }}
             </span>

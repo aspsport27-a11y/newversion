@@ -768,3 +768,49 @@ class Attendance(db.Model):
             "check_in_address": self.check_in_address,
             "check_out_address": self.check_out_address,
         }
+
+
+class Event(db.Model):
+    """Event (turnamen/sewa borongan) — mengunci SELURUH lapangan venue pada
+    rentang tanggal + jam. Migration 064. Uang sewa lewat order (order_id)."""
+
+    __tablename__ = "events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    renter = db.Column(db.String(120))
+    phone = db.Column(db.String(30))
+    date_from = db.Column(db.Date, nullable=False)
+    date_to = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time, nullable=False)
+    end_time = db.Column(db.Time, nullable=False)
+    price = db.Column(db.Numeric(15, 2), nullable=False, default=0)
+    order_id = db.Column(db.Integer, db.ForeignKey("orders.id", ondelete="SET NULL"))
+    status = db.Column(db.String(12), nullable=False, default="active")  # active|cancelled
+    notes = db.Column(db.Text)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def covers_date(self, d):
+        return self.status == "active" and self.date_from <= d <= self.date_to
+
+    def to_dict(self):
+        f = lambda v: float(v) if v is not None else None
+        hhmm = lambda t: t.strftime("%H:%M") if t else None
+        return {
+            "id": self.id,
+            "venue_id": self.venue_id,
+            "name": self.name,
+            "renter": self.renter,
+            "phone": self.phone,
+            "date_from": self.date_from.isoformat() if self.date_from else None,
+            "date_to": self.date_to.isoformat() if self.date_to else None,
+            "start_time": hhmm(self.start_time),
+            "end_time": hhmm(self.end_time),
+            "price": f(self.price),
+            "order_id": self.order_id,
+            "status": self.status,
+            "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

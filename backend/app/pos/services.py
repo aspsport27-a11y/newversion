@@ -14,6 +14,7 @@ from .models import (
     CashMovement,
     Coach,
     CoachingRate,
+    Event,
     Facility,
     FacilityBooking,
     Holiday,
@@ -76,17 +77,56 @@ def _hours_between(start, end) -> float:
     return (e - s) / 60.0
 
 
+def _t_mins(t, as_end=False):
+    m = t.hour * 60 + t.minute
+    return 24 * 60 if (as_end and m == 0) else m
+
+
+def active_event_ranges(venue_id, booking_date):
+    """Rentang jam yang DIKUNCI oleh event aktif (borong semua lapangan) pada
+    venue+tanggal itu. Return list dict {start, end, name} (HH:MM)."""
+    evs = Event.query.filter(
+        Event.venue_id == venue_id,
+        Event.status == "active",
+        Event.date_from <= booking_date,
+        Event.date_to >= booking_date,
+    ).all()
+    return [
+        {"start": e.start_time.strftime("%H:%M"), "end": e.end_time.strftime("%H:%M"), "name": e.name}
+        for e in evs
+    ]
+
+
+def event_blocks_slot(venue_id, booking_date, start, end):
+    """True bila slot [start,end) bentrok dgn event aktif di venue+tanggal itu."""
+    s_min = _t_mins(start)
+    e_min = _t_mins(end, as_end=True)
+    evs = Event.query.filter(
+        Event.venue_id == venue_id,
+        Event.status == "active",
+        Event.date_from <= booking_date,
+        Event.date_to >= booking_date,
+    ).all()
+    for e in evs:
+        if _t_mins(e.start_time) < e_min and _t_mins(e.end_time, as_end=True) > s_min:
+            return True
+    return False
+
+
 def is_slot_available(facility_id, booking_date, start, end, exclude_id=None) -> bool:
     """True jika slot [start,end) di tanggal itu belum dibooking (tanpa overlap).
     Dihitung di Python (bukan filter SQL langsung) krn jam 00:00 = tengah malam
     (akhir hari) baik utk slot baru maupun booking lama — perbandingan TIME
-    mentah di SQL salah baca 00:00 sbg 'paling awal', bukan 'paling akhir'."""
-    def _mins(t, as_end=False):
-        m = t.hour * 60 + t.minute
-        return 24 * 60 if (as_end and m == 0) else m
-
+    mentah di SQL salah baca 00:00 sbg 'paling awal', bukan 'paling akhir'.
+    Slot juga TAK tersedia bila terkunci event (borong semua lapangan)."""
+    _mins = _t_mins
     s_min = _mins(start)
     e_min = _mins(end, as_end=True)
+
+    # terkunci event? (event mengunci semua lapangan venue)
+    fac = db.session.get(Facility, facility_id)
+    if fac and event_blocks_slot(fac.venue_id, booking_date, start, end):
+        return False
 
     q = FacilityBooking.query.filter(
         FacilityBooking.facility_id == facility_id,

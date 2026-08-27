@@ -101,8 +101,17 @@ def public_board():
             "coaching": fb.coach_id is not None,
         })
 
+    from ..pos.models import Event
+    events = [
+        {"name": e.name, "start": e.start_time.strftime("%H:%M"), "end": e.end_time.strftime("%H:%M")}
+        for e in Event.query.filter(
+            Event.venue_id == venue.id, Event.status == "active",
+            Event.date_from <= today, Event.date_to >= today,
+        ).all()
+    ]
     return jsonify(
-        venue=venue.name, date=today.isoformat(), courts=courts, bookings=bookings,
+        venue=venue.name, date=today.isoformat(), courts=courts,
+        bookings=bookings, events=events,
     ), 200
 
 
@@ -212,6 +221,16 @@ def public_schedule():
         for b in booked
     ]
 
+    # Event (borong semua lapangan) yg mengunci venue pada tanggal ini
+    from ..pos.models import Event
+    ev_ranges = [
+        (datetime.combine(d, e.start_time), _end_dt(e.end_time, e.start_time), e.name)
+        for e in Event.query.filter(
+            Event.venue_id == fac.venue_id, Event.status == "active",
+            Event.date_from <= d, Event.date_to >= d,
+        ).all()
+    ]
+
     # --- coaching: apakah ADA coach yg bisa dipakai di slot ini? ---
     # Sengaja TANPA nama coach (keputusan user): halaman publik cukup memberi
     # tahu "coaching tersedia", penentuan orangnya saat customer menghubungi
@@ -250,15 +269,18 @@ def public_schedule():
     while cur < end_of_day:
         slot_end = cur + timedelta(minutes=slot_minutes)
         overlap = [r for r in booked_ranges if r[0] < slot_end and r[1] > cur]
+        ev_overlap = [r for r in ev_ranges if r[0] < slot_end and r[1] > cur]
         is_booked = bool(overlap)
+        is_event = bool(ev_overlap)
         slots.append(
             {
                 "start_time": cur.strftime("%H:%M"),
                 "end_time": slot_end.strftime("%H:%M"),
-                "status": "booked" if is_booked else "available",
+                "status": "event" if is_event else ("booked" if is_booked else "available"),
+                "event_name": ev_overlap[0][2] if is_event else None,
                 "coaching": any(r[2] for r in overlap),
                 # cuma relevan utk slot yg court-nya masih kosong
-                "coach_available": (not is_booked) and _coach_free(cur, slot_end),
+                "coach_available": (not is_booked and not is_event) and _coach_free(cur, slot_end),
                 "rate": facility_rate_for_hour(fac, cur.hour, dtype),
             }
         )

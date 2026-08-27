@@ -13,6 +13,7 @@ import OpenPriceDialog from '../components/OpenPriceDialog.vue'
 import OpenBillDialog from '../components/OpenBillDialog.vue'
 import MemberBookingDialog from '../components/MemberBookingDialog.vue'
 import SettlementDialog from '../components/SettlementDialog.vue'
+import EventDialog from '../components/EventDialog.vue'
 import AbsenDialog from '../components/AbsenDialog.vue'
 import StationStartDialog from '../components/StationStartDialog.vue'
 import StationReservationDialog from '../components/StationReservationDialog.vue'
@@ -79,6 +80,7 @@ function onOpenPriceAdd(amount) {
   openPriceProduct.value = null
 }
 const showMember = ref(false)
+const showEvent = ref(false)
 const showSettle = ref(false)
 const lastResult = ref(null)
 
@@ -396,6 +398,10 @@ function logout() {
             class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-medium border border-purple-100 flex items-center justify-center gap-2">
             🗓️ Member
           </button>
+          <button v-if="pos.bookingEnabled" @click="showEvent = true"
+            class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium border border-rose-100 flex items-center justify-center gap-2">
+            🏆 Event
+          </button>
           <button v-if="pos.hasStations" @click="showStationResv = true"
             class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium border border-indigo-100 flex items-center justify-center gap-2">
             📅 Reservasi
@@ -602,6 +608,7 @@ function logout() {
     <CloseShiftDialog v-if="showClose" :shift="pos.openShift" @close="showClose = false" @submit="onCloseShift" />
     <BookingDialog v-if="showBooking" @close="showBooking = false" @added="flash('Booking ditambahkan ke keranjang')" />
     <MemberBookingDialog v-if="showMember" @close="showMember = false" @created="onMemberCreated" />
+    <EventDialog v-if="showEvent" @close="showEvent = false" @done="pos.fetchStations().catch(() => {})" />
     <StationReservationDialog v-if="showStationResv" @close="showStationResv = false"
       @created="onReservationCreated" @started="onReservationStarted" />
     <SettlementDialog v-if="showSettle" @close="showSettle = false" @paid="onSettlePaid" />
