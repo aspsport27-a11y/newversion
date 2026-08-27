@@ -2802,6 +2802,44 @@ def shift_orders(shift_id):
     return jsonify(shift=shift.to_dict(), orders=out), 200
 
 
+@admin_bp.post("/shifts/<int:shift_id>/opening-cash")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+def shift_edit_opening_cash(shift_id):
+    """Koreksi Saldo Awal (modal) shift — mis. salah input saat buka shift.
+    Kas seharusnya & selisih dihitung ulang. Admin/HO: semua venue; manajer:
+    venue-nya. Ditolak jika sudah disetor."""
+    shift = db.session.get(Shift, shift_id)
+    if not shift:
+        return _err("Shift tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and shift.venue_id != forced:
+        return _err("Bukan shift venue Anda", "forbidden", 403)
+    if shift.deposit_id is not None:
+        return _err("Kas shift sudah DISETOR — tak bisa ubah saldo awal.", "already_deposited", 409)
+    d = request.get_json(silent=True) or {}
+    if d.get("opening_cash") in (None, ""):
+        return _err("Saldo awal wajib diisi.")
+    new_open = float(_D(d.get("opening_cash")))
+    if new_open < 0:
+        return _err("Saldo awal tidak boleh negatif.")
+    old_open = float(shift.opening_cash or 0)
+    shift.opening_cash = new_open
+    shift.expected_cash = (
+        new_open + float(shift.total_cash_sales or 0)
+        + float(shift.cash_in or 0) - float(shift.cash_out or 0)
+    )
+    if shift.counted_cash is not None:
+        shift.cash_variance = float(shift.counted_cash) - float(shift.expected_cash)
+    db.session.add(ShiftAdjustLog(
+        shift_id=shift.id, venue_id=shift.venue_id, cash_delta=0, qris_delta=0, transfer_delta=0,
+        note=f"Koreksi saldo awal: Rp {int(old_open):,} → Rp {int(new_open):,}".replace(",", "."),
+        adjusted_by=_current_user().id,
+    ))
+    db.session.commit()
+    return jsonify(message="Saldo awal dikoreksi.", shift=shift.to_dict()), 200
+
+
 @admin_bp.put("/orders/<int:order_id>/edit-items")
 @jwt_required()
 @roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)

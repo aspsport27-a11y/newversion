@@ -88,12 +88,26 @@ function prepOrder(o) {
     _methods: [...new Set((o.payments || []).filter((p) => p.status === 'paid').map((p) => p.method))].join(', '),
   }
 }
+const soOpening = ref(0)
+const soOpenSaving = ref(false)
 async function openShiftOrders(s) {
   soShift.value = s; soOrders.value = []; showSO.value = true; soLoading.value = true
+  soOpening.value = Number(s.opening_cash) || 0
   try {
     const { data } = await client.get(`/admin/shifts/${s.id}/orders`)
     soOrders.value = data.orders.map(prepOrder)
   } catch (e) { alert(e?.response?.data?.message || 'Gagal memuat.') } finally { soLoading.value = false }
+}
+async function saveOpeningCash() {
+  if (Number(soOpening.value) === Number(soShift.value.opening_cash)) return
+  if (!window.confirm(`Ubah Saldo Awal shift menjadi ${rupiah(soOpening.value)}? Kas seharusnya & selisih akan menyesuaikan.`)) return
+  soOpenSaving.value = true
+  try {
+    const { data } = await client.post(`/admin/shifts/${soShift.value.id}/opening-cash`, { opening_cash: Number(soOpening.value) || 0 })
+    soShift.value = { ...soShift.value, ...data.shift }
+    await run()
+    flash('Saldo awal dikoreksi')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { soOpenSaving.value = false }
 }
 function soAddLine(o) { o._prod.push({ item_type: 'product', product_id: null, name: '', quantity: 1, unit_price: null }) }
 function soRmLine(o, i) { o._prod.splice(i, 1) }
@@ -423,7 +437,13 @@ onMounted(async () => { await loadVenues(); await run() })
           <h3 class="text-lg font-bold text-slate-800">Rincian Transaksi Shift</h3>
           <button @click="showSO = false" class="text-slate-400 text-xl">✕</button>
         </div>
-        <p class="text-xs text-slate-500 mb-3">{{ soShift?.cashier || '—' }} · {{ soShift && soShift.opened_at ? parseUTC(soShift.opened_at).toLocaleString('id-ID') : '—' }} · {{ soOrders.length }} transaksi</p>
+        <p class="text-xs text-slate-500 mb-2">{{ soShift?.cashier || '—' }} · {{ soShift && soShift.opened_at ? parseUTC(soShift.opened_at).toLocaleString('id-ID') : '—' }} · {{ soOrders.length }} transaksi</p>
+        <div class="flex items-center gap-2 mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          <label class="text-xs text-slate-600">Saldo Awal (modal):</label>
+          <input v-model.number="soOpening" type="number" class="w-32 rounded-lg border border-slate-300 px-2 py-1 text-sm text-right outline-none focus:border-brand-500" />
+          <button @click="saveOpeningCash" :disabled="soOpenSaving || Number(soOpening) === Number(soShift?.opening_cash)" class="text-xs bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-2.5 py-1 font-medium disabled:opacity-40">{{ soOpenSaving ? '…' : 'Koreksi' }}</button>
+          <span class="text-[11px] text-slate-400">ubah kalau modal awal salah input</span>
+        </div>
         <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 mb-3">
           Edit langsung nama/qty/harga item <b>produk & tiket</b>. Total order, pembayaran, & kas shift menyesuaikan otomatis (tanggal transaksi dipertahankan). Item <b>booking/rental dikunci</b> (pakai reschedule/cancel). <b>Stok tidak otomatis disesuaikan.</b>
         </div>
