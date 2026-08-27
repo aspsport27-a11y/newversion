@@ -71,6 +71,8 @@ onMounted(loadReport)
     <div class="bg-white rounded-xl shadow-sm border p-4 mb-5 flex flex-wrap items-end gap-3">
       <div><label class="block text-xs text-slate-500 mb-1">Dari</label>
         <input v-model="from" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+      <button @click="to = from" type="button" title="Samakan: Sampai = Dari (satu hari)"
+        class="h-[38px] px-2.5 rounded-lg border border-slate-300 text-slate-500 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-300 text-sm">⇥</button>
       <div><label class="block text-xs text-slate-500 mb-1">Sampai</label>
         <input v-model="to" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
       <button @click="apply" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>

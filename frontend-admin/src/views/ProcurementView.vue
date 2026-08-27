@@ -540,7 +540,9 @@ watch(tab, reloadTab)
             <input v-model="ksgFrom" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           </div>
           <div>
-            <label class="block text-xs text-slate-500 mb-1">Sampai</label>
+            <label class="flex items-center justify-between text-xs text-slate-500 mb-1">Sampai
+              <button @click="ksgTo = ksgFrom" type="button" title="Samakan Sampai = Dari" class="text-brand-600 hover:underline">⇥ = Dari</button>
+            </label>
             <input v-model="ksgTo" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
           </div>
         </div>
