@@ -77,14 +77,31 @@ const corrShift = ref(null)
 const corrForm = ref({ customer_name: '', method: 'cash', items: [] })
 const corrSaving = ref(false)
 const corrErr = ref('')
+const corrProducts = ref([])
 const corrTotal = computed(() => corrForm.value.items.reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.unit_price) || 0), 0))
-function openCorrection(s) {
+function newCorrLine() { return { product_id: '', name: '', qty: 1, unit_price: null, deduct_stock: false } }
+async function openCorrection(s) {
   corrShift.value = s
-  corrForm.value = { customer_name: '', method: 'cash', items: [{ name: '', qty: 1, unit_price: null }] }
-  corrErr.value = ''
+  corrForm.value = { customer_name: '', method: 'cash', items: [newCorrLine()] }
+  corrErr.value = ''; corrProducts.value = []
   showCorr.value = true
+  try {
+    const { data } = await client.get('/admin/products', { params: { venue_id: s.venue_id } })
+    corrProducts.value = data.products || []
+  } catch { corrProducts.value = [] }
 }
-function addCorrLine() { corrForm.value.items.push({ name: '', qty: 1, unit_price: null }) }
+function onCorrProduct(it) {
+  const p = corrProducts.value.find((x) => x.id === it.product_id)
+  if (!p) { it.deduct_stock = false; return }   // manual/kosong
+  it.name = p.name
+  if (it.unit_price == null || it.unit_price === '') it.unit_price = p.effective_price ?? p.price
+  it.deduct_stock = !!p.track_stock             // default centang kalau produk pakai stok
+}
+function corrProductTracked(it) {
+  const p = corrProducts.value.find((x) => x.id === it.product_id)
+  return !!(p && p.track_stock)
+}
+function addCorrLine() { corrForm.value.items.push(newCorrLine()) }
 function rmCorrLine(i) { corrForm.value.items.splice(i, 1) }
 async function submitCorrection() {
   const items = corrForm.value.items.filter((i) => i.name?.trim() && Number(i.qty) > 0)
@@ -94,7 +111,11 @@ async function submitCorrection() {
     const { data } = await client.post(`/admin/shifts/${corrShift.value.id}/correction-entry`, {
       method: corrForm.value.method,
       customer_name: corrForm.value.customer_name || null,
-      items: items.map((i) => ({ name: i.name.trim(), qty: Number(i.qty), unit_price: Number(i.unit_price) || 0 })),
+      items: items.map((i) => ({
+        name: i.name.trim(), qty: Number(i.qty), unit_price: Number(i.unit_price) || 0,
+        product_id: i.product_id || null,
+        deduct_stock: !!(i.product_id && i.deduct_stock),
+      })),
     })
     showCorr.value = false
     await run()
@@ -327,7 +348,7 @@ onMounted(async () => { await loadVenues(); await run() })
           <button @click="showCorr = false" class="text-slate-400 text-xl">✕</button>
         </div>
         <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800 mb-3">
-          Transaksi ini dicatat dengan <b>tanggal = tanggal shift</b> ({{ corrShift && corrShift.opened_at ? parseUTC(corrShift.opened_at).toLocaleDateString('id-ID') : '—' }}), bukan hari ini — supaya Laporan Penjualan & Laporan Shift konsisten. Langsung berstatus lunas & masuk kas shift. <b>Stok tidak otomatis dikurangi.</b>
+          Transaksi ini dicatat dengan <b>tanggal = tanggal shift</b> ({{ corrShift && corrShift.opened_at ? parseUTC(corrShift.opened_at).toLocaleDateString('id-ID') : '—' }}), bukan hari ini — supaya Laporan Penjualan & Laporan Shift konsisten. Langsung berstatus lunas & masuk kas shift.
         </div>
         <label class="block text-xs text-slate-500 mb-1">Nama pelanggan (opsional)</label>
         <input v-model="corrForm.customer_name" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3" placeholder="—" />
@@ -338,13 +359,26 @@ onMounted(async () => { await loadVenues(); await run() })
           <option value="transfer">Transfer</option>
         </select>
         <p class="text-xs font-medium text-slate-500 mb-1">Rincian</p>
-        <div v-for="(it, i) in corrForm.items" :key="i" class="flex gap-2 mb-2">
-          <input v-model="it.name" placeholder="Nama item" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
-          <input v-model.number="it.qty" type="number" min="1" placeholder="Qty" class="w-16 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
-          <input v-model.number="it.unit_price" type="number" placeholder="Harga" class="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
-          <button @click="rmCorrLine(i)" class="text-red-400 px-1">✕</button>
+        <div v-for="(it, i) in corrForm.items" :key="i" class="border border-slate-200 rounded-lg p-2 mb-2">
+          <div class="flex gap-2 mb-1.5">
+            <select v-model="it.product_id" @change="onCorrProduct(it)" class="w-40 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none">
+              <option value="">— manual —</option>
+              <option v-for="p in corrProducts" :key="p.id" :value="p.id">{{ p.name }}<span v-if="p.track_stock"> (stok {{ p.stock_qty }})</span></option>
+            </select>
+            <input v-model="it.name" placeholder="Nama item" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+            <button @click="rmCorrLine(i)" class="text-red-400 px-1">✕</button>
+          </div>
+          <div class="flex gap-2 items-center">
+            <input v-model.number="it.qty" type="number" min="1" placeholder="Qty" class="w-16 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
+            <input v-model.number="it.unit_price" type="number" placeholder="Harga" class="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
+            <span class="text-xs text-slate-400 ml-1">= {{ rupiah((Number(it.qty)||0) * (Number(it.unit_price)||0)) }}</span>
+            <label v-if="corrProductTracked(it)" class="ml-auto flex items-center gap-1 text-xs text-slate-600 cursor-pointer">
+              <input v-model="it.deduct_stock" type="checkbox" class="rounded" /> Kurangi stok
+            </label>
+          </div>
         </div>
-        <button @click="addCorrLine" class="text-brand-600 text-sm mb-3">+ baris</button>
+        <button @click="addCorrLine" class="text-brand-600 text-sm mb-2">+ baris</button>
+        <p class="text-[11px] text-slate-400 mb-3">Centang <b>Kurangi stok</b> jika barang benar-benar keluar (belum terpotong di POS). Baris manual tanpa produk tidak memengaruhi stok.</p>
         <div class="flex justify-between font-semibold mb-3"><span>Total</span><span class="text-brand-700">{{ rupiah(corrTotal) }}</span></div>
         <p v-if="corrErr" class="text-sm text-red-600 mb-2">{{ corrErr }}</p>
         <button @click="submitCorrection" :disabled="corrSaving || !corrTotal" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ corrSaving ? 'Menyimpan…' : 'Simpan Koreksi' }}</button>
