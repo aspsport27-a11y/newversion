@@ -750,7 +750,23 @@ def orders_outstanding():
         .order_by(Order.created_at.desc())
         .all()
     )
-    return jsonify(count=len(orders), orders=[o.to_dict() for o in orders]), 200
+    # tanggal booking per order (dari FacilityBooking) → utk filter tanggal di POS
+    item_ids = [it.id for o in orders for it in o.items]
+    bd_map = {}  # order_item_id -> booking_date iso
+    if item_ids:
+        for oi_id, bdate in (
+            db.session.query(FacilityBooking.order_item_id, FacilityBooking.booking_date)
+            .filter(FacilityBooking.order_item_id.in_(item_ids)).all()
+        ):
+            if bdate:
+                bd_map[oi_id] = bdate.isoformat()
+    out = []
+    for o in orders:
+        d = o.to_dict()
+        dates = sorted({bd_map[it.id] for it in o.items if it.id in bd_map})
+        d["booking_dates"] = dates
+        out.append(d)
+    return jsonify(count=len(out), orders=out), 200
 
 
 @pos_bp.get("/orders/<int:order_id>")

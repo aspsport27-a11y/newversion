@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { usePosStore } from '../stores/pos'
 import PaymentDialog from './PaymentDialog.vue'
 import RescheduleDialog from './RescheduleDialog.vue'
@@ -22,6 +22,24 @@ const orders = ref([])
 const loading = ref(true)
 const selected = ref(null)
 const err = ref('')
+
+// --- Filter: nama customer + tanggal booking ---
+const custQuery = ref('')
+const dateFilter = ref('')
+const filteredOrders = computed(() => {
+  const q = custQuery.value.trim().toLowerCase()
+  const dt = dateFilter.value
+  return orders.value.filter((o) => {
+    if (q && !((o.customer_name || '').toLowerCase().includes(q) || (o.order_number || '').toLowerCase().includes(q))) return false
+    if (dt) {
+      const inBooking = (o.booking_dates || []).includes(dt)
+      const inCreated = (o.created_at || '').slice(0, 10) === dt
+      if (!inBooking && !inCreated) return false
+    }
+    return true
+  })
+})
+function clearFilter() { custQuery.value = ''; dateFilter.value = '' }
 
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
 const ICONS = { booking: '🏟️', rental: '🎮', ticket: '🎟️', product: '🧾' }
@@ -64,18 +82,30 @@ async function cancel(o) {
 <template>
   <div class="fixed inset-0 z-40 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
     <div class="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[92vh] overflow-auto">
-      <div class="flex justify-between items-center mb-4">
+      <div class="flex justify-between items-center mb-3">
         <h3 class="text-lg font-bold text-slate-800">Order Belum Bayar</h3>
         <button @click="emit('close')" class="text-slate-400 text-xl">✕</button>
+      </div>
+
+      <!-- Filter -->
+      <div v-if="orders.length" class="flex flex-wrap gap-2 mb-3">
+        <input v-model="custQuery" type="text" placeholder="🔍 Cari nama / kode order…"
+          class="flex-1 min-w-[8rem] rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        <input v-model="dateFilter" type="date"
+          class="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-brand-500" />
+        <button v-if="custQuery || dateFilter" @click="clearFilter" class="px-2 rounded-lg border border-slate-300 text-slate-500 text-sm hover:bg-slate-50">✕</button>
       </div>
 
       <p v-if="loading" class="text-center text-slate-400 py-6">Memuat…</p>
       <p v-else-if="!orders.length" class="text-center text-slate-400 py-6">
         Tidak ada order yang belum lunas 🎉
       </p>
+      <p v-else-if="!filteredOrders.length" class="text-center text-slate-400 py-6">
+        Tidak ada order yang cocok dengan filter.
+      </p>
 
-      <div v-else class="space-y-2">
-        <div v-for="o in orders" :key="o.id" class="border rounded-xl p-3">
+      <div v-else class="space-y-2 overflow-y-auto pr-1" style="max-height: 55vh">
+        <div v-for="o in filteredOrders" :key="o.id" class="border rounded-xl p-3">
           <div class="flex justify-between items-start">
             <div>
               <p class="font-medium text-slate-800">{{ o.customer_name || 'Tanpa nama' }}</p>
