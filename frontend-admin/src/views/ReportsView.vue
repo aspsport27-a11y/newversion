@@ -102,6 +102,22 @@ function renderChart() {
       scales: { y: { ticks: { callback: (v) => 'Rp' + (v / 1000) + 'k' } } } },
   })
 }
+// Tab: laporan vs riwayat buka shift
+const tab = ref('report')
+const reopenLogs = ref([])
+const reopenLoading = ref(false)
+async function loadReopenLogs() {
+  reopenLoading.value = true
+  try {
+    const params = {}
+    if (venueId.value) params.venue_id = venueId.value
+    const { data } = await client.get('/admin/shifts/reopen-logs', { params })
+    reopenLogs.value = data.logs
+  } catch { reopenLogs.value = [] } finally { reopenLoading.value = false }
+}
+function switchTab(t) { tab.value = t; if (t === 'reopen') loadReopenLogs() }
+function venueName(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
+
 onMounted(async () => { await loadVenues(); await run() })
 </script>
 
@@ -110,8 +126,14 @@ onMounted(async () => { await loadVenues(); await run() })
     <h1 class="text-2xl font-bold text-slate-800 mb-1">Laporan</h1>
     <p class="text-slate-500 mb-5">Penjualan dan rekonsiliasi shift.</p>
 
+    <!-- Tabs -->
+    <div v-if="canReopen" class="flex gap-1 border-b border-slate-200 mb-5">
+      <button @click="switchTab('report')" :class="tab === 'report' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">Laporan</button>
+      <button @click="switchTab('reopen')" :class="tab === 'reopen' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500'" class="px-4 py-2 border-b-2 font-medium text-sm">↻ Riwayat Buka Shift</button>
+    </div>
+
     <!-- Filter -->
-    <div class="bg-white rounded-xl shadow-sm border p-4 mb-5 flex flex-wrap items-end gap-3">
+    <div v-show="tab === 'report'" class="bg-white rounded-xl shadow-sm border p-4 mb-5 flex flex-wrap items-end gap-3">
       <div><label class="block text-xs text-slate-500 mb-1">Dari</label>
         <input v-model="from" type="date" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
       <button @click="to = from" type="button" title="Samakan: Sampai = Dari (satu hari)"
@@ -126,9 +148,9 @@ onMounted(async () => { await loadVenues(); await run() })
       <button @click="run" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-5 py-2 font-medium">Terapkan</button>
     </div>
 
-    <div v-if="loading" class="text-slate-400">Memuat…</div>
+    <div v-if="tab === 'report' && loading" class="text-slate-400">Memuat…</div>
 
-    <template v-else-if="sales">
+    <template v-else-if="tab === 'report' && sales">
       <!-- Summary -->
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
         <div class="bg-white rounded-xl shadow-sm border p-5">
@@ -232,5 +254,38 @@ onMounted(async () => { await loadVenues(); await run() })
         </div>
       </div>
     </template>
+
+    <!-- ===== Riwayat Buka Shift (audit) ===== -->
+    <div v-show="tab === 'reopen'">
+      <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800 mb-4">
+        Jejak setiap shift yang <b>dibuka kembali</b> oleh Admin/HO untuk dikoreksi — beserta alasan & kondisi kas sebelum dibuka. Filter venue mengikuti pilihan di tab Laporan.
+      </div>
+      <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-3 font-medium">Waktu Dibuka</th>
+              <th class="px-4 py-3 font-medium">Venue</th>
+              <th class="px-4 py-3 font-medium">Shift ID</th>
+              <th class="px-4 py-3 font-medium">Dibuka oleh</th>
+              <th class="px-4 py-3 font-medium text-right">Selisih (sblm)</th>
+              <th class="px-4 py-3 font-medium">Alasan</th>
+            </tr></thead>
+            <tbody>
+              <tr v-if="reopenLoading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!reopenLogs.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada shift yang dibuka kembali.</td></tr>
+              <tr v-for="l in reopenLogs" :key="l.id" class="border-t hover:bg-slate-50">
+                <td class="px-4 py-3 text-slate-500 whitespace-nowrap">{{ l.reopened_at ? parseUTC(l.reopened_at).toLocaleString('id-ID') : '—' }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ venueName(l.venue_id) }}</td>
+                <td class="px-4 py-3 font-mono text-xs text-slate-500">#{{ l.shift_id }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ l.reopened_by_name || '—' }}</td>
+                <td class="px-4 py-3 text-right font-medium" :class="l.variance_before == null ? 'text-slate-300' : (l.variance_before === 0 ? 'text-emerald-600' : 'text-red-600')">{{ l.variance_before != null ? rupiah(l.variance_before) : '—' }}</td>
+                <td class="px-4 py-3 text-slate-700 max-w-md">{{ l.reason }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
