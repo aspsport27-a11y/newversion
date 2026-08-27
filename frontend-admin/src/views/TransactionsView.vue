@@ -132,7 +132,7 @@ const busy = ref(false)
 async function cancelOrder(o, ev) {
   ev?.stopPropagation()
   const warn = o.status === 'paid'
-    ? `Transaksi ${o.order_number} sudah LUNAS. Membatalkan akan mengembalikan stok produk yang sudah terjual dan mengurangi total kas shift terkait. Lanjutkan?`
+    ? `Transaksi ${o.order_number} sudah LUNAS. Membatalkan akan mengembalikan stok produk yang sudah terjual dan mengurangi total kas shift terkait.\n\nJika shift pembayaran sudah DITUTUP, uang yang sudah masuk tetap tercatat (jadi pendapatan/DP hangus, tak diubah retroaktif). Setelahnya order bisa dihapus permanen. Lanjutkan?`
     : `Batalkan transaksi ${o.order_number}?`
   if (!window.confirm(warn)) return
   busy.value = true

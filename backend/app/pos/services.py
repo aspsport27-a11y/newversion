@@ -895,15 +895,6 @@ def cancel_order(order: Order, uid: int = None) -> Order:
 
     if order.status == "paid":
         paid_payments = [p for p in order.payments if p.status == "paid"]
-        shift_ids = {p.shift_id for p in paid_payments if p.shift_id}
-        if shift_ids:
-            closed = Shift.query.filter(Shift.id.in_(shift_ids), Shift.status == "closed").count()
-            if closed:
-                raise PosError(
-                    "Shift penerima pembayaran order ini sudah ditutup — tidak bisa "
-                    "dibatalkan otomatis (sudah masuk rekonsiliasi kas).",
-                    "shift_closed", 409,
-                )
         # balikkan stok yg sudah dikurangi saat lunas
         for item in order.items:
             if item.item_type == "product" and item.product_id:
@@ -916,19 +907,25 @@ def cancel_order(order: Order, uid: int = None) -> Order:
                         quantity=qty, balance_after=product.stock_qty,
                         reference=order.order_number, created_by=uid,
                     ))
-        # balikkan akumulasi shift & tandai payment void (tanpa hapus baris)
+        # Balikkan efek pembayaran PER-shift:
+        # - shift masih BUKA  → kurangi akumulasi shift & tandai payment 'void'.
+        # - shift sudah DITUTUP → JANGAN diubah (kas historis sudah direkonsiliasi/
+        #   disetor). Pembayaran dibiarkan 'paid' → jadi pendapatan/DP hangus yg
+        #   tetap tercatat; ordernya tetap bisa dibatalkan lalu dihapus permanen
+        #   (jejak DP hangus muncul di tab DP Hangus & Riwayat Hapus).
         for p in paid_payments:
-            if p.shift_id:
-                shift = db.session.get(Shift, p.shift_id)
-                if shift:
-                    amt = Decimal(str(p.amount))
-                    shift.total_sales = Decimal(str(shift.total_sales or 0)) - amt
-                    if p.method == "cash":
-                        shift.total_cash_sales = Decimal(str(shift.total_cash_sales or 0)) - amt
-                    elif p.method == "qris":
-                        shift.total_qris_sales = Decimal(str(shift.total_qris_sales or 0)) - amt
-                    elif p.method == "transfer":
-                        shift.total_transfer_sales = Decimal(str(shift.total_transfer_sales or 0)) - amt
+            shift = db.session.get(Shift, p.shift_id) if p.shift_id else None
+            if shift and shift.status == "closed":
+                continue  # historis — biarkan apa adanya (pendapatan hangus)
+            if shift:
+                amt = Decimal(str(p.amount))
+                shift.total_sales = Decimal(str(shift.total_sales or 0)) - amt
+                if p.method == "cash":
+                    shift.total_cash_sales = Decimal(str(shift.total_cash_sales or 0)) - amt
+                elif p.method == "qris":
+                    shift.total_qris_sales = Decimal(str(shift.total_qris_sales or 0)) - amt
+                elif p.method == "transfer":
+                    shift.total_transfer_sales = Decimal(str(shift.total_transfer_sales or 0)) - amt
             p.status = "void"
 
     order.status = "void"
