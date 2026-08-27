@@ -58,7 +58,9 @@ onMounted(load)
 async function onPay(payload) {
   err.value = ''
   try {
-    const res = await pos.settle(selected.value.id, payload.method, payload.amount, payload.reference, payload.proof_image)
+    const res = payload.splits
+      ? await pos.settleSplit(selected.value.id, payload.splits)
+      : await pos.settle(selected.value.id, payload.method, payload.amount, payload.reference, payload.proof_image)
     emit('paid', res)
   } catch (e) {
     err.value = e?.response?.data?.message || 'Gagal memproses pelunasan.'

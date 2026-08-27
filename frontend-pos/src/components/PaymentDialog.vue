@@ -54,9 +54,47 @@ function setFull() { amount.value = props.total }
 function setNoDp() { amount.value = 0 }
 function quickReceived(v) { received.value = String(v) }
 
+// --- Split bill: bayar 1 tagihan pakai beberapa metode ---
+const splitMode = ref(false)
+const splits = ref([
+  { method: 'cash', amount: null, proof: '', reference: '' },
+  { method: 'qris', amount: null, proof: '', reference: '' },
+])
+function splitNeedsProof(m) { return m === 'transfer' || (m === 'qris' && qrisManual.value) }
+function addSplit() { splits.value.push({ method: 'cash', amount: null, proof: '', reference: '' }) }
+function rmSplit(i) { if (splits.value.length > 2) splits.value.splice(i, 1) }
+function onSplitProof(i, e) {
+  proofErr.value = ''
+  const file = e.target.files[0]; if (!file) return
+  if (file.size > 3_000_000) { proofErr.value = 'Ukuran file maks 3MB.'; e.target.value = ''; return }
+  const r = new FileReader(); r.onload = () => { splits.value[i].proof = r.result }; r.readAsDataURL(file)
+}
+const splitSum = computed(() => splits.value.reduce((t, s) => t + (Number(s.amount) || 0), 0))
+const splitRemaining = computed(() => (Number(amount.value) || 0) - splitSum.value)
+const splitValid = computed(() =>
+  Math.abs(splitRemaining.value) < 0.5 &&
+  splits.value.every((s) => (Number(s.amount) || 0) > 0 && (!splitNeedsProof(s.method) || !!s.proof)),
+)
+// autofill baris terakhir dgn sisa (mempercepat)
+function fillRemaining(i) {
+  const others = splits.value.reduce((t, s, idx) => t + (idx === i ? 0 : (Number(s.amount) || 0)), 0)
+  splits.value[i].amount = Math.max(0, (Number(amount.value) || 0) - others)
+}
+
 async function confirm() {
   submitting.value = true
   try {
+    if (splitMode.value) {
+      await emit('pay', {
+        amount: Number(amount.value),
+        splits: splits.value.map((s) => ({
+          method: s.method, amount: Number(s.amount),
+          reference: s.method !== 'cash' ? (s.reference || null) : null,
+          proof_image: splitNeedsProof(s.method) ? s.proof : null,
+        })),
+      })
+      return
+    }
     const needProof = method.value === 'transfer' || (method.value === 'qris' && qrisManual.value)
     await emit('pay', {
       method: method.value,
@@ -104,6 +142,46 @@ async function confirm() {
       </button>
 
       <template v-if="!noPay">
+      <!-- Toggle: 1 metode vs split -->
+      <div class="flex gap-2 mb-3">
+        <button @click="splitMode = false" :class="!splitMode ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500'" class="flex-1 py-2 rounded-lg text-sm font-medium">1 Metode</button>
+        <button @click="splitMode = true" :class="splitMode ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500'" class="flex-1 py-2 rounded-lg text-sm font-medium">🔀 Split (Cash + QRIS/Transfer)</button>
+      </div>
+
+      <!-- ===== SPLIT BILL ===== -->
+      <div v-if="splitMode" class="space-y-2">
+        <div v-for="(s, i) in splits" :key="i" class="border border-slate-200 rounded-lg p-2 space-y-1.5">
+          <div class="flex gap-2 items-center">
+            <select v-model="s.method" class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm w-28 outline-none">
+              <option value="cash">💵 Cash</option>
+              <option value="qris">📱 QRIS</option>
+              <option value="transfer">🏦 Transfer</option>
+            </select>
+            <input v-model.number="s.amount" type="number" inputmode="numeric" placeholder="Jumlah"
+              class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none focus:border-brand-500" />
+            <button type="button" @click="fillRemaining(i)" title="Isi sisa" class="text-xs text-brand-600 px-1 whitespace-nowrap">sisa</button>
+            <button v-if="splits.length > 2" @click="rmSplit(i)" class="text-red-400 px-1">✕</button>
+          </div>
+          <label v-if="splitNeedsProof(s.method)" class="flex items-center gap-2 text-xs cursor-pointer">
+            <input type="file" accept="image/*" class="hidden" @change="onSplitProof(i, $event)" />
+            <span class="inline-block rounded-lg border border-dashed border-slate-300 px-2 py-1 text-slate-500">{{ s.proof ? '✅ bukti terpilih' : '📎 upload bukti (' + s.method + ')' }}</span>
+          </label>
+        </div>
+        <button @click="addSplit" class="text-brand-600 text-sm">+ metode</button>
+        <div class="flex justify-between text-sm border-t pt-2">
+          <span class="text-slate-500">Terbagi</span>
+          <span class="font-semibold" :class="Math.abs(splitRemaining) < 0.5 ? 'text-emerald-600' : 'text-amber-600'">{{ rupiah(splitSum) }} / {{ rupiah(amount) }}</span>
+        </div>
+        <p v-if="splitRemaining > 0" class="text-xs text-amber-600 text-right">Kurang {{ rupiah(splitRemaining) }}</p>
+        <p v-else-if="splitRemaining < 0" class="text-xs text-red-600 text-right">Lebih {{ rupiah(-splitRemaining) }}</p>
+        <p v-if="proofErr" class="text-xs text-red-600">{{ proofErr }}</p>
+        <button @click="confirm" :disabled="!splitValid || submitting"
+          class="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50">
+          {{ submitting ? 'Memproses…' : (sisa > 0 ? 'Bayar DP (Split) & Cetak' : 'Bayar (Split) & Cetak Struk') }}
+        </button>
+      </div>
+
+      <template v-else>
       <div class="grid grid-cols-3 gap-2 mb-4">
         <button @click="method = 'cash'" :class="method === 'cash' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium text-sm">💵 Cash</button>
         <button @click="method = 'qris'" :class="method === 'qris' ? 'bg-brand-600 text-white' : 'bg-slate-100 text-slate-600'" class="py-2.5 rounded-lg font-medium text-sm">📱 QRIS</button>
@@ -185,6 +263,7 @@ async function confirm() {
           {{ submitting ? 'Memproses…' : (sisa > 0 ? 'Bayar DP & Cetak' : 'Bayar & Cetak Struk') }}
         </button>
       </div>
+      </template>
       </template>
     </div>
   </div>

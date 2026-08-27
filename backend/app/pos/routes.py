@@ -847,6 +847,49 @@ def order_pay(order_id):
     return jsonify(order=order.to_dict(), payment=payment.to_dict()), 200
 
 
+@pos_bp.post("/orders/<int:order_id>/pay-split")
+@jwt_required()
+def order_pay_split(order_id):
+    """Split bill: bayar 1 order dengan BEBERAPA metode sekaligus (mis. sebagian
+    cash, sebagian QRIS). Semua pembayaran dalam 1 transaksi (all-or-nothing).
+    Setiap baris: {method, amount, reference?, proof_image?}."""
+    from .models import Order
+
+    terminal = _current_terminal()
+    shift = _current_open_shift(terminal.id)
+    order = db.session.get(Order, order_id)
+    if order is None:
+        raise PosError("Order tidak ditemukan", "not_found", 404)
+    if order.venue_id != terminal.venue_id:
+        raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
+    body = request.get_json(silent=True) or {}
+    splits = body.get("splits") or []
+    if len(splits) < 2:
+        raise PosError("Split minimal 2 metode.", "bad_split")
+    # QRIS dinamis (BRIAPI aktif) tak bisa di-split (perlu QR per nominal, async)
+    if briapi.is_configured() and any(s.get("method") == "qris" for s in splits):
+        raise PosError("Split dengan QRIS dinamis belum didukung.", "qris_split_unsupported")
+    uid = int(get_jwt_identity())
+    try:
+        for s in splits:
+            data = {
+                "method": s.get("method"),
+                "amount": s.get("amount"),
+                "reference": s.get("reference"),
+            }
+            if data["method"] in ("transfer", "qris") and s.get("proof_image"):
+                fn = _save_payment_proof(s["proof_image"])
+                if not fn:
+                    raise PosError("Gagal simpan bukti (maks 3MB)", "bad_proof")
+                data["proof_filename"] = fn
+            pay_order(order, shift, uid, data, commit=False)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    return jsonify(order=order.to_dict()), 200
+
+
 @pos_bp.post("/orders/<int:order_id>/cancel")
 @jwt_required()
 def order_cancel(order_id):

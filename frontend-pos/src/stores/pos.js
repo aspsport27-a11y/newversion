@@ -301,6 +301,11 @@ export const usePosStore = defineStore('pos', {
       if (Number(extra.amount) === 0) {
         return { order: created.order, payment: null }
       }
+      // Split bill: beberapa metode sekaligus
+      if (extra.splits && extra.splits.length >= 2) {
+        const { data } = await client.post(`/orders/${created.order.id}/pay-split`, { splits: extra.splits })
+        return { order: data.order, payment: null }
+      }
       const { data: paid } = await client.post(`/orders/${created.order.id}/pay`, {
         method,
         amount: extra.amount ?? null,
@@ -308,6 +313,10 @@ export const usePosStore = defineStore('pos', {
         proof_image: extra.proof_image || null,
       })
       return paid // { order, payment }
+    },
+    async settleSplit(orderId, splits) {
+      const { data } = await client.post(`/orders/${orderId}/pay-split`, { splits })
+      return data // { order }
     },
     // Buka bill: buat order TERBUKA dari keranjang tanpa dibayar (open bill)
     async openBill() {

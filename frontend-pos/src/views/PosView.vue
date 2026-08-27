@@ -218,7 +218,9 @@ function onMemberCreated({ order, booked, skipped }) {
 }
 async function onPayStation(payload) {
   try {
-    const res = await pos.settle(pendingStationOrder.value.id, payload.method, payload.amount, payload.reference, payload.proof_image)
+    const res = payload.splits
+      ? await pos.settleSplit(pendingStationOrder.value.id, payload.splits)
+      : await pos.settle(pendingStationOrder.value.id, payload.method, payload.amount, payload.reference, payload.proof_image)
     showPayment.value = false
     pendingStationOrder.value = null
     if (openQrisIfNeeded(res)) return
@@ -297,6 +299,7 @@ async function onPay(payload) {
       amount: payload.amount,
       reference: payload.reference,
       proof_image: payload.proof_image,
+      splits: payload.splits,
     })
     showPayment.value = false
     if (openQrisIfNeeded(result)) return

@@ -724,11 +724,12 @@ PROVIDERS = {
 }
 
 
-def pay_order(order: Order, shift: Shift, cashier_id: int, data: dict) -> Payment:
+def pay_order(order: Order, shift: Shift, cashier_id: int, data: dict, commit: bool = True) -> Payment:
     """Terima pembayaran (penuh, DP, atau pelunasan) pada order.
 
     `data.amount` opsional: jika kosong = bayar seluruh sisa. Jika < sisa = DP.
     Pembayaran dicatat pada `shift` yang menerimanya (bisa beda dari shift order).
+    `commit=False` dipakai split bill: beberapa pembayaran dalam 1 transaksi.
     """
     if order.status not in ("open", "partial"):
         raise PosError("Order sudah tidak bisa dibayar", "order_not_open")
@@ -770,7 +771,8 @@ def pay_order(order: Order, shift: Shift, cashier_id: int, data: dict) -> Paymen
     if payment.status == "paid":
         _apply_payment(order, payment, shift, cashier_id)
 
-    db.session.commit()
+    if commit:
+        db.session.commit()
     return payment
 
 
