@@ -27,6 +27,7 @@ const routes = [
       { path: 'facilities', name: 'facilities', component: () => import('../views/FacilitiesView.vue') },
       { path: 'stations', name: 'stations', component: () => import('../views/StationsView.vue') },
       { path: 'bookings', name: 'bookings', component: () => import('../views/BookingsView.vue') },
+      { path: 'events', name: 'events', component: () => import('../views/EventsView.vue') },
       { path: 'reports', name: 'reports', component: () => import('../views/ReportsView.vue') },
       { path: 'transactions', name: 'transactions', component: () => import('../views/TransactionsView.vue') },
       { path: 'financial', name: 'financial', component: () => import('../views/FinancialView.vue') },

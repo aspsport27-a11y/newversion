@@ -814,3 +814,15 @@ class Event(db.Model):
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class EventContact(db.Model):
+    """Penanda 'sudah dihubungi' utk order terdampak event. Migration 065."""
+
+    __tablename__ = "event_contacts"
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    order_id = db.Column(db.Integer, nullable=False)
+    contacted_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    contacted_at = db.Column(db.DateTime, default=datetime.utcnow)

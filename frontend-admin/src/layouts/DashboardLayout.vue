@@ -134,6 +134,7 @@ const navGroups = [
     icon: '💳',
     items: [
       { name: 'bookings', label: 'Booking', icon: '📅', roles: ['admin', 'head_office', 'manager_unit'] },
+      { name: 'events', label: 'Event', icon: '🏆', roles: ['admin', 'head_office', 'manager_unit'] },
       { name: 'operational', label: 'Operasional', icon: '💰', roles: ['admin', 'head_office', 'manager_unit', 'admin_unit'] },
       { name: 'procurement', label: 'Procurement', icon: '🛒', roles: ['admin', 'head_office', 'manager_unit', 'admin_unit'] },
       { name: 'procurement-ops', label: 'Procurement Ops', icon: '🧾', roles: ['admin', 'head_office', 'manager_unit', 'admin_unit'] },

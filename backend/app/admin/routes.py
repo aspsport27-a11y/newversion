@@ -27,6 +27,8 @@ from ..pos.models import (
     Attendance,
     Coach,
     CoachingRate,
+    Event,
+    EventContact,
     Facility,
     FacilityBooking,
     FacilityRateRule,
@@ -3060,6 +3062,240 @@ def shift_adjust_logs():
     emp_names = {e.id: e.name for e in Employee.query.all()}
     users = {u.id: (emp_names.get(u.employee_id) or u.username) for u in User.query.all()}
     return jsonify(logs=[r.to_dict(users) for r in rows]), 200
+
+
+# ======================================================================
+# EVENT — kelola dari portal (manajer venue-nya, admin/HO semua). Fase 2.
+# ======================================================================
+EVENT_ROLES = roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+
+
+def _event_venue_id(body_or_arg):
+    """venue_id efektif: manajer dipaksa ke venue-nya; admin/HO ambil dari input."""
+    forced = _forced_venue()
+    if forced is not None:
+        return forced
+    vid = body_or_arg
+    return int(vid) if vid else None
+
+
+def _parse_ev(d):
+    df = datetime.strptime(d["date_from"], "%Y-%m-%d").date()
+    dto = datetime.strptime(d["date_to"], "%Y-%m-%d").date()
+    st = datetime.strptime(d["start_time"], "%H:%M").time()
+    et = datetime.strptime(d["end_time"], "%H:%M").time()
+    return df, dto, st, et
+
+
+@admin_bp.get("/events/quote")
+@jwt_required()
+@EVENT_ROLES
+def admin_event_quote():
+    from ..pos.services import event_conflicts, event_price_quote
+
+    vid = _event_venue_id(request.args.get("venue_id", type=int))
+    if not vid:
+        return _err("venue_id wajib")
+    try:
+        df, dto, st, et = _parse_ev(request.args)
+    except (KeyError, ValueError):
+        return _err("Tanggal/jam tidak lengkap/valid")
+    if dto < df:
+        return _err("Tanggal selesai sebelum tanggal mulai")
+    price, n = event_price_quote(vid, df, dto, st, et)
+    conflicts = event_conflicts(vid, df, dto, st, et)
+    return jsonify(suggested_price=price, facility_count=n, conflict_count=len(conflicts)), 200
+
+
+@admin_bp.get("/events")
+@jwt_required()
+@EVENT_ROLES
+def admin_events_list():
+    q = Event.query
+    forced = _forced_venue()
+    if forced is not None:
+        q = q.filter(Event.venue_id == forced)
+    elif request.args.get("venue_id", type=int):
+        q = q.filter(Event.venue_id == request.args.get("venue_id", type=int))
+    if request.args.get("scope") != "all":
+        q = q.filter(Event.status == "active", Event.date_to >= date.today())
+    events = q.order_by(Event.date_from.desc()).limit(300).all()
+    # ringkasan bayar order + jumlah bentrok
+    from ..pos.services import event_conflicts
+    out = []
+    for e in events:
+        d = e.to_dict()
+        order = db.session.get(Order, e.order_id) if e.order_id else None
+        d["order_status"] = order.status if order else None
+        d["amount_paid"] = float(order.amount_paid) if order else 0
+        d["conflict_count"] = len(event_conflicts(
+            e.venue_id, e.date_from, e.date_to, e.start_time, e.end_time,
+            exclude_order_id=e.order_id)) if e.status == "active" else 0
+        out.append(d)
+    return jsonify(events=out), 200
+
+
+@admin_bp.get("/events/<int:event_id>")
+@jwt_required()
+@EVENT_ROLES
+def admin_event_detail(event_id):
+    from ..pos.services import event_conflicts
+
+    ev = db.session.get(Event, event_id)
+    if not ev:
+        return _err("Event tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and ev.venue_id != forced:
+        return _err("Bukan event venue Anda", "forbidden", 403)
+    conflicts = event_conflicts(ev.venue_id, ev.date_from, ev.date_to, ev.start_time, ev.end_time,
+                                exclude_order_id=ev.order_id)
+    contacted = {c.order_id for c in EventContact.query.filter_by(event_id=ev.id).all()}
+    for c in conflicts:
+        c["contacted"] = c["order_id"] in contacted
+    order = db.session.get(Order, ev.order_id) if ev.order_id else None
+    d = ev.to_dict()
+    d["order_status"] = order.status if order else None
+    d["amount_paid"] = float(order.amount_paid) if order else 0
+    d["amount_due"] = float(order.total_amount - order.amount_paid) if order else 0
+    return jsonify(event=d, conflicts=conflicts), 200
+
+
+@admin_bp.post("/events")
+@jwt_required()
+@EVENT_ROLES
+def admin_event_create():
+    from ..pos.services import event_conflicts, generate_order_number
+
+    d = request.get_json(silent=True) or {}
+    vid = _event_venue_id(d.get("venue_id"))
+    if not vid:
+        return _err("venue_id wajib")
+    venue = db.session.get(Venue, vid)
+    if not venue:
+        return _err("Venue tidak ditemukan", "not_found", 404)
+    name = (d.get("name") or "").strip()
+    if not name:
+        return _err("Nama event wajib")
+    try:
+        df, dto, st, et = _parse_ev(d)
+    except (KeyError, ValueError):
+        return _err("Tanggal/jam tidak lengkap/valid")
+    if dto < df:
+        return _err("Tanggal selesai sebelum tanggal mulai")
+    price = _D(d.get("price"))
+    if price < 0:
+        return _err("Harga tidak valid")
+
+    uid = _current_user().id
+    label = f"Sewa Event: {name} ({df.isoformat()}"
+    label += f"–{dto.isoformat()}" if dto != df else ""
+    label += f" {st.strftime('%H:%M')}-{et.strftime('%H:%M')})"
+    # order UNPAID (dibayar nanti di POS/Pelunasan) — portal tak lewat shift/terminal
+    order = Order(
+        order_number=generate_order_number(venue), venue_id=vid, cashier_id=uid,
+        customer_name=(d.get("renter") or name), status="open",
+        subtotal=price, discount_amount=0, total_amount=price, amount_paid=0,
+    )
+    order.items.append(OrderItem(
+        item_type="event", name_snapshot=label[:120], unit_price=price,
+        quantity=1, line_total=price,
+    ))
+    db.session.add(order)
+    db.session.flush()
+    ev = Event(
+        venue_id=vid, name=name, renter=d.get("renter"), phone=d.get("phone"),
+        date_from=df, date_to=dto, start_time=st, end_time=et, price=price,
+        order_id=order.id, status="active", notes=d.get("notes"), created_by=uid,
+    )
+    db.session.add(ev)
+    db.session.commit()
+    conflicts = event_conflicts(vid, df, dto, st, et, exclude_order_id=order.id)
+    return jsonify(event=ev.to_dict(), order=order.to_dict(), conflicts=conflicts), 201
+
+
+@admin_bp.put("/events/<int:event_id>")
+@jwt_required()
+@EVENT_ROLES
+def admin_event_update(event_id):
+    ev = db.session.get(Event, event_id)
+    if not ev:
+        return _err("Event tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and ev.venue_id != forced:
+        return _err("Bukan event venue Anda", "forbidden", 403)
+    d = request.get_json(silent=True) or {}
+    if "name" in d:
+        ev.name = (d.get("name") or ev.name).strip()
+    if "renter" in d:
+        ev.renter = d.get("renter")
+    if "phone" in d:
+        ev.phone = d.get("phone")
+    if "notes" in d:
+        ev.notes = d.get("notes")
+    try:
+        if "date_from" in d:
+            ev.date_from = datetime.strptime(d["date_from"], "%Y-%m-%d").date()
+        if "date_to" in d:
+            ev.date_to = datetime.strptime(d["date_to"], "%Y-%m-%d").date()
+        if "start_time" in d:
+            ev.start_time = datetime.strptime(d["start_time"], "%H:%M").time()
+        if "end_time" in d:
+            ev.end_time = datetime.strptime(d["end_time"], "%H:%M").time()
+    except ValueError:
+        return _err("Tanggal/jam tidak valid")
+    if ev.date_to < ev.date_from:
+        return _err("Tanggal selesai sebelum tanggal mulai")
+    if "price" in d:
+        ev.price = _D(d.get("price"))
+        order = db.session.get(Order, ev.order_id) if ev.order_id else None
+        if order and order.status in ("open", "partial"):
+            order.subtotal = ev.price
+            order.total_amount = ev.price
+            for it in order.items:
+                if it.item_type == "event":
+                    it.unit_price = ev.price
+                    it.line_total = ev.price
+    db.session.commit()
+    return jsonify(event=ev.to_dict()), 200
+
+
+@admin_bp.post("/events/<int:event_id>/cancel")
+@jwt_required()
+@EVENT_ROLES
+def admin_event_cancel(event_id):
+    ev = db.session.get(Event, event_id)
+    if not ev:
+        return _err("Event tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and ev.venue_id != forced:
+        return _err("Bukan event venue Anda", "forbidden", 403)
+    ev.status = "cancelled"
+    db.session.commit()
+    return jsonify(message="Event dibatalkan (jadwal terbuka kembali).", event=ev.to_dict()), 200
+
+
+@admin_bp.post("/events/<int:event_id>/contacted")
+@jwt_required()
+@EVENT_ROLES
+def admin_event_contacted(event_id):
+    ev = db.session.get(Event, event_id)
+    if not ev:
+        return _err("Event tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and ev.venue_id != forced:
+        return _err("Bukan event venue Anda", "forbidden", 403)
+    d = request.get_json(silent=True) or {}
+    oid = d.get("order_id")
+    if not oid:
+        return _err("order_id wajib")
+    existing = EventContact.query.filter_by(event_id=ev.id, order_id=int(oid)).first()
+    if existing:  # toggle → batal tandai
+        db.session.delete(existing)
+        db.session.commit()
+        return jsonify(contacted=False), 200
+    db.session.add(EventContact(event_id=ev.id, order_id=int(oid), contacted_by=_current_user().id))
+    db.session.commit()
+    return jsonify(contacted=True), 200
 
 
 @admin_bp.get("/bookings")

@@ -1667,64 +1667,14 @@ def _mins_ev(t, as_end=False):
     return 24 * 60 if (as_end and m == 0) else m
 
 
-def _venue_facilities(venue_id):
-    return Facility.query.filter_by(venue_id=venue_id, is_active=True).all()
-
-
 def _event_quote(venue_id, date_from, date_to, start_t, end_t):
-    """Harga usulan = tarif normal semua lapangan × jam × jumlah hari."""
-    facs = _venue_facilities(venue_id)
-    sh, eh = start_t.hour, (end_t.hour if end_t.hour != 0 else 24)
-    total = 0.0
-    d = date_from
-    while d <= date_to:
-        dt = day_type_for_date(d)
-        for f in facs:
-            total += float(facility_booking_price(f, sh, eh, dt))
-        d += timedelta(days=1)
-    return round(total, 2), len(facs)
+    from .services import event_price_quote
+    return event_price_quote(venue_id, date_from, date_to, start_t, end_t)
 
 
 def _event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_event_order_id=None):
-    """Booking (member/reguler) yang bentrok dgn jam event pd rentang tanggal."""
-    fac_ids = [f.id for f in Facility.query.filter_by(venue_id=venue_id).all()]
-    if not fac_ids:
-        return []
-    e_min, s_min = _mins_ev(end_t, as_end=True), _mins_ev(start_t)
-    rows = (
-        FacilityBooking.query.filter(
-            FacilityBooking.facility_id.in_(fac_ids),
-            FacilityBooking.booking_date >= date_from,
-            FacilityBooking.booking_date <= date_to,
-            FacilityBooking.status == "booked",
-        ).all()
-    )
-    fac_names = {f.id: f.name for f in Facility.query.filter(Facility.id.in_(fac_ids)).all()}
-    out = []
-    for b in rows:
-        if not (_mins_ev(b.start_time) < e_min and _mins_ev(b.end_time, as_end=True) > s_min):
-            continue
-        oi = db.session.get(OrderItem, b.order_item_id) if b.order_item_id else None
-        order = oi.order if oi else None
-        if order is None or order.status == "void":
-            continue
-        if exclude_event_order_id and order.id == exclude_event_order_id:
-            continue
-        out.append({
-            "booking_id": b.id,
-            "order_id": order.id,
-            "order_item_id": b.order_item_id,
-            "order_number": order.order_number,
-            "customer_name": order.customer_name,
-            "is_member": order.is_member,
-            "status": order.status,
-            "facility_name": fac_names.get(b.facility_id),
-            "booking_date": b.booking_date.isoformat(),
-            "start_time": b.start_time.strftime("%H:%M"),
-            "end_time": b.end_time.strftime("%H:%M"),
-        })
-    out.sort(key=lambda x: (x["booking_date"], x["start_time"]))
-    return out
+    from .services import event_conflicts
+    return event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_order_id=exclude_event_order_id)
 
 
 @pos_bp.get("/events/quote")

@@ -1,7 +1,7 @@
 """Logika bisnis POS: order, pembayaran (provider), shift, stok."""
 import logging
 import secrets
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from ..extensions import db
@@ -95,6 +95,62 @@ def active_event_ranges(venue_id, booking_date):
         {"start": e.start_time.strftime("%H:%M"), "end": e.end_time.strftime("%H:%M"), "name": e.name}
         for e in evs
     ]
+
+
+def event_price_quote(venue_id, date_from, date_to, start_t, end_t):
+    """Harga usulan event = tarif normal semua lapangan aktif × jam × jumlah hari."""
+    facs = Facility.query.filter_by(venue_id=venue_id, is_active=True).all()
+    sh = start_t.hour
+    eh = end_t.hour if end_t.hour != 0 else 24
+    total = 0.0
+    d = date_from
+    while d <= date_to:
+        dt = day_type_for_date(d)
+        for f in facs:
+            total += float(facility_booking_price(f, sh, eh, dt))
+        d += timedelta(days=1)
+    return round(total, 2), len(facs)
+
+
+def event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_order_id=None):
+    """Booking (member/reguler) yang bentrok dgn jam event pada rentang tanggal."""
+    fac_ids = [f.id for f in Facility.query.filter_by(venue_id=venue_id).all()]
+    if not fac_ids:
+        return []
+    e_min, s_min = _t_mins(end_t, as_end=True), _t_mins(start_t)
+    rows = FacilityBooking.query.filter(
+        FacilityBooking.facility_id.in_(fac_ids),
+        FacilityBooking.booking_date >= date_from,
+        FacilityBooking.booking_date <= date_to,
+        FacilityBooking.status == "booked",
+    ).all()
+    fac_names = {f.id: f.name for f in Facility.query.filter(Facility.id.in_(fac_ids)).all()}
+    out = []
+    for b in rows:
+        if not (_t_mins(b.start_time) < e_min and _t_mins(b.end_time, as_end=True) > s_min):
+            continue
+        oi = db.session.get(OrderItem, b.order_item_id) if b.order_item_id else None
+        order = oi.order if oi else None
+        if order is None or order.status == "void":
+            continue
+        if exclude_order_id and order.id == exclude_order_id:
+            continue
+        out.append({
+            "booking_id": b.id,
+            "order_id": order.id,
+            "order_item_id": b.order_item_id,
+            "order_number": order.order_number,
+            "customer_name": order.customer_name,
+            "customer_phone": order.customer_phone,
+            "is_member": order.is_member,
+            "status": order.status,
+            "facility_name": fac_names.get(b.facility_id),
+            "booking_date": b.booking_date.isoformat(),
+            "start_time": b.start_time.strftime("%H:%M"),
+            "end_time": b.end_time.strftime("%H:%M"),
+        })
+    out.sort(key=lambda x: (x["booking_date"], x["start_time"]))
+    return out
 
 
 def event_blocks_slot(venue_id, booking_date, start, end):
