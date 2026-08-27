@@ -2815,7 +2815,9 @@ def order_edit_items(order_id):
         return _err("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status", 409)
     d = request.get_json(silent=True) or {}
     new_items = d.get("items") or []
-    # validasi baris produk baru
+    # tipe yg boleh diedit dari sini: produk & tiket (qty × harga sederhana).
+    # booking/rental TIDAK (terkait slot lapangan → pakai reschedule/cancel).
+    EDITABLE = ("product", "ticket")
     parsed = []
     for it in new_items:
         name = (it.get("name") or "").strip()
@@ -2823,26 +2825,27 @@ def order_edit_items(order_id):
         price = _D(it.get("unit_price"))
         if not name or qty <= 0 or price < 0:
             return _err("Baris tidak valid (nama, qty > 0, harga >= 0).")
-        parsed.append((name, float(qty), float(price)))
+        itype = it.get("item_type") if it.get("item_type") in EDITABLE else "product"
+        parsed.append((itype, it.get("product_id"), name, float(qty), float(price)))
 
     old_total = float(order.total_amount or 0)
-    # pertahankan item non-produk (booking/tiket/rental) apa adanya
-    non_product = [it for it in order.items if it.item_type != "product"]
-    non_product_sum = sum(float(it.line_total or 0) for it in non_product)
-    # buang item produk lama, ganti dgn yang baru
+    # pertahankan item non-editable (booking/rental) apa adanya
+    non_editable = [it for it in order.items if it.item_type not in EDITABLE]
+    non_editable_sum = sum(float(it.line_total or 0) for it in non_editable)
+    # buang item editable lama, ganti dgn yang baru
     for it in list(order.items):
-        if it.item_type == "product":
+        if it.item_type in EDITABLE:
             order.items.remove(it)
-    prod_sum = 0.0
-    for (name, qty, price) in parsed:
+    edit_sum = 0.0
+    for (itype, product_id, name, qty, price) in parsed:
         line = qty * price
-        prod_sum += line
+        edit_sum += line
         order.items.append(OrderItem(
-            item_type="product", name_snapshot=name, unit_price=price,
+            item_type=itype, product_id=product_id, name_snapshot=name, unit_price=price,
             quantity=qty, line_total=line, created_at=order.created_at,
         ))
 
-    subtotal = non_product_sum + prod_sum
+    subtotal = non_editable_sum + edit_sum
     discount = float(order.discount_amount or 0)
     new_total = round(subtotal - discount, 2)
     if new_total < 0:

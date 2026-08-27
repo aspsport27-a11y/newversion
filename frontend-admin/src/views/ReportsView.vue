@@ -78,11 +78,12 @@ const soOrders = ref([])
 const soLoading = ref(false)
 const soSaving = ref(null)   // id order yg sedang disimpan
 const statusLabel = { paid: 'Lunas', open: 'Belum Lunas', void: 'Dibatalkan' }
+const EDITABLE_TYPES = ['product', 'ticket']
 function prepOrder(o) {
   return {
     ...o,
-    _prod: o.items.filter((i) => i.item_type === 'product').map((i) => ({ name: i.name, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
-    _locked: o.items.filter((i) => i.item_type !== 'product'),
+    _prod: o.items.filter((i) => EDITABLE_TYPES.includes(i.item_type)).map((i) => ({ item_type: i.item_type, product_id: i.product_id || null, name: i.name, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
+    _locked: o.items.filter((i) => !EDITABLE_TYPES.includes(i.item_type)),
     _methods: [...new Set((o.payments || []).filter((p) => p.status === 'paid').map((p) => p.method))].join(', '),
   }
 }
@@ -93,7 +94,7 @@ async function openShiftOrders(s) {
     soOrders.value = data.orders.map(prepOrder)
   } catch (e) { alert(e?.response?.data?.message || 'Gagal memuat.') } finally { soLoading.value = false }
 }
-function soAddLine(o) { o._prod.push({ name: '', quantity: 1, unit_price: null }) }
+function soAddLine(o) { o._prod.push({ item_type: 'product', product_id: null, name: '', quantity: 1, unit_price: null }) }
 function soRmLine(o, i) { o._prod.splice(i, 1) }
 function soOrderTotal(o) {
   const prod = o._prod.reduce((t, i) => t + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0)
@@ -104,7 +105,7 @@ async function saveOrder(o) {
   soSaving.value = o.id
   try {
     const items = o._prod.filter((i) => i.name?.trim() && Number(i.quantity) > 0)
-      .map((i) => ({ name: i.name.trim(), quantity: Number(i.quantity), unit_price: Number(i.unit_price) || 0 }))
+      .map((i) => ({ item_type: i.item_type || 'product', product_id: i.product_id || null, name: i.name.trim(), quantity: Number(i.quantity), unit_price: Number(i.unit_price) || 0 }))
     await client.put(`/admin/orders/${o.id}/edit-items`, { items })
     // muat ulang daftar + tabel shift
     const { data } = await client.get(`/admin/shifts/${soShift.value.id}/orders`)
@@ -423,7 +424,7 @@ onMounted(async () => { await loadVenues(); await run() })
         </div>
         <p class="text-xs text-slate-500 mb-3">{{ soShift?.cashier || '—' }} · {{ soShift && soShift.opened_at ? parseUTC(soShift.opened_at).toLocaleString('id-ID') : '—' }} · {{ soOrders.length }} transaksi</p>
         <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 mb-3">
-          Edit langsung nama/qty/harga item <b>produk</b>. Total order, pembayaran, & kas shift menyesuaikan otomatis (tanggal transaksi dipertahankan). Item booking/tiket dikunci. <b>Stok tidak otomatis disesuaikan.</b>
+          Edit langsung nama/qty/harga item <b>produk & tiket</b>. Total order, pembayaran, & kas shift menyesuaikan otomatis (tanggal transaksi dipertahankan). Item <b>booking/rental dikunci</b> (pakai reschedule/cancel). <b>Stok tidak otomatis disesuaikan.</b>
         </div>
         <div v-if="soLoading" class="text-center text-slate-400 py-8">Memuat…</div>
         <div v-else-if="!soOrders.length" class="text-center text-slate-400 py-8">Tidak ada transaksi di shift ini.</div>
@@ -446,6 +447,7 @@ onMounted(async () => { await loadVenues(); await run() })
             </div>
             <!-- item produk yang bisa diedit -->
             <div v-for="(it, i) in o._prod" :key="i" class="flex items-center gap-2 mb-1.5">
+              <span v-if="it.item_type === 'ticket'" class="text-[10px] bg-violet-100 text-violet-700 rounded px-1 py-0.5">tiket</span>
               <input v-model="it.name" placeholder="Nama item" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
               <input v-model.number="it.quantity" type="number" min="1" class="w-14 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
               <span class="text-slate-400 text-xs">×</span>
