@@ -2693,6 +2693,97 @@ def shift_close_admin(shift_id):
     return jsonify(message="Shift ditutup.", shift=shift.to_dict()), 200
 
 
+@admin_bp.post("/shifts/<int:shift_id>/correction-entry")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def shift_correction_entry(shift_id):
+    """Tambah transaksi KOREKSI back-date ke shift (yg sudah dibuka kembali).
+    Berbeda dgn POS: tanggal (paid_at & created_at) DISAMAKAN ke tanggal shift,
+    supaya Laporan Penjualan (basis paid_at) & Laporan Shift (basis opened_at)
+    konsisten. Order langsung berstatus lunas & masuk akumulasi shift."""
+    shift = db.session.get(Shift, shift_id)
+    if not shift:
+        return _err("Shift tidak ditemukan", "not_found", 404)
+    if shift.status != "open":
+        return _err("Shift harus dalam keadaan TERBUKA (buka kembali dulu).", "not_open", 409)
+    d = request.get_json(silent=True) or {}
+    method = (d.get("method") or "").strip()
+    if method not in ("cash", "qris", "transfer"):
+        return _err("Metode bayar wajib (cash/qris/transfer).")
+    items = d.get("items") or []
+    if not items:
+        return _err("Minimal 1 baris item.")
+
+    # tanggal koreksi = tanggal shift (back-date). Jam dibuat = jam buka shift.
+    back_dt = shift.opened_at or datetime.utcnow()
+    venue = db.session.get(Venue, shift.venue_id)
+
+    # nomor order pakai prefix TANGGAL SHIFT (bukan hari ini)
+    prefix = f"{venue.code}-{back_dt:%Y%m%d}-"
+    existing = db.session.query(Order.order_number).filter(Order.order_number.like(prefix + "%")).all()
+    max_seq = 0
+    for (num,) in existing:
+        try:
+            max_seq = max(max_seq, int(num.rsplit("-", 1)[-1]))
+        except ValueError:
+            continue
+    order_number = f"{prefix}{max_seq + 1:04d}"
+
+    total = 0.0
+    parsed = []
+    for it in items:
+        name = (it.get("name") or "").strip()
+        qty = _D(it.get("qty") or it.get("quantity"))
+        price = _D(it.get("unit_price"))
+        if not name or qty <= 0 or price < 0:
+            return _err("Baris tidak valid (nama, qty > 0, harga >= 0).")
+        line = float(qty) * float(price)
+        total += line
+        parsed.append((name, float(qty), float(price), line, it.get("product_id"), bool(it.get("deduct_stock"))))
+    if total <= 0:
+        return _err("Total koreksi harus > 0.")
+
+    order = Order(
+        order_number=order_number, venue_id=shift.venue_id, terminal_id=shift.terminal_id,
+        shift_id=shift.id, cashier_id=shift.cashier_id, customer_name=d.get("customer_name"),
+        status="paid", subtotal=total, discount_amount=0, total_amount=total, amount_paid=total,
+        created_at=back_dt, updated_at=datetime.utcnow(),
+    )
+    for (name, qty, price, line, product_id, deduct) in parsed:
+        order.items.append(OrderItem(
+            item_type="product", product_id=product_id, name_snapshot=name,
+            unit_price=price, quantity=qty, line_total=line, created_at=back_dt,
+        ))
+        # opsional kurangi stok (kalau produk tracked & diminta)
+        if product_id and deduct:
+            prod = db.session.get(Product, product_id)
+            if prod and prod.track_stock:
+                prod.stock_qty -= int(qty)
+                db.session.add(StockMovement(
+                    product_id=prod.id, venue_id=shift.venue_id, type="sale",
+                    quantity=-int(qty), balance_after=prod.stock_qty,
+                    reference=order_number, created_by=_current_user().id,
+                ))
+    order.payments.append(Payment(
+        method=method, provider=method, amount=total, status="paid",
+        shift_id=shift.id, paid_at=back_dt, created_at=back_dt,
+        confirmed_by=_current_user().id,
+        reference=f"Koreksi back-date oleh {_current_user().username}",
+    ))
+    # akumulasi shift
+    shift.total_sales = float(shift.total_sales or 0) + total
+    if method == "cash":
+        shift.total_cash_sales = float(shift.total_cash_sales or 0) + total
+    elif method == "qris":
+        shift.total_qris_sales = float(shift.total_qris_sales or 0) + total
+    elif method == "transfer":
+        shift.total_transfer_sales = float(shift.total_transfer_sales or 0) + total
+    db.session.add(order)
+    db.session.commit()
+    return jsonify(message="Transaksi koreksi ditambahkan (tanggal disamakan ke tanggal shift).",
+                   order=order.to_dict()), 201
+
+
 @admin_bp.get("/shifts/reopen-logs")
 @jwt_required()
 @roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)

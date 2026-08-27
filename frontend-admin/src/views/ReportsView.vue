@@ -71,6 +71,36 @@ async function reopenShift(s) {
     alert(e?.response?.data?.message || 'Gagal membuka shift.')
   }
 }
+// ---- Entri koreksi back-date ----
+const showCorr = ref(false)
+const corrShift = ref(null)
+const corrForm = ref({ customer_name: '', method: 'cash', items: [] })
+const corrSaving = ref(false)
+const corrErr = ref('')
+const corrTotal = computed(() => corrForm.value.items.reduce((t, i) => t + (Number(i.qty) || 0) * (Number(i.unit_price) || 0), 0))
+function openCorrection(s) {
+  corrShift.value = s
+  corrForm.value = { customer_name: '', method: 'cash', items: [{ name: '', qty: 1, unit_price: null }] }
+  corrErr.value = ''
+  showCorr.value = true
+}
+function addCorrLine() { corrForm.value.items.push({ name: '', qty: 1, unit_price: null }) }
+function rmCorrLine(i) { corrForm.value.items.splice(i, 1) }
+async function submitCorrection() {
+  const items = corrForm.value.items.filter((i) => i.name?.trim() && Number(i.qty) > 0)
+  if (!items.length) { corrErr.value = 'Isi minimal 1 baris (nama & qty).'; return }
+  corrSaving.value = true; corrErr.value = ''
+  try {
+    const { data } = await client.post(`/admin/shifts/${corrShift.value.id}/correction-entry`, {
+      method: corrForm.value.method,
+      customer_name: corrForm.value.customer_name || null,
+      items: items.map((i) => ({ name: i.name.trim(), qty: Number(i.qty), unit_price: Number(i.unit_price) || 0 })),
+    })
+    showCorr.value = false
+    await run()
+    flash(data?.message || 'Koreksi ditambahkan')
+  } catch (e) { corrErr.value = e?.response?.data?.message || 'Gagal.' } finally { corrSaving.value = false }
+}
 async function closeShiftAdmin(s) {
   const raw = window.prompt(
     `Tutup shift ${s.cashier || ''}.\n\n` +
@@ -245,7 +275,8 @@ onMounted(async () => { await loadVenues(); await run() })
                 </td>
                 <td v-if="canDeleteShift || canReopen" class="px-4 py-2 text-right whitespace-nowrap">
                   <button v-if="canReopen && s.status === 'closed' && !s.deposited" @click="reopenShift(s)" class="text-brand-600 text-xs hover:underline">↻ Buka Kembali</button>
-                  <button v-if="canReopen && s.status === 'open'" @click="closeShiftAdmin(s)" class="text-emerald-600 text-xs hover:underline">Tutup</button>
+                  <button v-if="canReopen && s.status === 'open'" @click="openCorrection(s)" class="text-brand-600 text-xs hover:underline">+ Koreksi</button>
+                  <button v-if="canReopen && s.status === 'open'" @click="closeShiftAdmin(s)" class="text-emerald-600 text-xs hover:underline ml-3">Tutup</button>
                   <button v-if="canDeleteShift" @click="deleteShift(s)" class="text-red-500 text-xs hover:underline ml-3">Hapus</button>
                 </td>
               </tr>
@@ -285,6 +316,38 @@ onMounted(async () => { await loadVenues(); await run() })
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal: Entri Koreksi back-date -->
+    <div v-if="showCorr" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="showCorr = false">
+      <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
+        <div class="flex justify-between items-center mb-1">
+          <h3 class="text-lg font-bold text-slate-800">Tambah Transaksi Koreksi</h3>
+          <button @click="showCorr = false" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800 mb-3">
+          Transaksi ini dicatat dengan <b>tanggal = tanggal shift</b> ({{ corrShift && corrShift.opened_at ? parseUTC(corrShift.opened_at).toLocaleDateString('id-ID') : '—' }}), bukan hari ini — supaya Laporan Penjualan & Laporan Shift konsisten. Langsung berstatus lunas & masuk kas shift. <b>Stok tidak otomatis dikurangi.</b>
+        </div>
+        <label class="block text-xs text-slate-500 mb-1">Nama pelanggan (opsional)</label>
+        <input v-model="corrForm.customer_name" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3" placeholder="—" />
+        <label class="block text-xs text-slate-500 mb-1">Metode bayar</label>
+        <select v-model="corrForm.method" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3">
+          <option value="cash">Tunai (Cash)</option>
+          <option value="qris">QRIS</option>
+          <option value="transfer">Transfer</option>
+        </select>
+        <p class="text-xs font-medium text-slate-500 mb-1">Rincian</p>
+        <div v-for="(it, i) in corrForm.items" :key="i" class="flex gap-2 mb-2">
+          <input v-model="it.name" placeholder="Nama item" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+          <input v-model.number="it.qty" type="number" min="1" placeholder="Qty" class="w-16 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
+          <input v-model.number="it.unit_price" type="number" placeholder="Harga" class="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
+          <button @click="rmCorrLine(i)" class="text-red-400 px-1">✕</button>
+        </div>
+        <button @click="addCorrLine" class="text-brand-600 text-sm mb-3">+ baris</button>
+        <div class="flex justify-between font-semibold mb-3"><span>Total</span><span class="text-brand-700">{{ rupiah(corrTotal) }}</span></div>
+        <p v-if="corrErr" class="text-sm text-red-600 mb-2">{{ corrErr }}</p>
+        <button @click="submitCorrection" :disabled="corrSaving || !corrTotal" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ corrSaving ? 'Menyimpan…' : 'Simpan Koreksi' }}</button>
       </div>
     </div>
   </div>
