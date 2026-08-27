@@ -2773,6 +2773,120 @@ def shift_adjust(shift_id):
                    shift=shift.to_dict()), 201
 
 
+@admin_bp.get("/shifts/<int:shift_id>/orders")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def shift_orders(shift_id):
+    """Rincian transaksi yang sudah dientry pada 1 shift — utk dilihat & dikoreksi
+    admin (edit item & nominal)."""
+    shift = db.session.get(Shift, shift_id)
+    if not shift:
+        return _err("Shift tidak ditemukan", "not_found", 404)
+    orders = Order.query.filter_by(shift_id=shift_id).order_by(Order.created_at).all()
+    ucache = {}
+
+    def cashier_name(uid):
+        if uid not in ucache:
+            u = db.session.get(User, uid) if uid else None
+            ucache[uid] = u.username if u else None
+        return ucache[uid]
+
+    out = []
+    for o in orders:
+        dd = o.to_dict()
+        dd["cashier"] = cashier_name(o.cashier_id)
+        out.append(dd)
+    return jsonify(shift=shift.to_dict(), orders=out), 200
+
+
+@admin_bp.put("/orders/<int:order_id>/edit-items")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def order_edit_items(order_id):
+    """Koreksi item PRODUK sebuah transaksi (nama/qty/harga) + rekonsiliasi:
+    total order, pembayaran (paid terakhir disesuaikan), dan akumulasi shift —
+    semuanya menyesuaikan otomatis, tanggal transaksi dipertahankan. Item
+    booking/tiket/rental TAK diubah di sini (pakai reschedule/cancel).
+    Catatan: stok TIDAK otomatis disesuaikan."""
+    order = db.session.get(Order, order_id)
+    if not order:
+        return _err("Transaksi tidak ditemukan", "not_found", 404)
+    if order.status == "void":
+        return _err("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status", 409)
+    d = request.get_json(silent=True) or {}
+    new_items = d.get("items") or []
+    # validasi baris produk baru
+    parsed = []
+    for it in new_items:
+        name = (it.get("name") or "").strip()
+        qty = _D(it.get("quantity") or it.get("qty"))
+        price = _D(it.get("unit_price"))
+        if not name or qty <= 0 or price < 0:
+            return _err("Baris tidak valid (nama, qty > 0, harga >= 0).")
+        parsed.append((name, float(qty), float(price)))
+
+    old_total = float(order.total_amount or 0)
+    # pertahankan item non-produk (booking/tiket/rental) apa adanya
+    non_product = [it for it in order.items if it.item_type != "product"]
+    non_product_sum = sum(float(it.line_total or 0) for it in non_product)
+    # buang item produk lama, ganti dgn yang baru
+    for it in list(order.items):
+        if it.item_type == "product":
+            order.items.remove(it)
+    prod_sum = 0.0
+    for (name, qty, price) in parsed:
+        line = qty * price
+        prod_sum += line
+        order.items.append(OrderItem(
+            item_type="product", name_snapshot=name, unit_price=price,
+            quantity=qty, line_total=line, created_at=order.created_at,
+        ))
+
+    subtotal = non_product_sum + prod_sum
+    discount = float(order.discount_amount or 0)
+    new_total = round(subtotal - discount, 2)
+    if new_total < 0:
+        return _err("Total menjadi negatif — periksa harga/diskon.")
+    order.subtotal = subtotal
+    order.total_amount = new_total
+    delta = round(new_total - old_total, 2)
+
+    # rekonsiliasi pembayaran & shift (hanya jika order pernah dibayar)
+    paid = [p for p in order.payments if p.status == "paid"]
+    if paid and abs(delta) > 0.005:
+        p = paid[-1]  # sesuaikan pembayaran terakhir (biasanya pelunasan)
+        new_amt = round(float(p.amount) + delta, 2)
+        if new_amt < 0:
+            return _err(
+                "Penyesuaian membuat pembayaran negatif. Untuk mengurangi besar, "
+                "batalkan transaksi lalu buat ulang / pakai pembatalan.",
+                "payment_negative", 409,
+            )
+        p.amount = new_amt
+        if p.shift_id:
+            sh = db.session.get(Shift, p.shift_id)
+            if sh:
+                sh.total_sales = float(sh.total_sales or 0) + delta
+                if p.method == "cash":
+                    sh.total_cash_sales = float(sh.total_cash_sales or 0) + delta
+                elif p.method == "qris":
+                    sh.total_qris_sales = float(sh.total_qris_sales or 0) + delta
+                elif p.method == "transfer":
+                    sh.total_transfer_sales = float(sh.total_transfer_sales or 0) + delta
+                sh.expected_cash = (
+                    float(sh.opening_cash or 0) + float(sh.total_cash_sales or 0)
+                    + float(sh.cash_in or 0) - float(sh.cash_out or 0)
+                )
+                if sh.counted_cash is not None:
+                    sh.cash_variance = float(sh.counted_cash) - float(sh.expected_cash)
+    order.amount_paid = round(sum(float(p.amount) for p in order.payments if p.status == "paid"), 2)
+    if order.status != "void":
+        order.status = "paid" if (new_total > 0 and order.amount_paid >= new_total - 0.005) else "open"
+    order.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(message="Transaksi dikoreksi.", order=order.to_dict()), 200
+
+
 @admin_bp.post("/shifts/<int:shift_id>/correction-entry")
 @jwt_required()
 @roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)

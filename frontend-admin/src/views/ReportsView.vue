@@ -71,6 +71,49 @@ async function reopenShift(s) {
     alert(e?.response?.data?.message || 'Gagal membuka shift.')
   }
 }
+// ---- Rincian transaksi shift (lihat & edit item) ----
+const showSO = ref(false)
+const soShift = ref(null)
+const soOrders = ref([])
+const soLoading = ref(false)
+const soSaving = ref(null)   // id order yg sedang disimpan
+const statusLabel = { paid: 'Lunas', open: 'Belum Lunas', void: 'Dibatalkan' }
+function prepOrder(o) {
+  return {
+    ...o,
+    _prod: o.items.filter((i) => i.item_type === 'product').map((i) => ({ name: i.name, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
+    _locked: o.items.filter((i) => i.item_type !== 'product'),
+    _methods: [...new Set((o.payments || []).filter((p) => p.status === 'paid').map((p) => p.method))].join(', '),
+  }
+}
+async function openShiftOrders(s) {
+  soShift.value = s; soOrders.value = []; showSO.value = true; soLoading.value = true
+  try {
+    const { data } = await client.get(`/admin/shifts/${s.id}/orders`)
+    soOrders.value = data.orders.map(prepOrder)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal memuat.') } finally { soLoading.value = false }
+}
+function soAddLine(o) { o._prod.push({ name: '', quantity: 1, unit_price: null }) }
+function soRmLine(o, i) { o._prod.splice(i, 1) }
+function soOrderTotal(o) {
+  const prod = o._prod.reduce((t, i) => t + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0)
+  const locked = o._locked.reduce((t, i) => t + (Number(i.line_total) || 0), 0)
+  return prod + locked - (Number(o.discount_amount) || 0)
+}
+async function saveOrder(o) {
+  soSaving.value = o.id
+  try {
+    const items = o._prod.filter((i) => i.name?.trim() && Number(i.quantity) > 0)
+      .map((i) => ({ name: i.name.trim(), quantity: Number(i.quantity), unit_price: Number(i.unit_price) || 0 }))
+    await client.put(`/admin/orders/${o.id}/edit-items`, { items })
+    // muat ulang daftar + tabel shift
+    const { data } = await client.get(`/admin/shifts/${soShift.value.id}/orders`)
+    soOrders.value = data.orders.map(prepOrder)
+    await run()
+    flash('Transaksi dikoreksi')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menyimpan.') } finally { soSaving.value = null }
+}
+
 // ---- Penyesuaian shift cepat (+/- per metode) ----
 const showAdj = ref(false)
 const adjShift = ref(null)
@@ -326,7 +369,8 @@ onMounted(async () => { await loadVenues(); await run() })
                   <span v-if="s.deposited" title="Sudah disetor" class="ml-1 text-xs text-emerald-600">💰</span>
                 </td>
                 <td v-if="canDeleteShift || canReopen" class="px-4 py-2 text-right whitespace-nowrap">
-                  <button v-if="canReopen && !s.deposited" @click="openAdjust(s)" class="text-indigo-600 text-xs hover:underline">⇅ Sesuaikan</button>
+                  <button v-if="canReopen" @click="openShiftOrders(s)" class="text-slate-600 text-xs hover:underline">📋 Rincian</button>
+                  <button v-if="canReopen && !s.deposited" @click="openAdjust(s)" class="text-indigo-600 text-xs hover:underline ml-3">⇅ Sesuaikan</button>
                   <button v-if="canReopen && s.status === 'closed' && !s.deposited" @click="reopenShift(s)" class="text-brand-600 text-xs hover:underline ml-3">↻ Buka Kembali</button>
                   <button v-if="canReopen && s.status === 'open'" @click="openCorrection(s)" class="text-brand-600 text-xs hover:underline">+ Koreksi</button>
                   <button v-if="canReopen && s.status === 'open'" @click="closeShiftAdmin(s)" class="text-emerald-600 text-xs hover:underline ml-3">Tutup</button>
@@ -368,6 +412,57 @@ onMounted(async () => { await loadVenues(); await run() })
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: Rincian transaksi shift (edit item) -->
+    <div v-if="showSO" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="showSO = false">
+      <div class="bg-white w-full max-w-3xl rounded-2xl p-5 max-h-[92vh] overflow-auto">
+        <div class="flex justify-between items-center mb-1">
+          <h3 class="text-lg font-bold text-slate-800">Rincian Transaksi Shift</h3>
+          <button @click="showSO = false" class="text-slate-400 text-xl">✕</button>
+        </div>
+        <p class="text-xs text-slate-500 mb-3">{{ soShift?.cashier || '—' }} · {{ soShift && soShift.opened_at ? parseUTC(soShift.opened_at).toLocaleString('id-ID') : '—' }} · {{ soOrders.length }} transaksi</p>
+        <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 mb-3">
+          Edit langsung nama/qty/harga item <b>produk</b>. Total order, pembayaran, & kas shift menyesuaikan otomatis (tanggal transaksi dipertahankan). Item booking/tiket dikunci. <b>Stok tidak otomatis disesuaikan.</b>
+        </div>
+        <div v-if="soLoading" class="text-center text-slate-400 py-8">Memuat…</div>
+        <div v-else-if="!soOrders.length" class="text-center text-slate-400 py-8">Tidak ada transaksi di shift ini.</div>
+        <div v-else class="space-y-3">
+          <div v-for="o in soOrders" :key="o.id" class="border border-slate-200 rounded-xl p-3">
+            <div class="flex justify-between items-center mb-2">
+              <div>
+                <span class="font-mono text-xs text-slate-500">{{ o.order_number }}</span>
+                <span class="ml-2 text-xs rounded-full px-2 py-0.5" :class="o.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : (o.status === 'void' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700')">{{ statusLabel[o.status] || o.status }}</span>
+                <span v-if="o._methods" class="ml-2 text-xs text-slate-400 capitalize">{{ o._methods }}</span>
+              </div>
+              <span class="text-xs text-slate-400">{{ o.customer_name || '' }}</span>
+            </div>
+            <!-- item terkunci (booking/tiket/rental) -->
+            <div v-for="lk in o._locked" :key="'lk'+lk.id" class="flex items-center gap-2 text-sm text-slate-500 mb-1">
+              <span class="flex-1">🔒 {{ lk.name }} <span class="text-xs text-slate-400">({{ lk.item_type }})</span></span>
+              <span>{{ lk.quantity }} ×</span>
+              <span class="w-24 text-right">{{ rupiah(lk.unit_price) }}</span>
+              <span class="w-24 text-right font-medium">{{ rupiah(lk.line_total) }}</span>
+            </div>
+            <!-- item produk yang bisa diedit -->
+            <div v-for="(it, i) in o._prod" :key="i" class="flex items-center gap-2 mb-1.5">
+              <input v-model="it.name" placeholder="Nama item" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+              <input v-model.number="it.quantity" type="number" min="1" class="w-14 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
+              <span class="text-slate-400 text-xs">×</span>
+              <input v-model.number="it.unit_price" type="number" placeholder="Harga" class="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
+              <span class="w-24 text-right text-sm text-slate-500">{{ rupiah((Number(it.quantity)||0)*(Number(it.unit_price)||0)) }}</span>
+              <button @click="soRmLine(o, i)" class="text-red-400 px-1">✕</button>
+            </div>
+            <div class="flex items-center justify-between mt-2">
+              <button @click="soAddLine(o)" class="text-brand-600 text-xs hover:underline">+ item</button>
+              <div class="flex items-center gap-3">
+                <span class="text-sm">Total baru: <b class="text-brand-700">{{ rupiah(soOrderTotal(o)) }}</b></span>
+                <button @click="saveOrder(o)" :disabled="soSaving === o.id || o.status === 'void'" class="bg-brand-600 hover:bg-brand-700 text-white text-xs rounded-lg px-3 py-1.5 font-medium disabled:opacity-50">{{ soSaving === o.id ? 'Menyimpan…' : 'Simpan' }}</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
