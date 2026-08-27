@@ -12,6 +12,7 @@ function flash(m) { toastStore.show(m) }
 const canDeleteShift = computed(() => auth.hasPerm('order.cancel'))
 const canReopen = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
 const isManager = computed(() => auth.user?.role === 'manager_unit')
+const canRincian = computed(() => canReopen.value || isManager.value)  // manajer: lihat+edit venue-nya
 
 const venues = ref([])
 const venueId = ref('')
@@ -348,10 +349,10 @@ onMounted(async () => { await loadVenues(); await run() })
               <th class="px-4 py-2 font-medium text-right">Dihitung</th>
               <th class="px-4 py-2 font-medium text-right">Selisih</th>
               <th class="px-4 py-2 font-medium text-center">Status</th>
-              <th v-if="canDeleteShift || canReopen" class="px-4 py-2"></th>
+              <th v-if="canDeleteShift || canRincian" class="px-4 py-2"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="!shifts.length"><td :colspan="(canDeleteShift || canReopen) ? 10 : 9" class="px-4 py-6 text-center text-slate-400">Tidak ada shift.</td></tr>
+              <tr v-if="!shifts.length"><td :colspan="(canDeleteShift || canRincian) ? 10 : 9" class="px-4 py-6 text-center text-slate-400">Tidak ada shift.</td></tr>
               <tr v-for="s in shifts" :key="s.id" class="border-t">
                 <td class="px-4 py-2 text-slate-700">{{ s.cashier || '—' }}</td>
                 <td class="px-4 py-2 text-slate-500">{{ s.opened_at ? parseUTC(s.opened_at).toLocaleString('id-ID') : '—' }}</td>
@@ -369,8 +370,8 @@ onMounted(async () => { await loadVenues(); await run() })
                   <span v-if="s.reopened_count > 0" :title="`Pernah dibuka kembali ${s.reopened_count}×`" class="ml-1 text-xs text-brand-600">↻{{ s.reopened_count }}</span>
                   <span v-if="s.deposited" title="Sudah disetor" class="ml-1 text-xs text-emerald-600">💰</span>
                 </td>
-                <td v-if="canDeleteShift || canReopen" class="px-4 py-2 text-right whitespace-nowrap">
-                  <button v-if="canReopen" @click="openShiftOrders(s)" class="text-slate-600 text-xs hover:underline">📋 Rincian</button>
+                <td v-if="canDeleteShift || canRincian" class="px-4 py-2 text-right whitespace-nowrap">
+                  <button v-if="canRincian" @click="openShiftOrders(s)" class="text-slate-600 text-xs hover:underline">📋 Rincian</button>
                   <button v-if="canReopen && s.status === 'closed' && !s.deposited" @click="reopenShift(s)" class="text-brand-600 text-xs hover:underline ml-3">↻ Buka Kembali</button>
                   <button v-if="canReopen && s.status === 'open'" @click="closeShiftAdmin(s)" class="text-emerald-600 text-xs hover:underline ml-3">Tutup</button>
                   <button v-if="canDeleteShift" @click="deleteShift(s)" class="text-red-500 text-xs hover:underline ml-3">Hapus</button>

@@ -2775,13 +2775,16 @@ def shift_adjust(shift_id):
 
 @admin_bp.get("/shifts/<int:shift_id>/orders")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
 def shift_orders(shift_id):
-    """Rincian transaksi yang sudah dientry pada 1 shift — utk dilihat & dikoreksi
-    admin (edit item & nominal)."""
+    """Rincian transaksi yang sudah dientry pada 1 shift — utk dilihat & dikoreksi.
+    Admin/HO: semua venue. Manajer: hanya venue-nya sendiri."""
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and shift.venue_id != forced:
+        return _err("Bukan shift venue Anda", "forbidden", 403)
     orders = Order.query.filter_by(shift_id=shift_id).order_by(Order.created_at).all()
     ucache = {}
 
@@ -2801,16 +2804,19 @@ def shift_orders(shift_id):
 
 @admin_bp.put("/orders/<int:order_id>/edit-items")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
 def order_edit_items(order_id):
-    """Koreksi item PRODUK sebuah transaksi (nama/qty/harga) + rekonsiliasi:
+    """Koreksi item produk/tiket sebuah transaksi (nama/qty/harga) + rekonsiliasi:
     total order, pembayaran (paid terakhir disesuaikan), dan akumulasi shift —
     semuanya menyesuaikan otomatis, tanggal transaksi dipertahankan. Item
-    booking/tiket/rental TAK diubah di sini (pakai reschedule/cancel).
-    Catatan: stok TIDAK otomatis disesuaikan."""
+    booking/rental TAK diubah di sini (pakai reschedule/cancel).
+    Admin/HO: semua venue. Manajer: hanya venue-nya. Stok TIDAK otomatis disesuaikan."""
     order = db.session.get(Order, order_id)
     if not order:
         return _err("Transaksi tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and order.venue_id != forced:
+        return _err("Bukan transaksi venue Anda", "forbidden", 403)
     if order.status == "void":
         return _err("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status", 409)
     d = request.get_json(silent=True) or {}
