@@ -21,11 +21,16 @@ const radarIcon = { cash_variance_recurring: '💸', cash_variance_single: '⚖�
 const briefing = ref(null)
 const briefingLoading = ref(false)
 
+// Event mendatang (Fase 3 — tampil di dashboard)
+const events = ref([])
+
 const isManagerLike = computed(() => ['manager_unit', 'admin_unit'].includes(auth.user?.role))
 
 function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
 }
+function evDates(e) { return e.date_from === e.date_to ? e.date_from : `${e.date_from} → ${e.date_to}` }
+const PAY_LBL = { paid: 'Lunas', partial: 'DP', open: 'Belum bayar' }
 
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
@@ -59,6 +64,10 @@ onMounted(async () => {
   } finally {
     radarLoading.value = false
   }
+  try {
+    const { data } = await client.get('/admin/events', { params: { scope: 'upcoming' } })
+    events.value = (data.events || []).sort((a, b) => (a.date_from + a.start_time).localeCompare(b.date_from + b.start_time))
+  } catch (e) { events.value = [] }
   // briefing AI hanya kalau ada temuan (hemat: tak panggil AI kalau radar bersih)
   if (radar.value && radar.value.count > 0) {
     briefingLoading.value = true
@@ -78,6 +87,28 @@ onMounted(async () => {
   <div>
     <h1 class="text-2xl font-bold text-slate-800">Selamat datang, {{ auth.user?.username }} 👋</h1>
     <p class="text-slate-500 mt-1">Ringkasan operasional hari ini.</p>
+
+    <!-- Event Mendatang -->
+    <div v-if="events.length" class="mt-6 bg-white rounded-xl shadow-sm border p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-slate-700 flex items-center gap-2"><span>🏆</span> Event Mendatang</h2>
+        <RouterLink :to="{ name: 'events' }" class="text-xs text-brand-600 hover:underline">Kelola →</RouterLink>
+      </div>
+      <div class="space-y-2">
+        <RouterLink v-for="e in events.slice(0, 5)" :key="e.id" :to="{ name: 'events' }"
+          class="flex items-center justify-between gap-2 rounded-lg border border-slate-100 hover:bg-rose-50 px-3 py-2">
+          <div class="min-w-0">
+            <p class="font-medium text-slate-800 truncate">{{ e.name }} <span v-if="e.renter" class="text-xs text-slate-400 font-normal">· {{ e.renter }}</span></p>
+            <p class="text-xs text-slate-500">{{ evDates(e) }} · {{ e.start_time }}–{{ e.end_time }}</p>
+          </div>
+          <div class="text-right whitespace-nowrap flex items-center gap-1">
+            <span v-if="e.conflict_count" class="text-xs rounded-full px-2 py-0.5 bg-red-100 text-red-700 font-medium">⚠️ {{ e.conflict_count }}</span>
+            <span class="text-xs rounded-full px-2 py-0.5" :class="e.order_status === 'paid' ? 'bg-emerald-100 text-emerald-700' : (e.order_status === 'partial' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500')">{{ PAY_LBL[e.order_status] || '—' }}</span>
+          </div>
+        </RouterLink>
+      </div>
+      <p v-if="events.length > 5" class="text-xs text-slate-400 mt-2 text-center">+{{ events.length - 5 }} event lagi</p>
+    </div>
 
     <!-- Radar Operasional (Fase 1) -->
     <div v-if="!radarLoading && radar" class="mt-6 bg-white rounded-xl shadow-sm border p-5">
