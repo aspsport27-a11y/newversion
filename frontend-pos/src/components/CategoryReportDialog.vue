@@ -8,6 +8,7 @@ const loading = ref(true)
 const err = ref('')
 const report = ref(null)
 const open = ref(new Set()) // kategori yg sedang di-expand
+const selDate = ref(new Date().toISOString().slice(0, 10))
 
 function rupiah(n) {
   return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
@@ -25,7 +26,7 @@ async function load() {
   loading.value = true
   err.value = ''
   try {
-    const { data } = await client.get('/reports/category-daily')
+    const { data } = await client.get('/reports/category-daily', { params: { date: selDate.value } })
     report.value = data
   } catch (e) {
     err.value = e?.response?.data?.message || 'Gagal memuat laporan.'
@@ -40,13 +41,20 @@ onMounted(load)
 <template>
   <div class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" @click.self="emit('close')">
     <div class="bg-white w-full max-w-sm rounded-2xl p-5 max-h-[85vh] overflow-auto">
-      <div class="flex justify-between items-center mb-3 no-print">
-        <h3 class="text-lg font-bold text-slate-800">📊 Laporan Hari Ini</h3>
+      <div class="flex justify-between items-center mb-2 no-print">
+        <h3 class="text-lg font-bold text-slate-800">📊 Laporan Penjualan</h3>
         <div class="flex items-center gap-2">
           <button v-if="report" @click="print"
             class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg px-2.5 py-1.5">🖨️ Cetak</button>
           <button @click="emit('close')" class="text-slate-400 text-xl">✕</button>
         </div>
+      </div>
+      <div class="flex items-center gap-2 mb-3 no-print">
+        <label class="text-xs text-slate-500">Tanggal</label>
+        <input v-model="selDate" @change="load" type="date"
+          class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-brand-500" />
+        <button @click="selDate = new Date().toISOString().slice(0, 10); load()"
+          class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg px-2 py-1.5">Hari ini</button>
       </div>
 
       <div v-if="loading" class="text-center text-slate-400 text-sm py-6">Memuat…</div>
@@ -59,7 +67,7 @@ onMounted(load)
         <p class="text-xs text-slate-400 mb-3">{{ report.date }} · {{ report.order_count }} transaksi (termasuk DP)</p>
 
         <div v-if="!report.by_category.length" class="text-center text-slate-400 text-sm py-6">
-          Belum ada uang masuk hari ini.
+          Belum ada uang masuk pada tanggal ini.
         </div>
         <div v-else class="space-y-1.5">
           <div v-for="c in report.by_category" :key="c.category"

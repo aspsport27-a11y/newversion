@@ -375,6 +375,12 @@ def report_category_daily():
     proporsional ke tiap item sesuai porsi line_total-nya."""
     terminal = _current_terminal()
     today = date.today()
+    d_arg = request.args.get("date")
+    if d_arg:
+        try:
+            today = date.fromisoformat(d_arg)
+        except ValueError:
+            pass
 
     payments = (
         Payment.query.join(Order, Payment.order_id == Order.id)
