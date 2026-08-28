@@ -2965,15 +2965,19 @@ def order_edit_items(order_id):
 
 @admin_bp.post("/shifts/<int:shift_id>/correction-entry")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
 def shift_correction_entry(shift_id):
     """Tambah transaksi KOREKSI back-date ke shift (yg sudah dibuka kembali).
     Berbeda dgn POS: tanggal (paid_at & created_at) DISAMAKAN ke tanggal shift,
     supaya Laporan Penjualan (basis paid_at) & Laporan Shift (basis opened_at)
-    konsisten. Order langsung berstatus lunas & masuk akumulasi shift."""
+    konsisten. Order langsung berstatus lunas & masuk akumulasi shift.
+    Admin/HO semua venue; manajer/admin_unit sesuai cakupan."""
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
+    err = _venue_in_scope(shift.venue_id, _current_user())
+    if err:
+        return err
     if shift.status != "open":
         return _err("Shift harus dalam keadaan TERBUKA (buka kembali dulu).", "not_open", 409)
     d = request.get_json(silent=True) or {}

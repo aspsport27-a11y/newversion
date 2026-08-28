@@ -389,6 +389,7 @@ onMounted(async () => { await loadVenues(); await run() })
                 <td v-if="canDeleteShift || canRincian" class="px-4 py-2 text-right whitespace-nowrap">
                   <button v-if="canRincian" @click="openShiftOrders(s)" class="text-slate-600 text-xs hover:underline">📋 Rincian</button>
                   <button v-if="canReopen && s.status === 'closed' && !s.deposited" @click="reopenShift(s)" class="text-brand-600 text-xs hover:underline ml-3">↻ Buka Kembali</button>
+                  <button v-if="canReopen && s.status === 'open'" @click="openCorrection(s)" class="text-brand-600 text-xs hover:underline ml-3">+ Koreksi</button>
                   <button v-if="canReopen && s.status === 'open'" @click="closeShiftAdmin(s)" class="text-emerald-600 text-xs hover:underline ml-3">Tutup</button>
                   <button v-if="canDeleteShift" @click="deleteShift(s)" class="text-red-500 text-xs hover:underline ml-3">Hapus</button>
                 </td>
