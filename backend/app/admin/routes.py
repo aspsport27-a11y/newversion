@@ -79,13 +79,6 @@ def _forced_venue():
     return None
 
 
-def _venue_in_scope(venue_id):
-    """True bila venue di cakupan user: admin/HO (semua), manajer (venue-nya),
-    admin_unit (venue area-nya)."""
-    vids = _scope_vids(_current_user())
-    return vids is None or (venue_id in vids)
-
-
 def _report_scope():
     """Venue-id yang boleh dilihat di laporan (list) atau None (semua, admin/HO).
     manager -> [venue]; admin_unit -> venue area. Kalau minta 1 venue yang SAH
@@ -2632,8 +2625,9 @@ def shift_delete(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    if not _venue_in_scope(shift.venue_id):
-        return _err("Bukan shift venue Anda", "forbidden", 403)
+    err = _venue_in_scope(shift.venue_id, _current_user())
+    if err:
+        return err
     if shift.status != "closed":
         return _err("Shift masih terbuka — tutup dulu sebelum bisa dihapus.", "shift_open", 409)
     n_ord = Order.query.filter_by(shift_id=shift_id).count()
@@ -2662,8 +2656,9 @@ def shift_reopen(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    if not _venue_in_scope(shift.venue_id):
-        return _err("Bukan shift venue Anda", "forbidden", 403)
+    err = _venue_in_scope(shift.venue_id, _current_user())
+    if err:
+        return err
     if shift.status != "closed":
         return _err("Shift belum ditutup — tak perlu dibuka.", "not_closed", 409)
     if shift.deposit_id is not None:
@@ -2708,8 +2703,9 @@ def shift_close_admin(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    if not _venue_in_scope(shift.venue_id):
-        return _err("Bukan shift venue Anda", "forbidden", 403)
+    err = _venue_in_scope(shift.venue_id, _current_user())
+    if err:
+        return err
     if shift.status != "open":
         return _err("Shift tidak dalam keadaan terbuka.", "not_open", 409)
     d = request.get_json(silent=True) or {}
@@ -2815,8 +2811,9 @@ def shift_orders(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    if not _venue_in_scope(shift.venue_id):
-        return _err("Bukan shift venue Anda", "forbidden", 403)
+    err = _venue_in_scope(shift.venue_id, _current_user())
+    if err:
+        return err
     orders = Order.query.filter_by(shift_id=shift_id).order_by(Order.created_at).all()
     ucache = {}
 
@@ -2844,8 +2841,9 @@ def shift_edit_opening_cash(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    if not _venue_in_scope(shift.venue_id):
-        return _err("Bukan shift venue Anda", "forbidden", 403)
+    err = _venue_in_scope(shift.venue_id, _current_user())
+    if err:
+        return err
     if shift.deposit_id is not None:
         return _err("Kas shift sudah DISETOR — tak bisa ubah saldo awal.", "already_deposited", 409)
     d = request.get_json(silent=True) or {}
@@ -2883,8 +2881,9 @@ def order_edit_items(order_id):
     order = db.session.get(Order, order_id)
     if not order:
         return _err("Transaksi tidak ditemukan", "not_found", 404)
-    if not _venue_in_scope(order.venue_id):
-        return _err("Bukan transaksi venue Anda", "forbidden", 403)
+    err = _venue_in_scope(order.venue_id, _current_user())
+    if err:
+        return err
     if order.status == "void":
         return _err("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status", 409)
     d = request.get_json(silent=True) or {}
