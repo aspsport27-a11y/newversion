@@ -10,8 +10,9 @@ const auth = useAuthStore()
 const toastStore = useToastStore()
 function flash(m) { toastStore.show(m) }
 const canDeleteShift = computed(() => auth.hasPerm('order.cancel'))
-// manajer disamakan dgn admin/HO utk fungsi shift (dibatasi venue-nya di backend)
-const canReopen = computed(() => ['admin', 'head_office', 'manager_unit'].includes(auth.user?.role))
+// manajer & admin_unit (area) disamakan dgn admin/HO utk fungsi shift
+// (dibatasi cakupan venue/area di backend)
+const canReopen = computed(() => ['admin', 'head_office', 'manager_unit', 'admin_unit'].includes(auth.user?.role))
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const canRincian = computed(() => canReopen.value || isManager.value)
 

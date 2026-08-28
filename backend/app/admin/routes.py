@@ -79,6 +79,13 @@ def _forced_venue():
     return None
 
 
+def _venue_in_scope(venue_id):
+    """True bila venue di cakupan user: admin/HO (semua), manajer (venue-nya),
+    admin_unit (venue area-nya)."""
+    vids = _scope_vids(_current_user())
+    return vids is None or (venue_id in vids)
+
+
 def _report_scope():
     """Venue-id yang boleh dilihat di laporan (list) atau None (semua, admin/HO).
     manager -> [venue]; admin_unit -> venue area. Kalau minta 1 venue yang SAH
@@ -2625,8 +2632,7 @@ def shift_delete(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and shift.venue_id != forced:
+    if not _venue_in_scope(shift.venue_id):
         return _err("Bukan shift venue Anda", "forbidden", 403)
     if shift.status != "closed":
         return _err("Shift masih terbuka — tutup dulu sebelum bisa dihapus.", "shift_open", 409)
@@ -2646,7 +2652,7 @@ def shift_delete(shift_id):
 
 @admin_bp.post("/shifts/<int:shift_id>/reopen")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
 def shift_reopen(shift_id):
     """Buka kembali shift yang sudah ditutup untuk koreksi. Admin/HO: semua
     venue; manajer: venue-nya. Setelah dibuka: status → open, transaksi bisa
@@ -2656,8 +2662,7 @@ def shift_reopen(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and shift.venue_id != forced:
+    if not _venue_in_scope(shift.venue_id):
         return _err("Bukan shift venue Anda", "forbidden", 403)
     if shift.status != "closed":
         return _err("Shift belum ditutup — tak perlu dibuka.", "not_closed", 409)
@@ -2693,7 +2698,7 @@ def shift_reopen(shift_id):
 
 @admin_bp.post("/shifts/<int:shift_id>/close")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
 def shift_close_admin(shift_id):
     """Tutup shift dari back office (mis. setelah dibuka kembali & dikoreksi,
     tanpa lewat terminal kasir). Admin/HO: semua venue; manajer: venue-nya.
@@ -2703,8 +2708,7 @@ def shift_close_admin(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and shift.venue_id != forced:
+    if not _venue_in_scope(shift.venue_id):
         return _err("Bukan shift venue Anda", "forbidden", 403)
     if shift.status != "open":
         return _err("Shift tidak dalam keadaan terbuka.", "not_open", 409)
@@ -2804,15 +2808,14 @@ def shift_adjust(shift_id):
 
 @admin_bp.get("/shifts/<int:shift_id>/orders")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
 def shift_orders(shift_id):
     """Rincian transaksi yang sudah dientry pada 1 shift — utk dilihat & dikoreksi.
     Admin/HO: semua venue. Manajer: hanya venue-nya sendiri."""
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and shift.venue_id != forced:
+    if not _venue_in_scope(shift.venue_id):
         return _err("Bukan shift venue Anda", "forbidden", 403)
     orders = Order.query.filter_by(shift_id=shift_id).order_by(Order.created_at).all()
     ucache = {}
@@ -2833,7 +2836,7 @@ def shift_orders(shift_id):
 
 @admin_bp.post("/shifts/<int:shift_id>/opening-cash")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
 def shift_edit_opening_cash(shift_id):
     """Koreksi Saldo Awal (modal) shift — mis. salah input saat buka shift.
     Kas seharusnya & selisih dihitung ulang. Admin/HO: semua venue; manajer:
@@ -2841,8 +2844,7 @@ def shift_edit_opening_cash(shift_id):
     shift = db.session.get(Shift, shift_id)
     if not shift:
         return _err("Shift tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and shift.venue_id != forced:
+    if not _venue_in_scope(shift.venue_id):
         return _err("Bukan shift venue Anda", "forbidden", 403)
     if shift.deposit_id is not None:
         return _err("Kas shift sudah DISETOR — tak bisa ubah saldo awal.", "already_deposited", 409)
@@ -2871,7 +2873,7 @@ def shift_edit_opening_cash(shift_id):
 
 @admin_bp.put("/orders/<int:order_id>/edit-items")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
 def order_edit_items(order_id):
     """Koreksi item produk/tiket sebuah transaksi (nama/qty/harga) + rekonsiliasi:
     total order, pembayaran (paid terakhir disesuaikan), dan akumulasi shift —
@@ -2881,8 +2883,7 @@ def order_edit_items(order_id):
     order = db.session.get(Order, order_id)
     if not order:
         return _err("Transaksi tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and order.venue_id != forced:
+    if not _venue_in_scope(order.venue_id):
         return _err("Bukan transaksi venue Anda", "forbidden", 403)
     if order.status == "void":
         return _err("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status", 409)
@@ -3056,13 +3057,14 @@ def shift_correction_entry(shift_id):
 
 @admin_bp.get("/shifts/reopen-logs")
 @jwt_required()
-@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER)
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE, ROLE_MANAGER, ROLE_ADMIN_UNIT)
 def shift_reopen_logs():
-    """Jejak audit buka-kembali shift (tab riwayat). Manajer: venue-nya saja."""
+    """Jejak audit buka-kembali shift (tab riwayat). Manajer/admin_unit: venue
+    cakupannya saja; admin/HO semua."""
     q = ShiftReopenLog.query
-    forced = _forced_venue()
-    if forced is not None:
-        q = q.filter(ShiftReopenLog.venue_id == forced)
+    vids = _scope_vids(_current_user())
+    if vids is not None:
+        q = q.filter(ShiftReopenLog.venue_id.in_(vids)) if vids else q.filter(db.false())
     elif request.args.get("venue_id", type=int):
         q = q.filter(ShiftReopenLog.venue_id == request.args.get("venue_id", type=int))
     rows = q.order_by(ShiftReopenLog.reopened_at.desc()).limit(500).all()
