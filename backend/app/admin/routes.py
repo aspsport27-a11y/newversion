@@ -79,6 +79,21 @@ def _forced_venue():
     return None
 
 
+def _report_scope():
+    """Venue-id yang boleh dilihat di laporan (list) atau None (semua, admin/HO).
+    manager -> [venue]; admin_unit -> venue area. Kalau minta 1 venue yang SAH
+    dalam cakupan, dipersempit ke venue itu; kalau di luar cakupan, diabaikan."""
+    vids = _scope_vids(_current_user())  # None=all, list=scoped
+    req = request.args.get("venue_id", type=int)
+    if vids is None:
+        return [req] if req else None
+    if not vids:
+        return []  # tak punya venue (mis. admin_unit belum di-set area)
+    if req and req in vids:
+        return [req]
+    return vids
+
+
 def _scope_vids(u):
     """Venue yang boleh dikelola user utk master data (produk/lapangan/promo).
     None = semua (admin/head_office). manager_unit -> [venue-nya].
@@ -130,7 +145,13 @@ def _promo(v):
 @jwt_required()
 @VIEW
 def venues():
-    vs = Venue.query.order_by(Venue.code).all()
+    # Batasi ke cakupan user: admin/HO semua; manajer venue-nya; admin_unit
+    # venue di areanya. Jadi semua dropdown venue otomatis "sesuai area".
+    vids = _scope_vids(_current_user())
+    q = Venue.query
+    if vids is not None:
+        q = q.filter(Venue.id.in_(vids)) if vids else q.filter(db.false())
+    vs = q.order_by(Venue.code).all()
     return jsonify(venues=[v.to_dict() for v in vs]), 200
 
 
@@ -2306,9 +2327,9 @@ def _date_range():
 @REPORT_SALES
 def report_sales():
     d_from, d_to = _date_range()
-    # manajer DIPAKSA ke venue-nya (tak boleh lihat venue lain); admin/HO bebas
-    forced = _forced_venue()
-    vid = forced if forced is not None else request.args.get("venue_id", type=int)
+    # cakupan venue: manajer -> venue-nya; admin_unit -> venue area-nya; admin/HO
+    # -> semua atau 1 venue yg dipilih.
+    ids = _report_scope()
 
     # --- basis kas: pembayaran yang DITERIMA dalam rentang (DP + pelunasan) ---
     pay_q = (
@@ -2317,8 +2338,8 @@ def report_sales():
         .filter(Payment.status == "paid")
         .filter(func.date(Payment.paid_at).between(d_from, d_to))
     )
-    if vid:
-        pay_q = pay_q.filter(Order.venue_id == vid)
+    if ids is not None:
+        pay_q = pay_q.filter(Order.venue_id.in_(ids)) if ids else pay_q.filter(db.false())
 
     total_received = float(
         pay_q.with_entities(func.coalesce(func.sum(Payment.amount), 0)).scalar() or 0
@@ -2342,8 +2363,8 @@ def report_sales():
     ord_q = Order.query.filter(
         Order.status == "paid", func.date(Order.created_at).between(d_from, d_to)
     )
-    if vid:
-        ord_q = ord_q.filter(Order.venue_id == vid)
+    if ids is not None:
+        ord_q = ord_q.filter(Order.venue_id.in_(ids)) if ids else ord_q.filter(db.false())
     paid_ids = [o.id for o in ord_q.with_entities(Order.id).all()]
     by_type = []
     consignment = {"own_revenue": 0.0, "consignment_revenue": 0.0, "consignment_owed": 0.0}
@@ -2396,11 +2417,10 @@ def report_sales():
 @REPORT_SALES
 def report_shifts():
     d_from, d_to = _date_range()
-    forced = _forced_venue()  # manajer dipaksa ke venue-nya
-    vid = forced if forced is not None else request.args.get("venue_id", type=int)
+    ids = _report_scope()  # manajer->venue; admin_unit->area; admin/HO->semua/1
     q = Shift.query.filter(func.date(Shift.opened_at).between(d_from, d_to))
-    if vid:
-        q = q.filter(Shift.venue_id == vid)
+    if ids is not None:
+        q = q.filter(Shift.venue_id.in_(ids)) if ids else q.filter(db.false())
     shifts = q.order_by(Shift.opened_at.desc()).all()
     # peta username kasir
     uids = {s.cashier_id for s in shifts}
