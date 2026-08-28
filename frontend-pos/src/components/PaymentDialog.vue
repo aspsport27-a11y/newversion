@@ -21,14 +21,46 @@ const fileInput = ref(null)
 const proofPreview = ref('') // base64 data URL
 const proofErr = ref('')
 function pickProof() { fileInput.value?.click() }
-function onProofChange(e) {
+
+// Kompres foto bukti di HP → JPEG maks ~1600px & di bawah 3MB, supaya foto
+// besar dari kamera tetap bisa dipakai (tak lagi ditolak "maks 3MB").
+function compressImageToDataUrl(file, maxDim = 1600, maxBytes = 2_800_000) {
+  return new Promise((resolve, reject) => {
+    if (!file.type?.startsWith('image/')) {
+      // bukan gambar (mis. PDF) → pakai apa adanya kalau muat, else tolak
+      if (file.size > maxBytes) { reject(new Error('File > 3MB & bukan gambar (tak bisa dikompres).')); return }
+      const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); return
+    }
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      let { width, height } = img
+      const scale = Math.min(1, maxDim / Math.max(width, height))
+      width = Math.round(width * scale); height = Math.round(height * scale)
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      let q = 0.8, out = canvas.toDataURL('image/jpeg', q)
+      // turunkan kualitas bertahap sampai muat
+      while (out.length * 0.75 > maxBytes && q > 0.4) { q -= 0.1; out = canvas.toDataURL('image/jpeg', q) }
+      resolve(out)
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Gagal membaca gambar.')) }
+    img.src = url
+  })
+}
+
+async function onProofChange(e) {
   proofErr.value = ''
   const file = e.target.files[0]
   if (!file) return
-  if (file.size > 3_000_000) { proofErr.value = 'Ukuran file maks 3MB.'; e.target.value = ''; return }
-  const reader = new FileReader()
-  reader.onload = () => { proofPreview.value = reader.result }
-  reader.readAsDataURL(file)
+  try {
+    proofPreview.value = await compressImageToDataUrl(file)
+  } catch (err) {
+    proofErr.value = err?.message || 'Gagal memproses foto.'
+    e.target.value = ''
+  }
 }
 
 const sisa = computed(() => Math.max(0, props.total - (Number(amount.value) || 0)))
@@ -63,11 +95,15 @@ const splits = ref([
 function splitNeedsProof(m) { return m === 'transfer' || (m === 'qris' && qrisManual.value) }
 function addSplit() { splits.value.push({ method: 'cash', amount: null, proof: '', reference: '' }) }
 function rmSplit(i) { if (splits.value.length > 2) splits.value.splice(i, 1) }
-function onSplitProof(i, e) {
+async function onSplitProof(i, e) {
   proofErr.value = ''
   const file = e.target.files[0]; if (!file) return
-  if (file.size > 3_000_000) { proofErr.value = 'Ukuran file maks 3MB.'; e.target.value = ''; return }
-  const r = new FileReader(); r.onload = () => { splits.value[i].proof = r.result }; r.readAsDataURL(file)
+  try {
+    splits.value[i].proof = await compressImageToDataUrl(file)
+  } catch (err) {
+    proofErr.value = err?.message || 'Gagal memproses foto.'
+    e.target.value = ''
+  }
 }
 const splitSum = computed(() => splits.value.reduce((t, s) => t + (Number(s.amount) || 0), 0))
 const splitRemaining = computed(() => (Number(amount.value) || 0) - splitSum.value)
