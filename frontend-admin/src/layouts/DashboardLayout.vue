@@ -145,7 +145,7 @@ const navGroups = [
     label: 'Laporan',
     icon: '📈',
     items: [
-      { name: 'reports', label: 'Laporan Penjualan', icon: '📈', roles: ['admin', 'head_office', 'manager_unit'] },
+      { name: 'reports', label: 'Laporan Penjualan', icon: '📈', perm: 'report.sales' },
       { name: 'transactions', label: 'Riwayat Transaksi', icon: '🧾', roles: ['admin', 'head_office', 'manager_unit'] },
       { name: 'financial', label: 'Laporan Bisnis', icon: '💹', roles: ['admin', 'head_office', 'manager_unit'] },
       { name: 'management-report', label: 'Laporan Manajemen', icon: '🔐', roles: ['admin', 'head_office'] },

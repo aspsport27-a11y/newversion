@@ -60,6 +60,7 @@ FACILITY_MANAGE = require_perm("facility.manage")
 SETUP_MANAGE = require_perm("setup.manage")
 ORDER_CANCEL = require_perm("order.cancel")
 VIEW = require_perm("master.view")
+REPORT_SALES = require_perm("report.sales")
 # HR: manager unit juga boleh kelola karyawan (venue-nya sendiri)
 MANAGE_HR = require_perm("hr.manage")
 
@@ -2302,7 +2303,7 @@ def _date_range():
 
 @admin_bp.get("/reports/sales")
 @jwt_required()
-@VIEW
+@REPORT_SALES
 def report_sales():
     d_from, d_to = _date_range()
     # manajer DIPAKSA ke venue-nya (tak boleh lihat venue lain); admin/HO bebas
@@ -2392,7 +2393,7 @@ def report_sales():
 
 @admin_bp.get("/reports/shifts")
 @jwt_required()
-@VIEW
+@REPORT_SALES
 def report_shifts():
     d_from, d_to = _date_range()
     forced = _forced_venue()  # manajer dipaksa ke venue-nya
