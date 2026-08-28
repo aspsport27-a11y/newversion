@@ -92,13 +92,32 @@ function prepOrder(o) {
 }
 const soOpening = ref(0)
 const soOpenSaving = ref(false)
+const soProducts = ref([])
 async function openShiftOrders(s) {
   soShift.value = s; soOrders.value = []; showSO.value = true; soLoading.value = true
   soOpening.value = Number(s.opening_cash) || 0
+  soProducts.value = []
   try {
     const { data } = await client.get(`/admin/shifts/${s.id}/orders`)
     soOrders.value = data.orders.map(prepOrder)
   } catch (e) { alert(e?.response?.data?.message || 'Gagal memuat.') } finally { soLoading.value = false }
+  // produk venue ini → utk auto-isi nama & harga (hindari salah entry)
+  try {
+    const { data } = await client.get('/admin/products', { params: { venue_id: s.venue_id } })
+    soProducts.value = data.products || []
+  } catch { soProducts.value = [] }
+}
+// saat nama diketik/dipilih dari daftar produk → cocokkan & isi harga + tipe
+function onPickProduct(it) {
+  const q = (it.name || '').trim().toLowerCase()
+  const p = soProducts.value.find((x) => (x.name || '').toLowerCase() === q)
+  if (p) {
+    it.product_id = p.id
+    it.item_type = p.is_ticket ? 'ticket' : 'product'
+    it.unit_price = p.effective_price ?? p.price
+  } else {
+    it.product_id = null   // nama manual (di luar katalog)
+  }
 }
 async function saveOpeningCash() {
   if (Number(soOpening.value) === Number(soShift.value.opening_cash)) return
@@ -448,8 +467,11 @@ onMounted(async () => { await loadVenues(); await run() })
           <span class="text-[11px] text-slate-400">ubah kalau modal awal salah input</span>
         </div>
         <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 mb-3">
-          Edit langsung nama/qty/harga item <b>produk & tiket</b>. Total order, pembayaran, & kas shift menyesuaikan otomatis (tanggal transaksi dipertahankan). Item <b>booking/rental dikunci</b> (pakai reschedule/cancel). <b>Stok tidak otomatis disesuaikan.</b>
+          Edit langsung nama/qty/harga item <b>produk & tiket</b>. Ketik/pilih nama dari <b>daftar produk venue</b> → harga terisi otomatis (hindari salah entry). Item <b>booking/rental dikunci</b>. Total order, pembayaran, & kas shift menyesuaikan otomatis; <b>stok tidak otomatis disesuaikan.</b>
         </div>
+        <datalist id="soProductList">
+          <option v-for="p in soProducts" :key="p.id" :value="p.name" />
+        </datalist>
         <div v-if="soLoading" class="text-center text-slate-400 py-8">Memuat…</div>
         <div v-else-if="!soOrders.length" class="text-center text-slate-400 py-8">Tidak ada transaksi di shift ini.</div>
         <div v-else class="space-y-3">
@@ -472,7 +494,8 @@ onMounted(async () => { await loadVenues(); await run() })
             <!-- item produk yang bisa diedit -->
             <div v-for="(it, i) in o._prod" :key="i" class="flex items-center gap-2 mb-1.5">
               <span v-if="it.item_type === 'ticket'" class="text-[10px] bg-violet-100 text-violet-700 rounded px-1 py-0.5">tiket</span>
-              <input v-model="it.name" placeholder="Nama item" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+              <span v-else-if="it.product_id" class="text-[10px] bg-emerald-100 text-emerald-700 rounded px-1 py-0.5" title="Sesuai produk">✓</span>
+              <input v-model="it.name" @change="onPickProduct(it)" list="soProductList" placeholder="Ketik / pilih produk" class="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
               <input v-model.number="it.quantity" type="number" min="1" class="w-14 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
               <span class="text-slate-400 text-xs">×</span>
               <input v-model.number="it.unit_price" type="number" placeholder="Harga" class="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
