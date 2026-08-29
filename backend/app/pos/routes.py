@@ -460,13 +460,15 @@ def report_category_daily():
                 g["qty"] += q
                 det["qty"] += q
 
+    # Bulatkan ke rupiah UTUH (rupiah tak punya sen). Alokasi proporsional DP
+    # bisa pecahan → dibulatkan biar laporan bersih di semua venue.
     by_category = sorted(
         [{
             "category": g["category"],
             "qty": round(g["qty"], 2),
-            "amount": round(g["amount"], 2),
+            "amount": round(g["amount"]),
             "items": sorted(
-                [{"name": d["name"], "qty": round(d["qty"], 2), "amount": round(d["amount"], 2)}
+                [{"name": d["name"], "qty": round(d["qty"], 2), "amount": round(d["amount"])}
                  for d in g["items"].values()],
                 key=lambda x: -x["amount"],
             ),
@@ -474,14 +476,14 @@ def report_category_daily():
         key=lambda x: -x["amount"],
     )
     by_method = [
-        {"method": "cash", "label": "Cash", "amount": round(method_totals.get("cash", 0.0), 2)},
-        {"method": "qris", "label": "QRIS", "amount": round(method_totals.get("qris", 0.0), 2)},
-        {"method": "transfer", "label": "Transfer Bank", "amount": round(method_totals.get("transfer", 0.0), 2)},
+        {"method": "cash", "label": "Cash", "amount": round(method_totals.get("cash", 0.0))},
+        {"method": "qris", "label": "QRIS", "amount": round(method_totals.get("qris", 0.0))},
+        {"method": "transfer", "label": "Transfer Bank", "amount": round(method_totals.get("transfer", 0.0))},
     ]
     return jsonify(
         date=today.isoformat(),
         order_count=len(order_ids_seen),
-        total=round(total, 2),
+        total=round(total),
         by_category=by_category,
         by_method=by_method,
     ), 200

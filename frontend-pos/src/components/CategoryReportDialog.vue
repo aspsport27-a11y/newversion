@@ -11,7 +11,7 @@ const open = ref(new Set()) // kategori yg sedang di-expand
 const selDate = ref(new Date().toISOString().slice(0, 10))
 
 function rupiah(n) {
-  return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID')
+  return 'Rp ' + Math.round(Number(n) || 0).toLocaleString('id-ID')
 }
 function toggle(cat) {
   const s = new Set(open.value)
