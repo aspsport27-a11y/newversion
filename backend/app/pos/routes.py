@@ -426,11 +426,13 @@ def report_category_daily():
     # uang masuk (cash-basis) per metode — dari pembayaran hari ini
     cash_total = 0.0
     order_ids_seen = set()
+    paid_today_by_order = {}
     for p in payments:
         method_totals[p.method] = method_totals.get(p.method, 0.0) + float(p.amount or 0)
         cash_total += float(p.amount or 0)
         if p.order_id:
             order_ids_seen.add(p.order_id)
+            paid_today_by_order[p.order_id] = paid_today_by_order.get(p.order_id, 0.0) + float(p.amount or 0)
 
     # Per-item = NILAI PENUH (qty × harga = line_total), dari order yang ada
     # pembayaran hari ini (tiap order dihitung SEKALI). Diskon & sisa DP (belum
@@ -439,6 +441,7 @@ def report_category_daily():
     gross_total = 0.0
     discount_total = 0.0
     unpaid_total = 0.0
+    paid_other_total = 0.0   # bagian order ini yg dibayar di HARI LAIN (DP lintas hari)
     for oid in order_ids_seen:
         order = db.session.get(Order, oid)
         if not order or not order.items:
@@ -447,6 +450,9 @@ def report_category_daily():
         unpaid = float(order.total_amount or 0) - float(order.amount_paid or 0)
         if unpaid > 0.005:
             unpaid_total += unpaid
+        other = float(order.amount_paid or 0) - paid_today_by_order.get(oid, 0.0)
+        if other > 0.005:
+            paid_other_total += other
         for item in order.items:
             amt = float(item.line_total or 0)  # nilai penuh
             if item.item_type == "product":
@@ -486,10 +492,11 @@ def report_category_daily():
     return jsonify(
         date=today.isoformat(),
         order_count=len(order_ids_seen),
-        gross_total=round(gross_total),        # penjualan kotor (nilai penuh item)
-        discount_total=round(discount_total),  # total diskon
-        unpaid_total=round(unpaid_total),       # sisa belum lunas (DP)
-        total=round(cash_total),                # uang masuk hari ini (kas)
+        gross_total=round(gross_total),          # penjualan kotor (nilai penuh item)
+        discount_total=round(discount_total),    # total diskon
+        unpaid_total=round(unpaid_total),         # sisa belum lunas (DP)
+        paid_other_total=round(paid_other_total), # dibayar hari lain (DP lintas hari)
+        total=round(cash_total),                  # uang masuk hari ini (kas)
         by_category=by_category,
         by_method=by_method,
     ), 200

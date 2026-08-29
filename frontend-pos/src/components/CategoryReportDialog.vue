@@ -111,6 +111,9 @@ onMounted(load)
           <div v-if="report.unpaid_total > 0" class="flex justify-between px-3 print:px-0 text-amber-600">
             <span>Belum lunas (DP)</span><span>− {{ rupiah(report.unpaid_total) }}</span>
           </div>
+          <div v-if="report.paid_other_total > 0" class="flex justify-between px-3 print:px-0 text-slate-400">
+            <span>Dibayar hari lain (DP)</span><span>− {{ rupiah(report.paid_other_total) }}</span>
+          </div>
         </div>
 
         <p class="text-xs font-medium text-slate-400 mt-3 mb-1.5">Uang masuk per metode</p>
