@@ -99,7 +99,21 @@ onMounted(load)
           </div>
         </div>
 
-        <p class="text-xs font-medium text-slate-400 mt-4 mb-1.5">Uang masuk per metode</p>
+        <!-- ringkasan: penjualan kotor → diskon/DP → uang masuk -->
+        <div class="border-t mt-3 pt-2 space-y-1 text-sm">
+          <div class="flex justify-between px-3 print:px-0">
+            <span class="text-slate-600">Penjualan (nilai penuh)</span>
+            <span class="font-medium text-slate-700">{{ rupiah(report.gross_total) }}</span>
+          </div>
+          <div v-if="report.discount_total > 0" class="flex justify-between px-3 print:px-0 text-amber-600">
+            <span>Diskon</span><span>− {{ rupiah(report.discount_total) }}</span>
+          </div>
+          <div v-if="report.unpaid_total > 0" class="flex justify-between px-3 print:px-0 text-amber-600">
+            <span>Belum lunas (DP)</span><span>− {{ rupiah(report.unpaid_total) }}</span>
+          </div>
+        </div>
+
+        <p class="text-xs font-medium text-slate-400 mt-3 mb-1.5">Uang masuk per metode</p>
         <div class="space-y-1">
           <div v-for="m in report.by_method" :key="m.method"
             class="flex items-center justify-between px-3 py-1.5 print:px-0 print:py-0.5">
@@ -109,7 +123,7 @@ onMounted(load)
         </div>
 
         <div class="flex justify-between items-center border-t mt-3 pt-3">
-          <span class="font-semibold text-slate-700">Total</span>
+          <span class="font-semibold text-slate-700">Total uang masuk</span>
           <span class="font-bold text-lg text-emerald-700">{{ rupiah(report.total) }}</span>
         </div>
       </div>

@@ -423,44 +423,47 @@ def report_category_daily():
     # walau ada yg 0, biar kasir gampang cocokkan fisik uang di laci
     method_totals = {"cash": 0.0, "qris": 0.0, "transfer": 0.0}
 
-    total = 0.0
+    # uang masuk (cash-basis) per metode — dari pembayaran hari ini
+    cash_total = 0.0
     order_ids_seen = set()
-    qty_counted = set()  # item.id yg qty-nya sudah dihitung (biar tak dobel per pembayaran)
     for p in payments:
         method_totals[p.method] = method_totals.get(p.method, 0.0) + float(p.amount or 0)
+        cash_total += float(p.amount or 0)
+        if p.order_id:
+            order_ids_seen.add(p.order_id)
 
-        order = p.order
-        # pembagi = jumlah line_total semua item (= subtotal, SEBELUM diskon).
-        # JANGAN pakai total_amount (setelah diskon): line_total menjumlah ke
-        # subtotal, jadi kalau ada diskon porsinya >100% & uang laporan jadi
-        # lebih besar dr yg benar-benar dibayar. Diskon otomatis terbagi rata.
-        items_sum = float(sum(float(i.line_total or 0) for i in order.items)) if order else 0
-        if not order or items_sum <= 0 or not order.items:
+    # Per-item = NILAI PENUH (qty × harga = line_total), dari order yang ada
+    # pembayaran hari ini (tiap order dihitung SEKALI). Diskon & sisa DP (belum
+    # lunas) ditampilkan terpisah sbg pengurang — bukan disebar ke tiap item,
+    # supaya angka per-item bulat & sesuai harga produk.
+    gross_total = 0.0
+    discount_total = 0.0
+    unpaid_total = 0.0
+    for oid in order_ids_seen:
+        order = db.session.get(Order, oid)
+        if not order or not order.items:
             continue
-        order_ids_seen.add(order.id)
-        pay_amount = float(p.amount or 0)
+        discount_total += float(order.discount_amount or 0)
+        unpaid = float(order.total_amount or 0) - float(order.amount_paid or 0)
+        if unpaid > 0.005:
+            unpaid_total += unpaid
         for item in order.items:
-            share = float(item.line_total or 0) / items_sum
+            amt = float(item.line_total or 0)  # nilai penuh
             if item.item_type == "product":
                 label = cat_names.get(product_cat.get(item.product_id), "Tanpa Kategori")
             else:
                 label = _REPORT_LABELS.get(item.item_type, item.item_type)
             g = groups.setdefault(label, {"category": label, "qty": 0.0, "amount": 0.0, "items": {}})
-            g["amount"] += pay_amount * share
-            total += pay_amount * share
-            # rincian per nama item (digabung kalau nama sama)
+            g["amount"] += amt
+            gross_total += amt
             nm = item.name_snapshot or "—"
             det = g["items"].setdefault(nm, {"name": nm, "qty": 0.0, "amount": 0.0})
-            det["amount"] += pay_amount * share
-            # qty = jumlah item UTUH, dihitung sekali saja (jangan ikut porsi
-            # nilai/pembayaran — itu bikin jumlah item jadi pecahan)
-            if item.id not in qty_counted:
-                qty_counted.add(item.id)
-                q = float(item.quantity or 0)
-                g["qty"] += q
-                det["qty"] += q
+            det["amount"] += amt
+            q = float(item.quantity or 0)
+            g["qty"] += q
+            det["qty"] += q
 
-    # Bulatkan ke rupiah UTUH (rupiah tak punya sen). Alokasi proporsional DP
+    # Bulatkan ke rupiah UTUH (rupiah tak punya sen).
     # bisa pecahan → dibulatkan biar laporan bersih di semua venue.
     by_category = sorted(
         [{
@@ -483,7 +486,10 @@ def report_category_daily():
     return jsonify(
         date=today.isoformat(),
         order_count=len(order_ids_seen),
-        total=round(total),
+        gross_total=round(gross_total),        # penjualan kotor (nilai penuh item)
+        discount_total=round(discount_total),  # total diskon
+        unpaid_total=round(unpaid_total),       # sisa belum lunas (DP)
+        total=round(cash_total),                # uang masuk hari ini (kas)
         by_category=by_category,
         by_method=by_method,
     ), 200
