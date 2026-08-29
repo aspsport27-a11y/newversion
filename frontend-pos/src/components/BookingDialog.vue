@@ -175,10 +175,12 @@ function add() {
   pos.addBooking({
     facility_id: facility.value.id,
     name: `${facility.value.name} ${date.value} ${startStr}-${endStr}`,
-    // dikirim tarif rata2/jam (blended) — server tetap hitung ulang total sbnrnya
-    // pakai facility_rate_for_hour, ini cuma supaya preview di keranjang benar
+    // dikirim tarif rata2/jam (blended) hanya utk TAMPILAN; total baris pakai
+    // line_total EKSAK (jumlah tarif per jam) supaya tak meleset 1 rupiah dari
+    // server (server tetap hitung ulang pakai facility_rate_for_hour).
     unit_price: Math.round(price.value / durationHours.value),
     quantity: durationHours.value,
+    line_total: price.value,
     booking_date: date.value,
     start_time: startStr,
     end_time: endStr,

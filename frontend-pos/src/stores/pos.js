@@ -39,8 +39,11 @@ export const usePosStore = defineStore('pos', {
       }
       // coaching_preview = biaya coaching yg menempel pd booking ini; baris
       // uangnya dibuat server, tapi harus ikut dihitung di preview keranjang
-      // supaya total di POS sama dgn yang ditagih saat bayar
-      return i.unit_price * paid + (i.coaching_preview || 0)
+      // supaya total di POS sama dgn yang ditagih saat bayar.
+      // Booking pakai line_total EKSAK (jumlah tarif per jam) — bukan
+      // unit_price(dibulatkan) × jam, biar tak meleset 1 rupiah dari server.
+      const base = i.line_total != null ? Number(i.line_total) : i.unit_price * paid
+      return base + (i.coaching_preview || 0)
     },
     subtotal() {
       return this.cart.reduce((s, i) => s + this.lineTotal(i), 0)
