@@ -368,6 +368,10 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.get('/orders/recent')
       return data.orders
     },
+    async editOrderItems(orderId, items) {
+      const { data } = await client.put(`/orders/${orderId}/edit-items`, { items })
+      return data.order
+    },
     async createMemberBooking(payload) {
       const { data } = await client.post('/bookings/member', payload)
       return data // { order, per_session, booked_dates, skipped_dates }

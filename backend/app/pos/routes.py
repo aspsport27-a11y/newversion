@@ -28,6 +28,7 @@ from .services import (
     close_shift,
     confirm_qris_payment,
     create_order,
+    edit_order_items_core,
     expire_stale_qris,
     generate_order_number,
     is_coach_available,
@@ -983,6 +984,36 @@ def order_cancel(order_id):
             "forbidden", 403,
         )
     cancel_order(order, uid=user.id if user else None)
+    return jsonify(order=order.to_dict()), 200
+
+
+@pos_bp.put("/orders/<int:order_id>/edit-items")
+@jwt_required()
+def order_edit_items_pos(order_id):
+    """Kasir koreksi item (produk/tiket) transaksi di shift yg SEDANG berjalan
+    (salah entry). Total, pembayaran, & kas shift menyesuaikan otomatis. Item
+    booking/rental tetap dikunci. Transaksi shift lama → hubungi manajer."""
+    from .models import Order
+
+    user = db.session.get(User, int(get_jwt_identity()))
+    terminal = _current_terminal()
+    order = db.session.get(Order, order_id)
+    if order is None:
+        raise PosError("Order tidak ditemukan", "not_found", 404)
+    if order.venue_id != terminal.venue_id:
+        raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
+    cur_shift = Shift.query.filter_by(terminal_id=terminal.id, status="open").first()
+    own_current = bool(cur_shift and order.shift_id == cur_shift.id)
+    if not (user and (has_perm(user.role, "order.cancel") or own_current)):
+        raise PosError(
+            "Hanya transaksi di shift yang sedang berjalan yang bisa Anda edit — hubungi manajer untuk yang lain.",
+            "forbidden", 403,
+        )
+    d = request.get_json(silent=True) or {}
+    err = edit_order_items_core(order, d.get("items") or [])
+    if err:
+        raise PosError(err[0], err[1], 409)
+    db.session.commit()
     return jsonify(order=order.to_dict()), 200
 
 

@@ -978,6 +978,81 @@ def expire_stale_qris(payment: Payment) -> None:
         payment.status = "failed"
 
 
+def edit_order_items_core(order, new_items):
+    """Ganti item PRODUK/TIKET sebuah order (nama/qty/harga) + rekonsiliasi:
+    total order, pembayaran (paid terakhir disesuaikan), & akumulasi shift.
+    Item booking/rental TAK diubah (pakai reschedule/cancel). Tanggal & stok
+    TIDAK diutak-atik. Return None kalau sukses, atau (message, code) kalau
+    gagal. TIDAK commit — pemanggil yang commit."""
+    if order.status == "void":
+        return ("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status")
+    EDITABLE = ("product", "ticket")
+    parsed = []
+    for it in (new_items or []):
+        name = (it.get("name") or "").strip()
+        try:
+            qty = float(it.get("quantity") or it.get("qty") or 0)
+            price = float(it.get("unit_price") or 0)
+        except (TypeError, ValueError):
+            return ("Qty/harga tidak valid.", "bad_item")
+        if not name or qty <= 0 or price < 0:
+            return ("Baris tidak valid (nama, qty > 0, harga >= 0).", "bad_item")
+        itype = it.get("item_type") if it.get("item_type") in EDITABLE else "product"
+        parsed.append((itype, it.get("product_id"), name, qty, price))
+
+    old_total = float(order.total_amount or 0)
+    non_editable = [it for it in order.items if it.item_type not in EDITABLE]
+    non_editable_sum = sum(float(it.line_total or 0) for it in non_editable)
+    for it in list(order.items):
+        if it.item_type in EDITABLE:
+            order.items.remove(it)
+    edit_sum = 0.0
+    for (itype, product_id, name, qty, price) in parsed:
+        line = qty * price
+        edit_sum += line
+        order.items.append(OrderItem(
+            item_type=itype, product_id=product_id, name_snapshot=name[:120],
+            unit_price=price, quantity=qty, line_total=line, created_at=order.created_at,
+        ))
+    subtotal = non_editable_sum + edit_sum
+    discount = float(order.discount_amount or 0)
+    new_total = round(subtotal - discount, 2)
+    if new_total < 0:
+        return ("Total menjadi negatif — periksa harga/diskon.", "bad_total")
+    order.subtotal = subtotal
+    order.total_amount = new_total
+    delta = round(new_total - old_total, 2)
+
+    paid = [p for p in order.payments if p.status == "paid"]
+    if paid and abs(delta) > 0.005:
+        p = paid[-1]
+        new_amt = round(float(p.amount) + delta, 2)
+        if new_amt < 0:
+            return ("Perubahan membuat pembayaran negatif. Untuk mengurangi besar, batalkan transaksi lalu input ulang.", "payment_negative")
+        p.amount = new_amt
+        if p.shift_id:
+            sh = db.session.get(Shift, p.shift_id)
+            if sh:
+                sh.total_sales = float(sh.total_sales or 0) + delta
+                if p.method == "cash":
+                    sh.total_cash_sales = float(sh.total_cash_sales or 0) + delta
+                elif p.method == "qris":
+                    sh.total_qris_sales = float(sh.total_qris_sales or 0) + delta
+                elif p.method == "transfer":
+                    sh.total_transfer_sales = float(sh.total_transfer_sales or 0) + delta
+                sh.expected_cash = (
+                    float(sh.opening_cash or 0) + float(sh.total_cash_sales or 0)
+                    + float(sh.cash_in or 0) - float(sh.cash_out or 0)
+                )
+                if sh.counted_cash is not None:
+                    sh.cash_variance = float(sh.counted_cash) - float(sh.expected_cash)
+    order.amount_paid = round(sum(float(p.amount) for p in order.payments if p.status == "paid"), 2)
+    if order.status != "void":
+        order.status = "paid" if (new_total > 0 and order.amount_paid >= new_total - 0.005) else "open"
+    order.updated_at = datetime.utcnow()
+    return None
+
+
 def cancel_order(order: Order, uid: int = None) -> Order:
     """Batalkan transaksi → order jadi 'void', slot lapangan dilepas.
     - open/partial: DP yg sudah masuk hangus (tak direfund), tak ada stok/shift

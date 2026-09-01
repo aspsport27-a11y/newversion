@@ -2891,79 +2891,11 @@ def order_edit_items(order_id):
         return err
     if order.status == "void":
         return _err("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status", 409)
+    from ..pos.services import edit_order_items_core
     d = request.get_json(silent=True) or {}
-    new_items = d.get("items") or []
-    # tipe yg boleh diedit dari sini: produk & tiket (qty × harga sederhana).
-    # booking/rental TIDAK (terkait slot lapangan → pakai reschedule/cancel).
-    EDITABLE = ("product", "ticket")
-    parsed = []
-    for it in new_items:
-        name = (it.get("name") or "").strip()
-        qty = _D(it.get("quantity") or it.get("qty"))
-        price = _D(it.get("unit_price"))
-        if not name or qty <= 0 or price < 0:
-            return _err("Baris tidak valid (nama, qty > 0, harga >= 0).")
-        itype = it.get("item_type") if it.get("item_type") in EDITABLE else "product"
-        parsed.append((itype, it.get("product_id"), name, float(qty), float(price)))
-
-    old_total = float(order.total_amount or 0)
-    # pertahankan item non-editable (booking/rental) apa adanya
-    non_editable = [it for it in order.items if it.item_type not in EDITABLE]
-    non_editable_sum = sum(float(it.line_total or 0) for it in non_editable)
-    # buang item editable lama, ganti dgn yang baru
-    for it in list(order.items):
-        if it.item_type in EDITABLE:
-            order.items.remove(it)
-    edit_sum = 0.0
-    for (itype, product_id, name, qty, price) in parsed:
-        line = qty * price
-        edit_sum += line
-        order.items.append(OrderItem(
-            item_type=itype, product_id=product_id, name_snapshot=name, unit_price=price,
-            quantity=qty, line_total=line, created_at=order.created_at,
-        ))
-
-    subtotal = non_editable_sum + edit_sum
-    discount = float(order.discount_amount or 0)
-    new_total = round(subtotal - discount, 2)
-    if new_total < 0:
-        return _err("Total menjadi negatif — periksa harga/diskon.")
-    order.subtotal = subtotal
-    order.total_amount = new_total
-    delta = round(new_total - old_total, 2)
-
-    # rekonsiliasi pembayaran & shift (hanya jika order pernah dibayar)
-    paid = [p for p in order.payments if p.status == "paid"]
-    if paid and abs(delta) > 0.005:
-        p = paid[-1]  # sesuaikan pembayaran terakhir (biasanya pelunasan)
-        new_amt = round(float(p.amount) + delta, 2)
-        if new_amt < 0:
-            return _err(
-                "Penyesuaian membuat pembayaran negatif. Untuk mengurangi besar, "
-                "batalkan transaksi lalu buat ulang / pakai pembatalan.",
-                "payment_negative", 409,
-            )
-        p.amount = new_amt
-        if p.shift_id:
-            sh = db.session.get(Shift, p.shift_id)
-            if sh:
-                sh.total_sales = float(sh.total_sales or 0) + delta
-                if p.method == "cash":
-                    sh.total_cash_sales = float(sh.total_cash_sales or 0) + delta
-                elif p.method == "qris":
-                    sh.total_qris_sales = float(sh.total_qris_sales or 0) + delta
-                elif p.method == "transfer":
-                    sh.total_transfer_sales = float(sh.total_transfer_sales or 0) + delta
-                sh.expected_cash = (
-                    float(sh.opening_cash or 0) + float(sh.total_cash_sales or 0)
-                    + float(sh.cash_in or 0) - float(sh.cash_out or 0)
-                )
-                if sh.counted_cash is not None:
-                    sh.cash_variance = float(sh.counted_cash) - float(sh.expected_cash)
-    order.amount_paid = round(sum(float(p.amount) for p in order.payments if p.status == "paid"), 2)
-    if order.status != "void":
-        order.status = "paid" if (new_total > 0 and order.amount_paid >= new_total - 0.005) else "open"
-    order.updated_at = datetime.utcnow()
+    err = edit_order_items_core(order, d.get("items") or [])
+    if err:
+        return _err(err[0], err[1], 409)
     db.session.commit()
     return jsonify(message="Transaksi dikoreksi.", order=order.to_dict()), 200
 
