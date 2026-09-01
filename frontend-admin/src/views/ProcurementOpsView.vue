@@ -17,8 +17,11 @@ const accounts = ref([])
 const sourceAccount = ref('')
 const pos = ref([])
 const statusFilter = ref('')
-const poFrom = ref('')
-const poTo = ref('')
+// default: bulan berjalan (awal s/d akhir bulan)
+function _ymd(dt) { return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` }
+const _now = new Date()
+const poFrom = ref(_ymd(new Date(_now.getFullYear(), _now.getMonth(), 1)))
+const poTo = ref(_ymd(new Date(_now.getFullYear(), _now.getMonth() + 1, 0)))
 const loading = ref(false)
 const toastStore = useToastStore()
 function flash(m) { toastStore.show(m) }
