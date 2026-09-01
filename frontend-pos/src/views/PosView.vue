@@ -14,6 +14,7 @@ import OpenBillDialog from '../components/OpenBillDialog.vue'
 import MemberBookingDialog from '../components/MemberBookingDialog.vue'
 import SettlementDialog from '../components/SettlementDialog.vue'
 import EventDialog from '../components/EventDialog.vue'
+import RecentTxDialog from '../components/RecentTxDialog.vue'
 import AbsenDialog from '../components/AbsenDialog.vue'
 import StationStartDialog from '../components/StationStartDialog.vue'
 import StationReservationDialog from '../components/StationReservationDialog.vue'
@@ -81,6 +82,8 @@ function onOpenPriceAdd(amount) {
 }
 const showMember = ref(false)
 const showEvent = ref(false)
+const showRecent = ref(false)
+async function onTxChanged() { await pos.fetchProducts().catch(() => {}); await pos.fetchMe().catch(() => {}) }
 const showSettle = ref(false)
 const lastResult = ref(null)
 
@@ -389,7 +392,7 @@ function logout() {
              ditampilkan meski venue tak punya lapangan, mis. venue Station
              Gaming murni, supaya order yg sempat dibuat tapi dialog
              pembayarannya ditutup tanpa bayar tak "hilang" dr jangkauan kasir) -->
-        <div v-if="pos.bookingEnabled || pos.hasStations" class="flex flex-wrap gap-2 mb-3">
+        <div class="flex flex-wrap gap-2 mb-3">
           <button v-if="pos.bookingEnabled" @click="showBooking = true"
             class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-brand-50 hover:bg-brand-100 text-brand-700 font-medium border border-brand-100 flex items-center justify-center gap-2">
             🏟️ Booking
@@ -413,6 +416,10 @@ function logout() {
           <button @click="showOpenBills = true"
             class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-700 font-medium border border-teal-100 flex items-center justify-center gap-2">
             🧾 Bill Terbuka
+          </button>
+          <button @click="showRecent = true"
+            class="flex-1 min-w-[30%] py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium border border-rose-100 flex items-center justify-center gap-2">
+            ↩️ Koreksi/Batal
           </button>
         </div>
 
@@ -612,6 +619,7 @@ function logout() {
     <StationReservationDialog v-if="showStationResv" @close="showStationResv = false"
       @created="onReservationCreated" @started="onReservationStarted" />
     <SettlementDialog v-if="showSettle" @close="showSettle = false" @paid="onSettlePaid" />
+    <RecentTxDialog v-if="showRecent" @close="showRecent = false" @changed="onTxChanged" />
     <OpenBillDialog v-if="showOpenBills" @close="showOpenBills = false"
       @add-item="onBillAddItem" @paid="onBillPaid" @print="draftBill = $event" />
     <ReceiptDialog v-if="draftBill" :order="draftBill" :terminal="pos.terminal" draft @close="draftBill = null" />

@@ -364,6 +364,10 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.get('/orders/outstanding')
       return data.orders
     },
+    async fetchRecentOrders() {
+      const { data } = await client.get('/orders/recent')
+      return data.orders
+    },
     async createMemberBooking(payload) {
       const { data } = await client.post('/bookings/member', payload)
       return data // { order, per_session, booked_dates, skipped_dates }

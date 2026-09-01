@@ -966,17 +966,41 @@ def order_cancel(order_id):
     from .models import Order
 
     user = db.session.get(User, int(get_jwt_identity()))
-    if not user or not has_perm(user.role, "order.cancel"):
-        raise PosError("Kasir tidak punya izin membatalkan transaksi — hubungi manajer", "forbidden", 403)
-
     terminal = _current_terminal()
     order = db.session.get(Order, order_id)
     if order is None:
         raise PosError("Order tidak ditemukan", "not_found", 404)
     if order.venue_id != terminal.venue_id:
         raise PosError("Order bukan milik venue ini", "wrong_venue", 403)
-    cancel_order(order, uid=user.id)
+    # Izin: (a) punya order.cancel (manajer dll), ATAU (b) SELF-SERVICE kasir —
+    # transaksi ini dibuat di shift yg SEDANG berjalan di terminal ini (koreksi
+    # salah entry sendiri). Transaksi shift lama tetap butuh izin manajer.
+    cur_shift = Shift.query.filter_by(terminal_id=terminal.id, status="open").first()
+    own_current = bool(cur_shift and order.shift_id == cur_shift.id)
+    if not (user and (has_perm(user.role, "order.cancel") or own_current)):
+        raise PosError(
+            "Hanya transaksi di shift yang sedang berjalan yang bisa Anda batalkan — hubungi manajer untuk yang lain.",
+            "forbidden", 403,
+        )
+    cancel_order(order, uid=user.id if user else None)
     return jsonify(order=order.to_dict()), 200
+
+
+@pos_bp.get("/orders/recent")
+@jwt_required()
+def orders_recent():
+    """Transaksi di shift yang SEDANG berjalan (utk kasir koreksi salah entry)."""
+    from .models import Order
+
+    terminal = _current_terminal()
+    cur = Shift.query.filter_by(terminal_id=terminal.id, status="open").first()
+    if not cur:
+        return jsonify(orders=[]), 200
+    orders = (
+        Order.query.filter_by(shift_id=cur.id)
+        .order_by(Order.created_at.desc()).limit(50).all()
+    )
+    return jsonify(orders=[o.to_dict() for o in orders]), 200
 
 
 # ------------------------------------------------------------------
