@@ -229,7 +229,10 @@ onMounted(async () => { await loadBase(); await loadPo() })
               <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ p.code }}</td>
               <td class="px-4 py-3 text-slate-600 whitespace-nowrap">{{ fmtDate(p.order_date) }}</td>
               <td class="px-4 py-3 text-slate-600">{{ venueName(p.venue_id) }}</td>
-              <td class="px-4 py-3 text-slate-600">{{ p.supplier_name || '—' }}</td>
+              <td class="px-4 py-3 text-slate-600">
+                <div>{{ p.supplier_name || '—' }}</div>
+                <div v-if="p.supplier_bank" class="text-xs text-slate-400 font-mono">💳 {{ p.supplier_bank }}</div>
+              </td>
               <td class="px-4 py-3 text-slate-500 text-xs truncate max-w-[220px]">{{ p.notes || '—' }}</td>
               <td class="px-4 py-3 text-right font-medium">{{ rupiah(p.total_amount) }}</td>
               <td class="px-4 py-3 text-center"><span :class="statusMap[p.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[p.status]?.[0] }}</span></td>
@@ -290,7 +293,8 @@ onMounted(async () => { await loadBase(); await loadPo() })
     <div v-if="detail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="detail = null">
       <div class="bg-white w-full max-w-md rounded-2xl p-5 max-h-[92vh] overflow-auto">
         <div class="flex justify-between items-center mb-1"><h3 class="text-lg font-bold text-slate-800 font-mono">{{ detail.code }}</h3><button @click="detail = null" class="text-slate-400 text-xl">✕</button></div>
-        <p class="text-sm text-slate-500 mb-3">{{ venueName(detail.venue_id) }} · {{ detail.supplier_name || 'tanpa supplier' }}<span v-if="detail.order_date"> · {{ fmtDate(detail.order_date) }}</span></p>
+        <p class="text-sm text-slate-500 mb-1">{{ venueName(detail.venue_id) }} · {{ detail.supplier_name || 'tanpa supplier' }}<span v-if="detail.order_date"> · {{ fmtDate(detail.order_date) }}</span></p>
+        <p v-if="detail.supplier_bank" class="text-xs text-slate-500 mb-3">💳 Rek: <span class="font-mono text-slate-700">{{ detail.supplier_bank }}</span></p>
         <div class="border rounded-lg overflow-hidden mb-3">
           <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-left text-xs"><tr><th class="px-3 py-2">Item</th><th class="px-3 py-2 text-right">Qty</th><th class="px-3 py-2 text-right">Subtotal</th></tr></thead>
