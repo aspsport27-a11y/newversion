@@ -8,6 +8,7 @@ import PaymentDialog from '../components/PaymentDialog.vue'
 import QrisDialog from '../components/QrisDialog.vue'
 import ReceiptDialog from '../components/ReceiptDialog.vue'
 import CloseShiftDialog from '../components/CloseShiftDialog.vue'
+import { parseUTC } from '../utils/datetime'
 import BookingDialog from '../components/BookingDialog.vue'
 import OpenPriceDialog from '../components/OpenPriceDialog.vue'
 import OpenBillDialog from '../components/OpenBillDialog.vue'
@@ -130,6 +131,20 @@ const nowTick = ref(Date.now())
 let clockTimer = null
 onMounted(() => { clockTimer = setInterval(() => (nowTick.value = Date.now()), 1000) })
 onUnmounted(() => clearInterval(clockTimer))
+
+// Peringatan shift terlalu lama terbuka (idealnya tutup harian). Ambang 20 jam.
+const SHIFT_WARN_HOURS = 20
+const shiftHoursOpen = computed(() => {
+  const s = pos.openShift
+  if (!s?.opened_at) return 0
+  return (nowTick.value - parseUTC(s.opened_at).getTime()) / 3600000
+})
+const shiftTooLong = computed(() => shiftHoursOpen.value >= SHIFT_WARN_HOURS)
+const shiftOpenedLabel = computed(() => pos.openShift?.opened_at ? parseUTC(pos.openShift.opened_at).toLocaleString('id-ID') : '')
+const shiftOpenText = computed(() => {
+  const h = Math.floor(shiftHoursOpen.value)
+  return h >= 48 ? `${Math.floor(h / 24)} hari` : `${h} jam`
+})
 
 function stationClockFor(s) {
   return s.status === 'ongoing' ? stationClock(s.session, nowTick.value, s.hourly_rate) : null
@@ -365,6 +380,12 @@ function logout() {
 
     <AbsenDialog v-if="showAbsen" :terminal-code="pos.terminal?.code || ''" @close="showAbsen = false" />
     <CategoryReportDialog v-if="showCategoryReport" @close="showCategoryReport = false" />
+
+    <!-- Peringatan: shift terlalu lama terbuka -->
+    <div v-if="pos.openShift && shiftTooLong" class="bg-red-600 text-white px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+      <p class="text-sm font-medium">⚠️ Shift sudah terbuka <b>{{ shiftOpenText }}</b> (sejak {{ shiftOpenedLabel }}). Harap <b>tutup shift</b> lalu buka shift baru — biar kas bisa direkonsiliasi harian.</p>
+      <button @click="showClose = true" class="text-sm bg-white text-red-700 font-semibold rounded-lg px-3 py-1.5 whitespace-nowrap hover:bg-red-50">Tutup Shift Sekarang</button>
+    </div>
 
     <div v-if="loading" class="flex-1 grid place-items-center text-slate-400">Memuat…</div>
 
