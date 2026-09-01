@@ -19,6 +19,8 @@ const products = ref([])
 const toastStore = useToastStore()
 
 const searchPo = ref('')
+const poFrom = ref('')
+const poTo = ref('')
 const searchReorder = ref('')
 const searchSup = ref('')
 
@@ -128,6 +130,8 @@ async function loadPo() {
   loadingPo.value = true
   const params = {}
   if (!isManager.value && venueId.value) params.venue_id = venueId.value
+  if (poFrom.value) params.from = poFrom.value
+  if (poTo.value) params.to = poTo.value
   try {
     const { data } = await client.get('/procurement/pos', { params })
     if (seq === poSeq) pos.value = data.pos
@@ -393,7 +397,13 @@ watch(tab, reloadTab)
     <div v-if="tab === 'po'">
       <div class="flex justify-between items-center gap-2 mb-3 flex-wrap">
         <input v-model="searchPo" type="text" placeholder="🔍 Cari kode PO atau supplier…"
-          class="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+          class="flex-1 min-w-[10rem] max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+        <div class="flex items-center gap-1.5">
+          <input v-model="poFrom" @change="loadPo" type="date" title="Tanggal PO dari" class="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-brand-500" />
+          <span class="text-slate-400 text-xs">s/d</span>
+          <input v-model="poTo" @change="loadPo" type="date" title="Tanggal PO sampai" class="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-brand-500" />
+          <button v-if="poFrom || poTo" @click="poFrom=''; poTo=''; loadPo()" class="px-2 rounded-lg border border-slate-300 text-slate-500 text-sm hover:bg-slate-50">✕</button>
+        </div>
         <button @click="openCreate" class="bg-brand-600 hover:bg-brand-700 text-white text-sm rounded-lg px-4 py-2 font-medium">+ Buat PO</button>
       </div>
 
@@ -426,16 +436,18 @@ watch(tab, reloadTab)
           <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-left"><tr>
               <th class="px-4 py-3 font-medium">Kode</th>
+              <th class="px-4 py-3 font-medium">Tanggal</th>
               <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
               <th class="px-4 py-3 font-medium">Supplier</th>
               <th class="px-4 py-3 font-medium text-right">Total</th><th class="px-4 py-3 font-medium text-center">Status</th><th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="loadingPo"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!pos.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada PO.</td></tr>
-              <tr v-else-if="!filteredPos.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Tidak ada PO yang cocok dengan pencarian.</td></tr>
+              <tr v-if="loadingPo"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!pos.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada PO.</td></tr>
+              <tr v-else-if="!filteredPos.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Tidak ada PO yang cocok dengan pencarian.</td></tr>
               <tr v-for="p in filteredPos" :key="p.id" @click="openDetail(p)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ p.code }}</td>
+                <td class="px-4 py-3 text-slate-600 whitespace-nowrap">{{ p.order_date || '—' }}</td>
                 <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===p.venue_id)?.code || '—' }}</td>
                 <td class="px-4 py-3 text-slate-600">
                   <div>{{ p.supplier_name || '—' }}</div>

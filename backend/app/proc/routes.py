@@ -291,7 +291,12 @@ def pos_list():
         q = q.filter_by(venue_id=vid_param)
     if request.args.get("status"):
         q = q.filter_by(status=request.args.get("status"))
-    pos = q.order_by(PurchaseOrder.created_at.desc()).all()
+    # filter rentang Tanggal PO (order_date)
+    if request.args.get("from"):
+        q = q.filter(PurchaseOrder.order_date >= request.args.get("from"))
+    if request.args.get("to"):
+        q = q.filter(PurchaseOrder.order_date <= request.args.get("to"))
+    pos = q.order_by(PurchaseOrder.order_date.desc().nullslast(), PurchaseOrder.created_at.desc()).all()
     sm = _sup_map()
     bm = _sup_bank_map()
     return jsonify(count=len(pos), pos=[p.to_dict(sm.get(p.supplier_id), bm.get(p.supplier_id)) for p in pos]), 200
