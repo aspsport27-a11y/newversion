@@ -142,6 +142,13 @@ async function saveTk() {
     showTk.value = false; await loadTickets(); flash('Tiket disimpan')
   } catch (e) { tkErr.value = e?.response?.data?.message || 'Gagal.' } finally { savingTk.value = false }
 }
+async function delTicket(t) {
+  if (!confirm(`Hapus tiket "${t.name}"? (Kalau sudah pernah terjual, tidak bisa dihapus — nonaktifkan saja lewat Edit.)`)) return
+  try {
+    await client.delete(`/admin/products/${t.id}`)
+    await loadTickets()
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus.') }
+}
 
 // ---------------- HARI LIBUR (global) ----------------
 const holidays = ref([])
@@ -574,7 +581,7 @@ watch(venueId, reload)
               <td class="px-4 py-3 text-right">{{ rupiah(t.price) }}</td>
               <td class="px-4 py-3 text-right">{{ t.weekend_price != null ? rupiah(t.weekend_price) : '— (= weekday)' }}</td>
               <td class="px-4 py-3 text-center"><span :class="t.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5">{{ t.is_active ? 'Aktif' : 'Nonaktif' }}</span></td>
-              <td class="px-4 py-3 text-right"><button @click="openTk(t)" class="text-brand-600 text-sm hover:underline">Edit</button></td>
+              <td class="px-4 py-3 text-right whitespace-nowrap"><button @click="openTk(t)" class="text-brand-600 text-sm hover:underline">Edit</button><button @click="delTicket(t)" class="text-red-500 text-sm hover:underline ml-3">Hapus</button></td>
             </tr>
           </tbody>
         </table>
