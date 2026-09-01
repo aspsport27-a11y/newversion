@@ -105,6 +105,10 @@ onMounted(load)
             <span class="text-slate-600">Penjualan (nilai penuh)</span>
             <span class="font-medium text-slate-700">{{ rupiah(report.gross_total) }}</span>
           </div>
+          <div v-if="report.advance_booking_total > 0" class="flex justify-between px-3 print:px-0 text-xs text-slate-400">
+            <span>↳ termasuk booking di muka (main tgl lain)</span>
+            <span>{{ rupiah(report.advance_booking_total) }}</span>
+          </div>
           <div v-if="report.discount_total > 0" class="flex justify-between px-3 print:px-0 text-amber-600">
             <span>Diskon</span><span>− {{ rupiah(report.discount_total) }}</span>
           </div>

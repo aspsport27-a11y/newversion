@@ -442,6 +442,7 @@ def report_category_daily():
     discount_total = 0.0
     unpaid_total = 0.0
     paid_other_total = 0.0   # bagian order ini yg dibayar di HARI LAIN (DP lintas hari)
+    booking_items = []       # (order_item_id, amount) — utk hitung "booking di muka"
     for oid in order_ids_seen:
         order = db.session.get(Order, oid)
         if not order or not order.items:
@@ -471,6 +472,25 @@ def report_category_daily():
             q = float(item.quantity or 0)
             g["qty"] += q
             det["qty"] += q
+            if item.item_type == "booking":
+                booking_items.append((item.id, amt))
+
+    # "Booking di muka" = item booking yg tanggal MAIN-nya SETELAH tanggal
+    # laporan (dibayar hari ini, mainnya belum) — supaya beda dgn Booking
+    # Lapangan back-office (yg per tanggal main) bisa dijelaskan.
+    advance_booking_total = 0.0
+    if booking_items:
+        oi_ids = [iid for iid, _ in booking_items]
+        bd_map = {
+            oi_id: bdate
+            for oi_id, bdate in db.session.query(
+                FacilityBooking.order_item_id, FacilityBooking.booking_date
+            ).filter(FacilityBooking.order_item_id.in_(oi_ids)).all()
+        }
+        for iid, amt in booking_items:
+            bd = bd_map.get(iid)
+            if bd and bd > today:
+                advance_booking_total += amt
 
     # Bulatkan ke rupiah UTUH (rupiah tak punya sen).
     # bisa pecahan → dibulatkan biar laporan bersih di semua venue.
@@ -499,6 +519,7 @@ def report_category_daily():
         discount_total=round(discount_total),    # total diskon
         unpaid_total=round(unpaid_total),         # sisa belum lunas (DP)
         paid_other_total=round(paid_other_total), # dibayar hari lain (DP lintas hari)
+        advance_booking_total=round(advance_booking_total),  # booking di muka (main tgl lain)
         total=round(cash_total),                  # uang masuk hari ini (kas)
         by_category=by_category,
         by_method=by_method,
