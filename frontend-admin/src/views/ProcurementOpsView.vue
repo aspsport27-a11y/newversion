@@ -17,11 +17,15 @@ const accounts = ref([])
 const sourceAccount = ref('')
 const pos = ref([])
 const statusFilter = ref('')
-// default: bulan berjalan (awal s/d akhir bulan)
+// filter per BULAN (default: bulan berjalan)
 function _ymd(dt) { return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}` }
-const _now = new Date()
-const poFrom = ref(_ymd(new Date(_now.getFullYear(), _now.getMonth(), 1)))
-const poTo = ref(_ymd(new Date(_now.getFullYear(), _now.getMonth() + 1, 0)))
+function _monthStr(dt) { return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}` }
+const poMonth = ref(_monthStr(new Date()))
+function shiftMonth(delta) {
+  const [y, m] = poMonth.value.split('-').map(Number)
+  poMonth.value = _monthStr(new Date(y, m - 1 + delta, 1))
+  loadPo()
+}
 const loading = ref(false)
 const toastStore = useToastStore()
 function flash(m) { toastStore.show(m) }
@@ -67,8 +71,11 @@ async function loadPo() {
   const params = { kind: 'ops' }
   if (!isManager.value && venueId.value) params.venue_id = venueId.value
   if (statusFilter.value) params.status = statusFilter.value
-  if (poFrom.value) params.from = poFrom.value
-  if (poTo.value) params.to = poTo.value
+  if (poMonth.value) {
+    const [y, m] = poMonth.value.split('-').map(Number)
+    params.from = `${poMonth.value}-01`
+    params.to = _ymd(new Date(y, m, 0))
+  }
   try { const { data } = await client.get('/procurement/pos', { params }); pos.value = data.pos }
   finally { loading.value = false }
 }
@@ -170,12 +177,11 @@ onMounted(async () => { await loadBase(); await loadPo() })
           <option value="submitted">Menunggu</option><option value="approved">Disetujui</option>
           <option value="received">Diterima</option><option value="paid">Dibayar</option><option value="rejected">Ditolak</option>
         </select></div>
-      <div><label class="block text-xs text-slate-500 mb-1">Tanggal PO</label>
-        <div class="flex items-center gap-1.5">
-          <input v-model="poFrom" @change="loadPo" type="date" class="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-brand-500" />
-          <span class="text-slate-400 text-xs">s/d</span>
-          <input v-model="poTo" @change="loadPo" type="date" class="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-brand-500" />
-          <button v-if="poFrom || poTo" @click="poFrom=''; poTo=''; loadPo()" class="px-2 rounded-lg border border-slate-300 text-slate-500 text-sm hover:bg-slate-50">✕</button>
+      <div><label class="block text-xs text-slate-500 mb-1">Bulan PO</label>
+        <div class="flex items-center gap-1">
+          <button @click="shiftMonth(-1)" title="Bulan sebelumnya" class="px-2.5 py-2 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50">‹</button>
+          <input v-model="poMonth" @change="loadPo" type="month" class="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-brand-500" />
+          <button @click="shiftMonth(1)" title="Bulan berikutnya" class="px-2.5 py-2 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50">›</button>
         </div>
       </div>
     </div>
