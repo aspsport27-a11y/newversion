@@ -2418,7 +2418,12 @@ def report_sales():
 def report_shifts():
     d_from, d_to = _date_range()
     ids = _report_scope()  # manajer->venue; admin_unit->area; admin/HO->semua/1
-    q = Shift.query.filter(func.date(Shift.opened_at).between(d_from, d_to))
+    # Muncul kalau shift DIBUKA atau DITUTUP dalam rentang (shift yg dibiarkan
+    # terbuka lintas hari tetap terlihat di tanggal tutupnya).
+    q = Shift.query.filter(db.or_(
+        func.date(Shift.opened_at).between(d_from, d_to),
+        func.date(Shift.closed_at).between(d_from, d_to),
+    ))
     if ids is not None:
         q = q.filter(Shift.venue_id.in_(ids)) if ids else q.filter(db.false())
     shifts = q.order_by(Shift.opened_at.desc()).all()
