@@ -333,9 +333,15 @@ def po_create():
     items = d.get("items") or []
     if not items:
         return _err("Minimal 1 item")
+    order_date = date.today()
+    if d.get("order_date"):
+        try:
+            order_date = date.fromisoformat(d["order_date"])
+        except (ValueError, TypeError):
+            return _err("Tanggal PO tidak valid")
     po = PurchaseOrder(
         code=_gen_po_code(venue, kind), kind=kind, venue_id=vid, supplier_id=d.get("supplier_id"),
-        created_by=_user().id, notes=d.get("notes"), status="submitted",
+        created_by=_user().id, notes=d.get("notes"), status="submitted", order_date=order_date,
     )
     total = 0.0
     for it in items:

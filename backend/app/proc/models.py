@@ -26,6 +26,7 @@ class PurchaseOrder(db.Model):
     paid_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     paid_at = db.Column(db.DateTime)
     source_account_id = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"))
+    order_date = db.Column(db.Date)  # tanggal PO (bisa dipilih), migration 067
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -45,6 +46,7 @@ class PurchaseOrder(db.Model):
             "total_amount": f(self.total_amount),
             "notes": self.notes,
             "status": self.status,
+            "order_date": self.order_date.isoformat() if self.order_date else None,
             "rejection_reason": self.rejection_reason,
             "approved_at": self.approved_at.isoformat() if self.approved_at else None,
             "received_at": self.received_at.isoformat() if self.received_at else None,

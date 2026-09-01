@@ -155,7 +155,7 @@ const availablePoSuppliers = computed(() => {
 async function openCreate() {
   const vid = venueId.value || venues.value[0]?.id
   try { await loadProducts(vid) } catch (e) { products.value = [] }  // tetap buka modal walau produk gagal (bisa item non-stok)
-  cForm.value = { venue_id: vid, supplier_id: availablePoSuppliers.value[0]?.id || '', notes: '', items: [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }] }
+  cForm.value = { venue_id: vid, supplier_id: availablePoSuppliers.value[0]?.id || '', order_date: new Date().toISOString().slice(0, 10), notes: '', items: [{ mode: 'product', product_id: products.value[0]?.id, item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' }] }
   cFiles.value = []; cErr.value = ''; showCreate.value = true
 }
 async function onModalVenueChange() {
@@ -177,7 +177,7 @@ async function submitCreate() {
     const items = cForm.value.items.map((i) => i.mode === 'product'
       ? { product_id: i.product_id, quantity: i.quantity, unit: i.unit, unit_price: i.unit_price, note: i.note }
       : { item_name: i.item_name, quantity: i.quantity, unit: i.unit, unit_price: i.unit_price, note: i.note })
-    const payload = { supplier_id: cForm.value.supplier_id || null, notes: cForm.value.notes, items }
+    const payload = { supplier_id: cForm.value.supplier_id || null, order_date: cForm.value.order_date || null, notes: cForm.value.notes, items }
     if (!isManager.value) payload.venue_id = cForm.value.venue_id
     const { data } = await client.post('/procurement/pos', payload)
     for (const f of cFiles.value) { const fd = new FormData(); fd.append('file', f); await client.post(`/procurement/pos/${data.po.id}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }) }
@@ -593,7 +593,9 @@ watch(tab, reloadTab)
             <select v-model="cForm.supplier_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
               <option value="">— pilih —</option><option v-for="s in availablePoSuppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select></div>
-          <div class="col-span-2"><label class="block text-xs text-slate-500 mb-1">Catatan</label><input v-model="cForm.notes" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <div><label class="block text-xs text-slate-500 mb-1">Tanggal PO</label>
+            <input v-model="cForm.order_date" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
+          <div><label class="block text-xs text-slate-500 mb-1">Catatan</label><input v-model="cForm.notes" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" /></div>
         </div>
         <p class="text-xs font-medium text-slate-500 mb-1">Item</p>
         <div v-for="(it, i) in cForm.items" :key="i" class="border rounded-lg p-2 mb-2">
@@ -628,7 +630,7 @@ watch(tab, reloadTab)
         <div class="flex justify-between items-start mb-3">
           <div>
             <h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3>
-            <p class="text-sm text-slate-500">{{ detail.supplier_name || 'Tanpa supplier' }}</p>
+            <p class="text-sm text-slate-500">{{ detail.supplier_name || 'Tanpa supplier' }}<span v-if="detail.order_date"> · {{ detail.order_date }}</span></p>
             <p v-if="detail.supplier_bank" class="text-xs text-slate-500 mt-0.5">💳 Rek: <span class="font-mono text-slate-700">{{ detail.supplier_bank }}</span></p>
           </div>
           <div class="flex items-center gap-2">
