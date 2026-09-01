@@ -375,6 +375,61 @@ def po_create():
     return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 201
 
 
+@proc_bp.put("/pos/<int:pid>")
+@jwt_required()
+@CREATE
+def po_update(pid):
+    """Edit PO — HANYA saat status masih 'submitted' (belum disetujui). Ganti
+    supplier/tanggal/catatan/item; total dihitung ulang."""
+    po = db.session.get(PurchaseOrder, pid)
+    if not po:
+        return _err("PO tidak ditemukan", "not_found", 404)
+    err = _check_venue(po)
+    if err:
+        return err
+    if po.status != "submitted":
+        return _err("Hanya PO berstatus Menunggu yang bisa diedit.", "bad_status", 409)
+    d = request.get_json(silent=True) or {}
+    items = d.get("items") or []
+    if not items:
+        return _err("Minimal 1 item")
+    if "supplier_id" in d:
+        po.supplier_id = d.get("supplier_id") or None
+    if "notes" in d:
+        po.notes = d.get("notes")
+    if d.get("order_date"):
+        try:
+            po.order_date = date.fromisoformat(d["order_date"])
+        except (ValueError, TypeError):
+            return _err("Tanggal PO tidak valid")
+    # ganti seluruh item
+    po.items.clear()
+    total = 0.0
+    for it in items:
+        qty = int(it.get("quantity") or 0)
+        price = _D(it.get("unit_price"))
+        if qty <= 0 or price < 0:
+            return _err("Item tidak valid (qty > 0)")
+        line = qty * price
+        total += line
+        name = it.get("item_name")
+        pid_item = None if po.kind == "ops" else it.get("product_id")
+        if pid_item:
+            prod = db.session.get(Product, pid_item)
+            if prod:
+                name = prod.name
+        if not name:
+            return _err("Nama item wajib")
+        po.items.append(PurchaseOrderItem(
+            product_id=pid_item or None, item_name=name[:120], quantity=qty,
+            unit=it.get("unit"), unit_price=price, total_price=line, note=it.get("note"),
+        ))
+    po.total_amount = total
+    po.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(po=po.to_dict(_sup_map().get(po.supplier_id))), 200
+
+
 @proc_bp.post("/pos/<int:pid>/approve")
 @jwt_required()
 @CREATE

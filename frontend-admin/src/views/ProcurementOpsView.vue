@@ -88,9 +88,22 @@ const cErr = ref('')
 const saving = ref(false)
 const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0))
 function newItem() { return { item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' } }
+const editingId = ref(null)
 function openCreate() {
+  editingId.value = null
   cForm.value = { venue_id: isManager.value ? auth.user?.venue_id : (venueId.value || venues.value[0]?.id), supplier_id: '', order_date: new Date().toISOString().slice(0, 10), notes: '', items: [newItem()] }
   cFiles.value = []; cErr.value = ''; showCreate.value = true
+}
+function openEdit(po) {
+  editingId.value = po.id
+  cForm.value = {
+    venue_id: po.venue_id, supplier_id: po.supplier_id || '',
+    order_date: po.order_date || new Date().toISOString().slice(0, 10),
+    notes: po.notes || '',
+    items: (po.items || []).map((i) => ({ item_name: i.item_name, quantity: Number(i.quantity), unit: i.unit || 'pcs', unit_price: Number(i.unit_price), note: i.note || '' })),
+  }
+  if (!cForm.value.items.length) cForm.value.items = [newItem()]
+  cFiles.value = []; cErr.value = ''; detail.value = null; showCreate.value = true
 }
 function addRow() { cForm.value.items.push(newItem()) }
 function rmRow(i) { cForm.value.items.splice(i, 1) }
@@ -107,9 +120,15 @@ async function submitCreate() {
       items: cForm.value.items.map((i) => ({ item_name: i.item_name, quantity: i.quantity, unit: i.unit, unit_price: i.unit_price, note: i.note })),
     }
     if (!isManager.value) payload.venue_id = cForm.value.venue_id
-    const { data } = await client.post('/procurement/pos', payload)
-    for (const f of cFiles.value) { const fd = new FormData(); fd.append('file', f); await client.post(`/procurement/pos/${data.po.id}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }) }
-    showCreate.value = false; await loadPo(); flash('Pembelian ops dibuat')
+    if (editingId.value) {
+      await client.put(`/procurement/pos/${editingId.value}`, payload)
+      for (const f of cFiles.value) { const fd = new FormData(); fd.append('file', f); await client.post(`/procurement/pos/${editingId.value}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }) }
+      showCreate.value = false; await loadPo(); flash('Pembelian ops diperbarui')
+    } else {
+      const { data } = await client.post('/procurement/pos', payload)
+      for (const f of cFiles.value) { const fd = new FormData(); fd.append('file', f); await client.post(`/procurement/pos/${data.po.id}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }) }
+      showCreate.value = false; await loadPo(); flash('Pembelian ops dibuat')
+    }
   } catch (e) { cErr.value = e?.response?.data?.message || 'Gagal.' } finally { saving.value = false }
 }
 
@@ -245,7 +264,7 @@ onMounted(async () => { await loadBase(); await loadPo() })
     <!-- Create modal -->
     <div v-if="showCreate" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
       <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[92vh] overflow-auto">
-        <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">Pembelian Ops Baru</h3><button @click="showCreate = false" class="text-slate-400 text-xl">✕</button></div>
+        <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">{{ editingId ? 'Edit Pembelian Ops' : 'Pembelian Ops Baru' }}</h3><button @click="showCreate = false" class="text-slate-400 text-xl">✕</button></div>
         <div class="space-y-3">
           <div v-if="!isManager">
             <label class="block text-xs text-slate-500 mb-1">Venue</label>
@@ -284,7 +303,7 @@ onMounted(async () => { await loadBase(); await loadPo() })
             <input type="file" accept="image/*,.pdf" multiple @change="onFiles" class="text-xs" />
           </div>
           <p v-if="cErr" class="text-sm text-red-600">{{ cErr }}</p>
-          <button @click="submitCreate" :disabled="saving" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ saving ? 'Menyimpan…' : 'Buat Pembelian' }}</button>
+          <button @click="submitCreate" :disabled="saving" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ saving ? 'Menyimpan…' : (editingId ? 'Simpan Perubahan' : 'Buat Pembelian') }}</button>
         </div>
       </div>
     </div>
@@ -323,6 +342,7 @@ onMounted(async () => { await loadBase(); await loadPo() })
 
         <div class="flex gap-2 pt-2 border-t">
           <template v-if="detail.status === 'submitted'">
+            <button @click="openEdit(detail)" :disabled="busy" class="py-2.5 px-4 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium disabled:opacity-50">✏️ Edit</button>
             <button @click="act('approve')" :disabled="busy" class="flex-1 py-2.5 rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-50">Setujui</button>
             <button @click="doReject" :disabled="busy" class="flex-1 py-2.5 rounded-lg bg-red-600 text-white font-medium disabled:opacity-50">Tolak</button>
           </template>
