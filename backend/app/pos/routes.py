@@ -1010,7 +1010,7 @@ def order_edit_items_pos(order_id):
             "forbidden", 403,
         )
     d = request.get_json(silent=True) or {}
-    err = edit_order_items_core(order, d.get("items") or [])
+    err = edit_order_items_core(order, d.get("items") or [], cashier_id=(user.id if user else None))
     if err:
         raise PosError(err[0], err[1], 409)
     db.session.commit()

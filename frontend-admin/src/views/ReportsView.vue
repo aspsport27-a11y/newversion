@@ -467,7 +467,7 @@ onMounted(async () => { await loadVenues(); await run() })
           <span class="text-[11px] text-slate-400">ubah kalau modal awal salah input</span>
         </div>
         <div class="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 mb-3">
-          Edit langsung nama/qty/harga item <b>produk & tiket</b>. Ketik/pilih nama dari <b>daftar produk venue</b> → harga terisi otomatis (hindari salah entry). Item <b>booking/rental dikunci</b>. Total order, pembayaran, & kas shift menyesuaikan otomatis; <b>stok tidak otomatis disesuaikan.</b>
+          Edit langsung nama/qty/harga item <b>produk & tiket</b>. Ketik/pilih nama dari <b>daftar produk venue</b> → harga terisi otomatis (hindari salah entry). Item <b>booking/rental dikunci</b>. Total order, pembayaran, kas shift, & <b>stok</b> (produk ber-stok dari katalog) menyesuaikan otomatis.
         </div>
         <datalist id="soProductList">
           <option v-for="p in soProducts" :key="p.id" :value="p.name" />

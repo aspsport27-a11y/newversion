@@ -978,12 +978,12 @@ def expire_stale_qris(payment: Payment) -> None:
         payment.status = "failed"
 
 
-def edit_order_items_core(order, new_items):
+def edit_order_items_core(order, new_items, cashier_id=None):
     """Ganti item PRODUK/TIKET sebuah order (nama/qty/harga) + rekonsiliasi:
-    total order, pembayaran (paid terakhir disesuaikan), & akumulasi shift.
-    Item booking/rental TAK diubah (pakai reschedule/cancel). Tanggal & stok
-    TIDAK diutak-atik. Return None kalau sukses, atau (message, code) kalau
-    gagal. TIDAK commit — pemanggil yang commit."""
+    total order, pembayaran (paid terakhir disesuaikan), akumulasi shift, & STOK
+    (selisih qty per produk). Item booking/rental TAK diubah (pakai
+    reschedule/cancel). Tanggal dipertahankan. Return None kalau sukses, atau
+    (message, code) kalau gagal. TIDAK commit — pemanggil yang commit."""
     if order.status == "void":
         return ("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status")
     EDITABLE = ("product", "ticket")
@@ -1001,6 +1001,11 @@ def edit_order_items_core(order, new_items):
         parsed.append((itype, it.get("product_id"), name, qty, price))
 
     old_total = float(order.total_amount or 0)
+    # qty lama per produk (sebelum diganti) → utk hitung selisih stok
+    old_qty_by_prod = {}
+    for it in order.items:
+        if it.item_type in EDITABLE and it.product_id:
+            old_qty_by_prod[it.product_id] = old_qty_by_prod.get(it.product_id, 0.0) + float(it.quantity or 0)
     non_editable = [it for it in order.items if it.item_type not in EDITABLE]
     non_editable_sum = sum(float(it.line_total or 0) for it in non_editable)
     for it in list(order.items):
@@ -1050,6 +1055,25 @@ def edit_order_items_core(order, new_items):
     if order.status != "void":
         order.status = "paid" if (new_total > 0 and order.amount_paid >= new_total - 0.005) else "open"
     order.updated_at = datetime.utcnow()
+
+    # --- rekonsiliasi STOK: selisih qty per produk (produk ber-stok saja) ---
+    new_qty_by_prod = {}
+    for (itype, product_id, name, qty, price) in parsed:
+        if product_id:
+            new_qty_by_prod[product_id] = new_qty_by_prod.get(product_id, 0.0) + qty
+    for pid in set(old_qty_by_prod) | set(new_qty_by_prod):
+        delta = new_qty_by_prod.get(pid, 0.0) - old_qty_by_prod.get(pid, 0.0)
+        d_int = int(round(delta))
+        if d_int == 0:
+            continue
+        prod = db.session.get(Product, pid)
+        if prod and prod.track_stock:
+            prod.stock_qty = int(prod.stock_qty or 0) - d_int  # qty naik → stok turun
+            db.session.add(StockMovement(
+                product_id=prod.id, venue_id=order.venue_id, type="adjustment",
+                quantity=-d_int, balance_after=prod.stock_qty,
+                reference=order.order_number, created_by=cashier_id,
+            ))
     return None
 
 

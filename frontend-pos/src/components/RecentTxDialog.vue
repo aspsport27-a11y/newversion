@@ -45,6 +45,18 @@ function openEdit(o) {
   editLocked.value = (o.items || []).filter((i) => !EDITABLE.includes(i.item_type))
 }
 function addEditLine() { editItems.value.push({ item_type: 'product', product_id: null, name: '', quantity: 1, unit_price: null }) }
+// ketik/pilih nama dari daftar produk venue → isi harga, tipe & product_id
+function onPickEdit(it) {
+  const q = (it.name || '').trim().toLowerCase()
+  const p = pos.products.find((x) => (x.name || '').toLowerCase() === q)
+  if (p) {
+    it.product_id = p.id
+    it.item_type = p.is_ticket ? 'ticket' : 'product'
+    it.unit_price = p.effective_price ?? p.price
+  } else {
+    it.product_id = null   // manual (di luar katalog) → stok tak disesuaikan
+  }
+}
 function rmEditLine(i) { editItems.value.splice(i, 1) }
 const editTotal = computed(() =>
   editItems.value.reduce((t, i) => t + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0) +
@@ -120,13 +132,18 @@ async function cancel(o) {
             <div v-for="lk in editLocked" :key="'lk'+lk.id" class="flex items-center gap-2 text-xs text-slate-500">
               <span class="flex-1 truncate">🔒 {{ lk.name }}</span><span>{{ lk.quantity }}×</span><span>{{ rupiah(lk.line_total) }}</span>
             </div>
+            <datalist id="posEditProducts">
+              <option v-for="p in pos.products" :key="p.id" :value="p.name" />
+            </datalist>
             <div v-for="(it, i) in editItems" :key="i" class="flex items-center gap-1.5">
-              <input v-model="it.name" placeholder="Nama item" class="flex-1 min-w-0 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
+              <span v-if="it.product_id" class="text-[10px] bg-emerald-100 text-emerald-700 rounded px-1 py-0.5" title="Sesuai produk">✓</span>
+              <input v-model="it.name" @change="onPickEdit(it)" list="posEditProducts" placeholder="Ketik / pilih produk" class="flex-1 min-w-0 rounded-lg border border-slate-300 px-2 py-1.5 text-sm outline-none" />
               <input v-model.number="it.quantity" type="number" min="1" class="w-12 rounded-lg border border-slate-300 px-1 py-1.5 text-sm text-right outline-none" />
               <input v-model.number="it.unit_price" type="number" placeholder="Harga" class="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm text-right outline-none" />
               <button @click="rmEditLine(i)" class="text-red-400 px-1">✕</button>
             </div>
             <button @click="addEditLine" class="text-brand-600 text-xs">+ item</button>
+            <p class="text-[11px] text-slate-400">Pilih dari daftar produk (✓) agar harga & stok otomatis. Baris manual tak menyesuaikan stok.</p>
             <div class="flex justify-between text-sm border-t pt-1.5"><span class="text-slate-500">Total baru</span><span class="font-semibold text-brand-700">{{ rupiah(editTotal) }}</span></div>
             <p v-if="editErr" class="text-xs text-red-600">{{ editErr }}</p>
             <div class="flex gap-2">
