@@ -354,6 +354,12 @@ function logout() {
   pos.logout()
   router.push({ name: 'login' })
 }
+// Keluar dijaga: kalau shift masih terbuka → wajib tutup shift dulu.
+const showMustClose = ref(false)
+function onKeluar() {
+  if (pos.openShift) showMustClose.value = true
+  else logout()
+}
 </script>
 
 <template>
@@ -374,7 +380,7 @@ function logout() {
           class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">🕐 Absen</button>
         <button v-if="pos.openShift" @click="showClose = true"
           class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">Tutup Shift</button>
-        <button @click="logout" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">Keluar</button>
+        <button @click="onKeluar" class="text-xs bg-white/10 hover:bg-white/20 rounded-lg px-3 py-1.5">Keluar</button>
       </div>
     </header>
 
@@ -393,10 +399,8 @@ function logout() {
     <div v-else-if="!pos.openShift" class="flex-1 grid place-items-center p-4">
       <div class="bg-white rounded-2xl shadow p-6 w-full max-w-sm text-center">
         <div class="text-3xl mb-2">🔓</div>
-        <h2 class="text-lg font-bold text-slate-800 mb-1">Buka Shift</h2>
-        <p class="text-sm text-slate-500 mb-4">Masukkan saldo awal laci kas.</p>
-        <input v-model="openingCash" type="number" inputmode="numeric" placeholder="Saldo awal (Rp)"
-          class="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-lg text-right outline-none focus:border-brand-500 mb-3" />
+        <h2 class="text-lg font-bold text-slate-800 mb-1">Mulai Shift</h2>
+        <p class="text-sm text-slate-500 mb-4">Tekan tombol di bawah untuk mulai. Tanpa saldo awal — kas dihitung dari penjualan.</p>
         <button @click="submitOpenShift" :disabled="openingBusy"
           class="w-full py-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold disabled:opacity-50">
           {{ openingBusy ? 'Membuka…' : 'Mulai Shift' }}
@@ -641,6 +645,19 @@ function logout() {
       @created="onReservationCreated" @started="onReservationStarted" />
     <SettlementDialog v-if="showSettle" @close="showSettle = false" @paid="onSettlePaid" />
     <RecentTxDialog v-if="showRecent" @close="showRecent = false" @changed="onTxChanged" />
+
+    <!-- Keluar tapi shift belum ditutup -->
+    <div v-if="showMustClose" class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" @click.self="showMustClose = false">
+      <div class="bg-white w-full max-w-sm rounded-2xl p-5 text-center">
+        <div class="text-3xl mb-2">🔒</div>
+        <h3 class="text-lg font-bold text-slate-800 mb-1">Shift belum ditutup</h3>
+        <p class="text-sm text-slate-500 mb-4">Anda belum menutup shift. Tutup shift terlebih dahulu sebelum keluar.</p>
+        <div class="flex gap-2">
+          <button @click="showMustClose = false" class="flex-1 py-2.5 rounded-lg bg-slate-100 text-slate-600 font-medium">Batal</button>
+          <button @click="showMustClose = false; showClose = true" class="flex-1 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold">Tutup Shift</button>
+        </div>
+      </div>
+    </div>
     <OpenBillDialog v-if="showOpenBills" @close="showOpenBills = false"
       @add-item="onBillAddItem" @paid="onBillPaid" @print="draftBill = $event" />
     <ReceiptDialog v-if="draftBill" :order="draftBill" :terminal="pos.terminal" draft @close="draftBill = null" />
