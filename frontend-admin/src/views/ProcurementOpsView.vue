@@ -17,10 +17,13 @@ const accounts = ref([])
 const sourceAccount = ref('')
 const pos = ref([])
 const statusFilter = ref('')
+const poFrom = ref('')
+const poTo = ref('')
 const loading = ref(false)
 const toastStore = useToastStore()
 function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
+function fmtDate(iso) { return iso ? new Date(iso + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
 
 // ringkasan nilai pembelian ops per status (kartu)
 const poSummary = computed(() => {
@@ -61,6 +64,8 @@ async function loadPo() {
   const params = { kind: 'ops' }
   if (!isManager.value && venueId.value) params.venue_id = venueId.value
   if (statusFilter.value) params.status = statusFilter.value
+  if (poFrom.value) params.from = poFrom.value
+  if (poTo.value) params.to = poTo.value
   try { const { data } = await client.get('/procurement/pos', { params }); pos.value = data.pos }
   finally { loading.value = false }
 }
@@ -74,7 +79,7 @@ const saving = ref(false)
 const cTotal = computed(() => cForm.value.items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0))
 function newItem() { return { item_name: '', quantity: 1, unit: 'pcs', unit_price: null, note: '' } }
 function openCreate() {
-  cForm.value = { venue_id: isManager.value ? auth.user?.venue_id : (venueId.value || venues.value[0]?.id), supplier_id: '', notes: '', items: [newItem()] }
+  cForm.value = { venue_id: isManager.value ? auth.user?.venue_id : (venueId.value || venues.value[0]?.id), supplier_id: '', order_date: new Date().toISOString().slice(0, 10), notes: '', items: [newItem()] }
   cFiles.value = []; cErr.value = ''; showCreate.value = true
 }
 function addRow() { cForm.value.items.push(newItem()) }
@@ -88,7 +93,7 @@ async function submitCreate() {
   saving.value = true
   try {
     const payload = {
-      kind: 'ops', supplier_id: cForm.value.supplier_id || null, notes: cForm.value.notes,
+      kind: 'ops', supplier_id: cForm.value.supplier_id || null, order_date: cForm.value.order_date || null, notes: cForm.value.notes,
       items: cForm.value.items.map((i) => ({ item_name: i.item_name, quantity: i.quantity, unit: i.unit, unit_price: i.unit_price, note: i.note })),
     }
     if (!isManager.value) payload.venue_id = cForm.value.venue_id
@@ -162,6 +167,14 @@ onMounted(async () => { await loadBase(); await loadPo() })
           <option value="submitted">Menunggu</option><option value="approved">Disetujui</option>
           <option value="received">Diterima</option><option value="paid">Dibayar</option><option value="rejected">Ditolak</option>
         </select></div>
+      <div><label class="block text-xs text-slate-500 mb-1">Tanggal PO</label>
+        <div class="flex items-center gap-1.5">
+          <input v-model="poFrom" @change="loadPo" type="date" class="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-brand-500" />
+          <span class="text-slate-400 text-xs">s/d</span>
+          <input v-model="poTo" @change="loadPo" type="date" class="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-brand-500" />
+          <button v-if="poFrom || poTo" @click="poFrom=''; poTo=''; loadPo()" class="px-2 rounded-lg border border-slate-300 text-slate-500 text-sm hover:bg-slate-50">✕</button>
+        </div>
+      </div>
     </div>
 
     <!-- Ringkasan nilai pembelian ops per status -->
@@ -193,6 +206,7 @@ onMounted(async () => { await loadBase(); await loadPo() })
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
             <th class="px-4 py-3 font-medium">Kode</th>
+            <th class="px-4 py-3 font-medium">Tanggal</th>
             <th class="px-4 py-3 font-medium">Venue</th>
             <th class="px-4 py-3 font-medium">Supplier</th>
             <th class="px-4 py-3 font-medium">Keterangan</th>
@@ -200,10 +214,11 @@ onMounted(async () => { await loadBase(); await loadPo() })
             <th class="px-4 py-3 font-medium text-center">Status</th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!pos.length"><td colspan="6" class="px-4 py-8 text-center text-slate-400">Belum ada pembelian ops.</td></tr>
+            <tr v-if="loading"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!pos.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Belum ada pembelian ops.</td></tr>
             <tr v-for="p in pos" :key="p.id" @click="openDetail(p)" class="border-t hover:bg-slate-50 cursor-pointer">
               <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ p.code }}</td>
+              <td class="px-4 py-3 text-slate-600 whitespace-nowrap">{{ fmtDate(p.order_date) }}</td>
               <td class="px-4 py-3 text-slate-600">{{ venueName(p.venue_id) }}</td>
               <td class="px-4 py-3 text-slate-600">{{ p.supplier_name || '—' }}</td>
               <td class="px-4 py-3 text-slate-500 text-xs truncate max-w-[220px]">{{ p.notes || '—' }}</td>
@@ -226,12 +241,18 @@ onMounted(async () => { await loadBase(); await loadPo() })
               <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
             </select>
           </div>
-          <div>
-            <label class="block text-xs text-slate-500 mb-1">Supplier / Toko (opsional)</label>
-            <select v-model="cForm.supplier_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
-              <option value="">— tanpa supplier —</option>
-              <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
-            </select>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">Supplier / Toko (opsional)</label>
+              <select v-model="cForm.supplier_id" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
+                <option value="">— tanpa supplier —</option>
+                <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-slate-500 mb-1">Tanggal PO</label>
+              <input v-model="cForm.order_date" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
+            </div>
           </div>
           <div>
             <div class="flex items-center justify-between mb-1"><label class="text-xs text-slate-500">Item pembelian</label>
@@ -260,7 +281,7 @@ onMounted(async () => { await loadBase(); await loadPo() })
     <div v-if="detail" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="detail = null">
       <div class="bg-white w-full max-w-md rounded-2xl p-5 max-h-[92vh] overflow-auto">
         <div class="flex justify-between items-center mb-1"><h3 class="text-lg font-bold text-slate-800 font-mono">{{ detail.code }}</h3><button @click="detail = null" class="text-slate-400 text-xl">✕</button></div>
-        <p class="text-sm text-slate-500 mb-3">{{ venueName(detail.venue_id) }} · {{ detail.supplier_name || 'tanpa supplier' }}</p>
+        <p class="text-sm text-slate-500 mb-3">{{ venueName(detail.venue_id) }} · {{ detail.supplier_name || 'tanpa supplier' }}<span v-if="detail.order_date"> · {{ fmtDate(detail.order_date) }}</span></p>
         <div class="border rounded-lg overflow-hidden mb-3">
           <table class="w-full text-sm">
             <thead class="bg-slate-50 text-slate-500 text-left text-xs"><tr><th class="px-3 py-2">Item</th><th class="px-3 py-2 text-right">Qty</th><th class="px-3 py-2 text-right">Subtotal</th></tr></thead>

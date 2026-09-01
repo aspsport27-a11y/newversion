@@ -26,6 +26,7 @@ const searchSup = ref('')
 
 function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
+function fmtDate(iso) { return iso ? new Date(iso + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
 
 function downloadCsv(filename, rows) {
   const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n')
@@ -447,7 +448,7 @@ watch(tab, reloadTab)
               <tr v-else-if="!filteredPos.length"><td colspan="7" class="px-4 py-8 text-center text-slate-400">Tidak ada PO yang cocok dengan pencarian.</td></tr>
               <tr v-for="p in filteredPos" :key="p.id" @click="openDetail(p)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ p.code }}</td>
-                <td class="px-4 py-3 text-slate-600 whitespace-nowrap">{{ p.order_date || '—' }}</td>
+                <td class="px-4 py-3 text-slate-600 whitespace-nowrap">{{ fmtDate(p.order_date) }}</td>
                 <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===p.venue_id)?.code || '—' }}</td>
                 <td class="px-4 py-3 text-slate-600">
                   <div>{{ p.supplier_name || '—' }}</div>
@@ -642,7 +643,7 @@ watch(tab, reloadTab)
         <div class="flex justify-between items-start mb-3">
           <div>
             <h3 class="text-lg font-bold text-slate-800">{{ detail.code }}</h3>
-            <p class="text-sm text-slate-500">{{ detail.supplier_name || 'Tanpa supplier' }}<span v-if="detail.order_date"> · {{ detail.order_date }}</span></p>
+            <p class="text-sm text-slate-500">{{ detail.supplier_name || 'Tanpa supplier' }}<span v-if="detail.order_date"> · {{ fmtDate(detail.order_date) }}</span></p>
             <p v-if="detail.supplier_bank" class="text-xs text-slate-500 mt-0.5">💳 Rek: <span class="font-mono text-slate-700">{{ detail.supplier_bank }}</span></p>
           </div>
           <div class="flex items-center gap-2">
