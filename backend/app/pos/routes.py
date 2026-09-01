@@ -463,6 +463,9 @@ def report_category_daily():
             g["amount"] += amt
             gross_total += amt
             nm = item.name_snapshot or "—"
+            # booking: tampilkan NAMA CUSTOMER sebelum nama lapangan
+            if item.item_type == "booking" and (order.customer_name or "").strip():
+                nm = f"{order.customer_name.strip()} · {nm}"
             det = g["items"].setdefault(nm, {"name": nm, "qty": 0.0, "amount": 0.0})
             det["amount"] += amt
             q = float(item.quantity or 0)
