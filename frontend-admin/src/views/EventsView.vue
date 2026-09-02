@@ -58,13 +58,19 @@ function openCreate() {
   }
   cQuote.value = { suggested_price: 0, facility_count: 0, conflict_count: 0 }
   cErr.value = ''; showCreate.value = true
+  refreshQuote()   // muat jumlah lapangan & harga usulan langsung (tak perlu nama dulu)
 }
 function cValid() {
   const f = cForm.value
   return f.venue_id && f.name?.trim() && f.date_to >= f.date_from && f.end_time > f.start_time
 }
+// jumlah lapangan & harga usulan hanya butuh venue+tanggal+jam — jangan syaratkan nama
+function quoteValid() {
+  const f = cForm.value
+  return f.venue_id && f.date_from && f.date_to && f.date_to >= f.date_from && f.start_time && f.end_time && f.end_time > f.start_time
+}
 async function refreshQuote() {
-  if (!cValid()) return
+  if (!quoteValid()) return
   try {
     const { data } = await client.get('/admin/events/quote', { params: {
       venue_id: cForm.value.venue_id, date_from: cForm.value.date_from, date_to: cForm.value.date_to,

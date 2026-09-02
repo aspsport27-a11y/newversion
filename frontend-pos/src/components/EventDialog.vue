@@ -27,9 +27,15 @@ function formValid() {
   return f.name.trim() && f.date_from && f.date_to && f.date_to >= f.date_from &&
     f.start_time && f.end_time && f.end_time > f.start_time
 }
+// jumlah lapangan & harga usulan hanya butuh tanggal+jam — jangan syaratkan nama
+function quoteValid() {
+  const f = form.value
+  return f.date_from && f.date_to && f.date_to >= f.date_from &&
+    f.start_time && f.end_time && f.end_time > f.start_time
+}
 
 async function refreshQuote() {
-  if (!formValid()) return
+  if (!quoteValid()) return
   quoting.value = true
   try {
     const q = await pos.eventQuote({
