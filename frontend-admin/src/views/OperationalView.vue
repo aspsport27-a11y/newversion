@@ -25,6 +25,8 @@ const toastStore = useToastStore()
 
 function flash(m) { toastStore.show(m) }
 function rupiah(n) { return 'Rp ' + (Number(n) || 0).toLocaleString('id-ID') }
+function fmtDate(iso) { return iso ? new Date(iso + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) : '—' }
+function reqCats(r) { return [...new Set((r.items || []).map((i) => i.category_name).filter(Boolean))] }
 function ym() { const [y, m] = period.value.split('-'); return { year: +y, month: +m } }
 const statusMap = { submitted: ['Menunggu', 'bg-amber-100 text-amber-700'], approved: ['Disetujui', 'bg-blue-100 text-blue-700'], rejected: ['Ditolak', 'bg-red-100 text-red-600'], disbursed: ['Dicairkan', 'bg-emerald-100 text-emerald-700'] }
 
@@ -149,7 +151,7 @@ function rowBudget(it) {
 const cHasOver = computed(() => cForm.value.items.some((it) => rowBudget(it)?.over))
 async function openCreate() {
   const vid = isManager.value ? auth.user?.venue_id : (venueId.value || venues.value[0]?.id)
-  cForm.value = { venue_id: vid, description: '', items: [{ category_id: null, amount: null, note: '' }] }
+  cForm.value = { venue_id: vid, req_date: new Date().toISOString().slice(0, 10), description: '', items: [{ category_id: null, amount: null, note: '' }] }
   cFiles.value = []; cErr.value = ''
   await loadCategoriesForVenue(vid)
   cForm.value.items[0].category_id = categories.value[0]?.id
@@ -166,7 +168,7 @@ async function submitCreate() {
   }
   saving.value = true; cErr.value = ''
   try {
-    const payload = { ...ym(), description: cForm.value.description, items: cForm.value.items.filter((i) => i.category_id && i.amount > 0) }
+    const payload = { ...ym(), req_date: cForm.value.req_date || null, description: cForm.value.description, items: cForm.value.items.filter((i) => i.category_id && i.amount > 0) }
     if (!isManager.value) payload.venue_id = cForm.value.venue_id
     const { data } = await client.post('/ops/requests', payload)
     for (const f of cFiles.value) {
@@ -615,18 +617,24 @@ watch(statusFilter, loadRequests)
             <thead class="bg-slate-50 text-slate-500 text-left"><tr>
               <th class="px-4 py-3 font-medium">Kode</th>
               <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
-              <th class="px-4 py-3 font-medium">Periode</th>
+              <th class="px-4 py-3 font-medium">Tanggal</th>
+              <th class="px-4 py-3 font-medium">Kategori</th>
               <th class="px-4 py-3 font-medium">Deskripsi</th><th class="px-4 py-3 font-medium text-right">Total</th>
               <th class="px-4 py-3 font-medium text-right">Sisa (LPJ)</th>
               <th class="px-4 py-3 font-medium text-center">Status</th><th class="px-4 py-3"></th>
             </tr></thead>
             <tbody>
-              <tr v-if="loadingReq"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-              <tr v-else-if="!requests.length"><td colspan="8" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan.</td></tr>
+              <tr v-if="loadingReq"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+              <tr v-else-if="!requests.length"><td colspan="9" class="px-4 py-8 text-center text-slate-400">Belum ada pengajuan.</td></tr>
               <tr v-for="r in requests" :key="r.id" @click="openDetail(r)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 font-mono text-xs text-slate-500 whitespace-nowrap">{{ r.code }}<span v-if="r.over_budget" title="Melebihi budget" class="ml-1 align-middle inline-block rounded bg-red-100 text-red-700 text-[10px] font-sans font-semibold px-1 py-0.5">⚠ Over</span></td>
                 <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venues.find(v=>v.id===r.venue_id)?.code || '—' }}</td>
-                <td class="px-4 py-3 text-slate-600">{{ r.period_month }}/{{ r.period_year }}</td>
+                <td class="px-4 py-3 text-slate-600 whitespace-nowrap">{{ r.req_date ? fmtDate(r.req_date) : (r.period_month + '/' + r.period_year) }}</td>
+                <td class="px-4 py-3">
+                  <span v-for="c in reqCats(r).slice(0, 2)" :key="c" class="text-[10px] bg-slate-100 text-slate-600 rounded px-1.5 py-0.5 mr-1 whitespace-nowrap">{{ c }}</span>
+                  <span v-if="reqCats(r).length > 2" class="text-[10px] text-slate-400">+{{ reqCats(r).length - 2 }}</span>
+                  <span v-if="!reqCats(r).length" class="text-slate-300 text-xs">—</span>
+                </td>
                 <td class="px-4 py-3 text-slate-600 max-w-xs truncate">{{ r.description || '—' }}</td>
                 <td class="px-4 py-3 text-right font-medium">{{ rupiah(r.total_amount) }}</td>
                 <td class="px-4 py-3 text-right text-sm" :class="r.status !== 'disbursed' ? 'text-slate-300' : ((r.total_amount - (r.realized_total || 0)) < 0 ? 'text-red-600' : 'text-emerald-600')">
@@ -690,6 +698,10 @@ watch(statusFilter, loadRequests)
           <select v-model="cForm.venue_id" @change="onModalVenueChange" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">
             <option v-for="v in venues" :key="v.id" :value="v.id">{{ v.code }} — {{ v.name }}</option>
           </select>
+        </div>
+        <div class="mb-3">
+          <label class="block text-xs text-slate-500 mb-1">Tanggal pengajuan</label>
+          <input v-model="cForm.req_date" type="date" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500" />
         </div>
         <label class="block text-xs font-medium mb-1" :class="cHasOver ? 'text-red-600' : 'text-slate-500'">Deskripsi / keterangan<span v-if="cHasOver"> — wajib (catatan melebihi budget)</span></label>
         <textarea v-model="cForm.description" placeholder="Deskripsi / keterangan" rows="2" class="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-brand-500 mb-3" :class="cHasOver && !cForm.description?.trim() ? 'border-red-400 bg-red-50' : 'border-slate-300'"></textarea>

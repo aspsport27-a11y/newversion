@@ -43,6 +43,7 @@ class OpRequest(db.Model):
     venue_id = db.Column(db.Integer, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
     period_month = db.Column(db.Integer, nullable=False)
     period_year = db.Column(db.Integer, nullable=False)
+    req_date = db.Column(db.Date)  # tanggal pengajuan (bisa dipilih), migration 068
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     total_amount = db.Column(db.Numeric(15, 2), nullable=False, default=0)
     description = db.Column(db.Text)
@@ -76,6 +77,7 @@ class OpRequest(db.Model):
             "venue_id": self.venue_id,
             "period_month": self.period_month,
             "period_year": self.period_year,
+            "req_date": self.req_date.isoformat() if self.req_date else None,
             "total_amount": f(self.total_amount),
             "description": self.description,
             "status": self.status,

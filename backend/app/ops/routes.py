@@ -359,11 +359,17 @@ def request_create():
     today = date.today()
     month = int(d.get("period_month") or today.month)
     year = int(d.get("period_year") or today.year)
+    req_date = today
+    if d.get("req_date"):
+        try:
+            req_date = date.fromisoformat(d["req_date"])
+        except (ValueError, TypeError):
+            return _err("Tanggal pengajuan tidak valid")
 
     r = OpRequest(
         code=_gen_code(venue, year, month), venue_id=vid, period_month=month,
-        period_year=year, created_by=_user().id, description=d.get("description"),
-        status="submitted",
+        period_year=year, req_date=req_date, created_by=_user().id,
+        description=d.get("description"), status="submitted",
     )
     total = 0.0
     for it in items:
