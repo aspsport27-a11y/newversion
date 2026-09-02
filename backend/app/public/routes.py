@@ -103,7 +103,8 @@ def public_board():
 
     from ..pos.models import Event
     events = [
-        {"name": e.name, "start": e.start_time.strftime("%H:%M"), "end": e.end_time.strftime("%H:%M")}
+        {"name": e.name, "start": e.start_time.strftime("%H:%M"), "end": e.end_time.strftime("%H:%M"),
+         "court_ids": sorted(e.facility_id_set())}  # [] = semua lapangan
         for e in Event.query.filter(
             Event.venue_id == venue.id, Event.status == "active",
             Event.date_from <= today, Event.date_to >= today,
@@ -229,6 +230,7 @@ def public_schedule():
             Event.venue_id == fac.venue_id, Event.status == "active",
             Event.date_from <= d, Event.date_to >= d,
         ).all()
+        if e.covers_facility(fac.id)  # hanya event yg mengunci lapangan ini
     ]
 
     # --- coaching: apakah ADA coach yg bisa dipakai di slot ini? ---

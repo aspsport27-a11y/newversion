@@ -3086,11 +3086,22 @@ def _parse_ev(d):
     return df, dto, st, et
 
 
+def _parse_fac_ids(raw):
+    """facility_ids sbg CSV (query) atau list (JSON). Kosong = None (semua lapangan)."""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        ids = [int(x) for x in raw.split(",") if x.strip().isdigit()]
+    else:
+        ids = [int(x) for x in raw if str(x).isdigit()]
+    return ids or None
+
+
 @admin_bp.get("/events/quote")
 @jwt_required()
 @EVENT_ROLES
 def admin_event_quote():
-    from ..pos.services import event_conflicts, event_price_quote
+    from ..pos.services import event_conflicts, event_facilities_list, event_price_quote
 
     vid = _event_venue_id(request.args.get("venue_id", type=int))
     if not vid:
@@ -3101,10 +3112,12 @@ def admin_event_quote():
         return _err("Tanggal/jam tidak lengkap/valid")
     if dto < df:
         return _err("Tanggal selesai sebelum tanggal mulai")
-    price, n = event_price_quote(vid, df, dto, st, et)
-    conflicts = event_conflicts(vid, df, dto, st, et)
+    fac_ids = _parse_fac_ids(request.args.get("facility_ids"))
+    price, n = event_price_quote(vid, df, dto, st, et, facility_ids=fac_ids)
+    conflicts = event_conflicts(vid, df, dto, st, et, facility_ids=fac_ids)
     return jsonify(suggested_price=price, facility_count=n,
-                   conflict_count=len(conflicts), conflicts=conflicts), 200
+                   conflict_count=len(conflicts), conflicts=conflicts,
+                   facilities=event_facilities_list(vid)), 200
 
 
 @admin_bp.get("/events")
@@ -3130,7 +3143,7 @@ def admin_events_list():
         d["amount_paid"] = float(order.amount_paid) if order else 0
         d["conflict_count"] = len(event_conflicts(
             e.venue_id, e.date_from, e.date_to, e.start_time, e.end_time,
-            exclude_order_id=e.order_id)) if e.status == "active" else 0
+            exclude_order_id=e.order_id, facility_ids=list(e.facility_id_set()) or None)) if e.status == "active" else 0
         out.append(d)
     return jsonify(events=out), 200
 
@@ -3148,7 +3161,7 @@ def admin_event_detail(event_id):
     if forced is not None and ev.venue_id != forced:
         return _err("Bukan event venue Anda", "forbidden", 403)
     conflicts = event_conflicts(ev.venue_id, ev.date_from, ev.date_to, ev.start_time, ev.end_time,
-                                exclude_order_id=ev.order_id)
+                                exclude_order_id=ev.order_id, facility_ids=list(ev.facility_id_set()) or None)
     contacted = {c.order_id for c in EventContact.query.filter_by(event_id=ev.id).all()}
     for c in conflicts:
         c["contacted"] = c["order_id"] in contacted
@@ -3185,6 +3198,13 @@ def admin_event_create():
     price = _D(d.get("price"))
     if price < 0:
         return _err("Harga tidak valid")
+    fac_ids = _parse_fac_ids(d.get("facility_ids"))  # kosong = borong semua
+    if fac_ids:
+        from ..pos.models import Facility as _Fac
+        valid = {f.id for f in _Fac.query.filter_by(venue_id=vid, is_active=True).all()}
+        fac_ids = [i for i in fac_ids if i in valid]
+        if not fac_ids:
+            return _err("Lapangan terpilih tidak valid")
 
     uid = _current_user().id
     label = f"Sewa Event: {name} ({df.isoformat()}"
@@ -3208,8 +3228,12 @@ def admin_event_create():
         order_id=order.id, status="active", notes=d.get("notes"), created_by=uid,
     )
     db.session.add(ev)
+    db.session.flush()
+    from ..pos.models import EventFacility as _EF
+    for fid in (fac_ids or []):
+        db.session.add(_EF(event_id=ev.id, facility_id=fid))
     db.session.commit()
-    conflicts = event_conflicts(vid, df, dto, st, et, exclude_order_id=order.id)
+    conflicts = event_conflicts(vid, df, dto, st, et, exclude_order_id=order.id, facility_ids=fac_ids)
     return jsonify(event=ev.to_dict(), order=order.to_dict(), conflicts=conflicts), 201
 
 
@@ -3255,6 +3279,15 @@ def admin_event_update(event_id):
                 if it.item_type == "event":
                     it.unit_price = ev.price
                     it.line_total = ev.price
+    if "facility_ids" in d:  # ganti daftar lapangan (kosong = borong semua)
+        from ..pos.models import EventFacility as _EF, Facility as _Fac
+        fac_ids = _parse_fac_ids(d.get("facility_ids"))
+        if fac_ids:
+            valid = {f.id for f in _Fac.query.filter_by(venue_id=ev.venue_id, is_active=True).all()}
+            fac_ids = [i for i in fac_ids if i in valid]
+        _EF.query.filter_by(event_id=ev.id).delete()
+        for fid in (fac_ids or []):
+            db.session.add(_EF(event_id=ev.id, facility_id=fid))
     db.session.commit()
     return jsonify(event=ev.to_dict()), 200
 

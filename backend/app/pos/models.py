@@ -794,8 +794,19 @@ class Event(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # lapangan yg dikunci event ini (migration 071). KOSONG = semua lapangan venue
+    # (event lama & event "borong semua"). Terisi = hanya lapangan itu.
+    facilities = db.relationship("EventFacility", backref="event", lazy="selectin", cascade="all, delete-orphan")
+
     def covers_date(self, d):
         return self.status == "active" and self.date_from <= d <= self.date_to
+
+    def facility_id_set(self):
+        return {ef.facility_id for ef in self.facilities}
+
+    def covers_facility(self, facility_id) -> bool:
+        ids = self.facility_id_set()
+        return (not ids) or (facility_id in ids)  # kosong = semua lapangan
 
     def to_dict(self):
         f = lambda v: float(v) if v is not None else None
@@ -814,8 +825,18 @@ class Event(db.Model):
             "order_id": self.order_id,
             "status": self.status,
             "notes": self.notes,
+            "facility_ids": sorted(self.facility_id_set()),  # [] = semua lapangan
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class EventFacility(db.Model):
+    """Lapangan yang dikunci sebuah event (migration 071). Tak ada baris utk 1
+    event = event itu mengunci SEMUA lapangan venue (borong)."""
+    __tablename__ = "event_facilities"
+
+    event_id = db.Column(db.Integer, db.ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    facility_id = db.Column(db.Integer, db.ForeignKey("facilities.id", ondelete="CASCADE"), primary_key=True)
 
 
 class EventContact(db.Model):

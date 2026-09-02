@@ -97,9 +97,19 @@ def active_event_ranges(venue_id, booking_date):
     ]
 
 
-def event_price_quote(venue_id, date_from, date_to, start_t, end_t):
-    """Harga usulan event = tarif normal semua lapangan aktif × jam × jumlah hari."""
+def event_facilities_list(venue_id):
+    """Daftar lapangan aktif venue utk dipilih di form event: [{id,name}]."""
+    facs = Facility.query.filter_by(venue_id=venue_id, is_active=True).order_by(Facility.name).all()
+    return [{"id": f.id, "name": f.name} for f in facs]
+
+
+def event_price_quote(venue_id, date_from, date_to, start_t, end_t, facility_ids=None):
+    """Harga usulan event = tarif normal lapangan TERPILIH × jam × jumlah hari.
+    facility_ids kosong/None = semua lapangan aktif (borong)."""
     facs = Facility.query.filter_by(venue_id=venue_id, is_active=True).all()
+    if facility_ids:
+        sel = set(facility_ids)
+        facs = [f for f in facs if f.id in sel]
     sh = start_t.hour
     eh = end_t.hour if end_t.hour != 0 else 24
     total = 0.0
@@ -112,9 +122,11 @@ def event_price_quote(venue_id, date_from, date_to, start_t, end_t):
     return round(total, 2), len(facs)
 
 
-def event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_order_id=None):
-    """Booking (member/reguler) yang bentrok dgn jam event pada rentang tanggal."""
-    fac_ids = [f.id for f in Facility.query.filter_by(venue_id=venue_id).all()]
+def event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_order_id=None, facility_ids=None):
+    """Booking (member/reguler) yang bentrok dgn jam event pada rentang tanggal.
+    facility_ids kosong/None = semua lapangan (borong); terisi = hanya lapangan itu."""
+    all_ids = [f.id for f in Facility.query.filter_by(venue_id=venue_id).all()]
+    fac_ids = [i for i in all_ids if i in set(facility_ids)] if facility_ids else all_ids
     if not fac_ids:
         return []
     e_min, s_min = _t_mins(end_t, as_end=True), _t_mins(start_t)
@@ -153,8 +165,10 @@ def event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_order_
     return out
 
 
-def event_blocks_slot(venue_id, booking_date, start, end):
-    """True bila slot [start,end) bentrok dgn event aktif di venue+tanggal itu."""
+def event_blocks_slot(venue_id, facility_id, booking_date, start, end):
+    """True bila slot [start,end) di LAPANGAN ini bentrok dgn event aktif di
+    venue+tanggal itu. Event bisa mengunci sebagian lapangan saja (migration 071);
+    event tanpa daftar lapangan = mengunci semua (borong)."""
     s_min = _t_mins(start)
     e_min = _t_mins(end, as_end=True)
     evs = Event.query.filter(
@@ -164,7 +178,7 @@ def event_blocks_slot(venue_id, booking_date, start, end):
         Event.date_to >= booking_date,
     ).all()
     for e in evs:
-        if _t_mins(e.start_time) < e_min and _t_mins(e.end_time, as_end=True) > s_min:
+        if _t_mins(e.start_time) < e_min and _t_mins(e.end_time, as_end=True) > s_min and e.covers_facility(facility_id):
             return True
     return False
 
@@ -179,9 +193,9 @@ def is_slot_available(facility_id, booking_date, start, end, exclude_id=None) ->
     s_min = _mins(start)
     e_min = _mins(end, as_end=True)
 
-    # terkunci event? (event mengunci semua lapangan venue)
+    # terkunci event? (event bisa mengunci sebagian/semua lapangan venue)
     fac = db.session.get(Facility, facility_id)
-    if fac and event_blocks_slot(fac.venue_id, booking_date, start, end):
+    if fac and event_blocks_slot(fac.venue_id, facility_id, booking_date, start, end):
         return False
 
     q = FacilityBooking.query.filter(

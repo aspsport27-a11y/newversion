@@ -22,6 +22,24 @@ const quote = ref({ suggested_price: 0, facility_count: 0, conflict_count: 0, co
 const quoting = ref(false)
 let quoteTimer = null
 
+// --- pilihan lapangan ---
+const facilities = ref([])          // [{id,name}] lapangan venue
+const selectedFac = ref(null)       // Set id terpilih; null = belum di-load
+const allSelected = computed(() => facilities.value.length > 0 && selectedFac.value && selectedFac.value.size === facilities.value.length)
+function facSelected(id) { return selectedFac.value ? selectedFac.value.has(id) : false }
+function toggleFac(id) {
+  const s = new Set(selectedFac.value || [])
+  s.has(id) ? s.delete(id) : s.add(id)
+  selectedFac.value = s
+  refreshQuote()
+}
+function selectAllFac() { selectedFac.value = new Set(facilities.value.map((f) => f.id)); refreshQuote() }
+// param facility_ids utk quote (CSV) & create (array) — null bila SEMUA terpilih (=borong)
+function facIdsParam() {
+  if (!selectedFac.value || allSelected.value) return null
+  return [...selectedFac.value]
+}
+
 function formValid() {
   const f = form.value
   return f.name.trim() && f.date_from && f.date_to && f.date_to >= f.date_from &&
@@ -38,10 +56,17 @@ async function refreshQuote() {
   if (!quoteValid()) return
   quoting.value = true
   try {
+    const ids = facIdsParam()
     const q = await pos.eventQuote({
       date_from: form.value.date_from, date_to: form.value.date_to,
       start_time: form.value.start_time, end_time: form.value.end_time,
+      ...(ids ? { facility_ids: ids.join(',') } : {}),
     })
+    // isi daftar lapangan sekali; default SEMUA terpilih (borong)
+    if (q.facilities && !facilities.value.length) {
+      facilities.value = q.facilities
+      if (!selectedFac.value) selectedFac.value = new Set(q.facilities.map((f) => f.id))
+    }
     quote.value = q
     // isi harga usulan jika kasir belum mengubahnya manual
     if (form.value.price === null || form.value.price === '') form.value.price = q.suggested_price
@@ -56,6 +81,7 @@ function useSuggested() { form.value.price = quote.value.suggested_price }
 function goPay() {
   err.value = ''
   if (!formValid()) { err.value = 'Lengkapi nama, tanggal, dan jam (selesai > mulai).'; return }
+  if (selectedFac.value && selectedFac.value.size === 0) { err.value = 'Pilih minimal 1 lapangan.'; return }
   if (Number(form.value.price) < 0) { err.value = 'Harga tidak valid.'; return }
   phase.value = 'pay'
 }
@@ -64,7 +90,7 @@ const result = ref(null)          // { event, order, conflicts }
 async function onPay(payload) {
   err.value = ''
   try {
-    const data = await pos.createEvent({ ...form.value, price: Number(form.value.price) || 0 }, payload)
+    const data = await pos.createEvent({ ...form.value, price: Number(form.value.price) || 0, facility_ids: facIdsParam() }, payload)
     result.value = data
     phase.value = 'result'
     emit('done')                  // beri tahu induk (mis. refresh jadwal)
@@ -101,7 +127,7 @@ async function onRescheduled() {
       <!-- ===== FORM ===== -->
       <div v-if="phase === 'form'" class="space-y-3">
         <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
-          Event mengunci <b>semua lapangan</b> di jam ini. Booking member yang bentrok bisa dipindah setelah event dibuat.
+          Event mengunci <b>{{ allSelected ? 'semua lapangan' : 'lapangan terpilih' }}</b> di jam ini. Booking member yang bentrok bisa dipindah setelah event dibuat.
         </div>
         <div>
           <label class="text-xs text-slate-500">Nama event</label>
@@ -124,6 +150,22 @@ async function onRescheduled() {
             <input v-model="form.start_time" type="time" class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none" /></div>
           <div><label class="text-xs text-slate-500">Jam selesai</label>
             <input v-model="form.end_time" type="time" class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none" /></div>
+        </div>
+
+        <!-- Pilih lapangan yang dipakai event -->
+        <div v-if="facilities.length" class="border border-slate-200 rounded-lg p-3">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-xs font-medium text-slate-600">Lapangan dipakai event <span class="text-slate-400">({{ selectedFac ? selectedFac.size : 0 }}/{{ facilities.length }})</span></label>
+            <button type="button" @click="selectAllFac" :class="allSelected ? 'text-slate-300' : 'text-brand-600'" class="text-xs" :disabled="allSelected">Pilih semua</button>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5 max-h-40 overflow-auto">
+            <label v-for="f in facilities" :key="f.id" class="flex items-center gap-2 text-sm rounded-lg px-2 py-1.5 cursor-pointer"
+              :class="facSelected(f.id) ? 'bg-brand-50 text-brand-800' : 'bg-slate-50 text-slate-500'">
+              <input type="checkbox" :checked="facSelected(f.id)" @change="toggleFac(f.id)" class="accent-brand-600" />
+              <span class="truncate">{{ f.name }}</span>
+            </label>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1.5">Hanya lapangan tercentang yang dikunci event; sisanya tetap bisa dibooking.</p>
         </div>
 
         <!-- Booking yang akan tertimpa event (dipindah jadwal setelah event dibuat) -->

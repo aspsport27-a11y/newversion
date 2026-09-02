@@ -50,6 +50,14 @@ const cQuote = ref({ suggested_price: 0, facility_count: 0, conflict_count: 0, c
 const cSaving = ref(false)
 const cErr = ref('')
 let quoteTimer = null
+// pilihan lapangan
+const cFac = ref([])            // [{id,name}]
+const cSelFac = ref(null)       // Set id terpilih; null = belum load
+const cAllSel = computed(() => cFac.value.length > 0 && cSelFac.value && cSelFac.value.size === cFac.value.length)
+function cFacSelected(id) { return cSelFac.value ? cSelFac.value.has(id) : false }
+function cToggleFac(id) { const s = new Set(cSelFac.value || []); s.has(id) ? s.delete(id) : s.add(id); cSelFac.value = s; refreshQuote() }
+function cSelectAllFac() { cSelFac.value = new Set(cFac.value.map((f) => f.id)); refreshQuote() }
+function cFacIds() { return (!cSelFac.value || cAllSel.value) ? null : [...cSelFac.value] }
 function openCreate() {
   cForm.value = {
     venue_id: isManager.value ? auth.user?.venue_id : (venueId.value || venues.value[0]?.id),
@@ -57,9 +65,12 @@ function openCreate() {
     date_from: today, date_to: today, start_time: '08:00', end_time: '17:00', price: null,
   }
   cQuote.value = { suggested_price: 0, facility_count: 0, conflict_count: 0, conflicts: [] }
+  cFac.value = []; cSelFac.value = null
   cErr.value = ''; showCreate.value = true
   refreshQuote()   // muat jumlah lapangan & harga usulan langsung (tak perlu nama dulu)
 }
+// ganti venue → reset daftar lapangan
+watch(() => cForm.value.venue_id, () => { cFac.value = []; cSelFac.value = null })
 function cValid() {
   const f = cForm.value
   return f.venue_id && f.name?.trim() && f.date_to >= f.date_from && f.end_time > f.start_time
@@ -72,10 +83,16 @@ function quoteValid() {
 async function refreshQuote() {
   if (!quoteValid()) return
   try {
+    const ids = cFacIds()
     const { data } = await client.get('/admin/events/quote', { params: {
       venue_id: cForm.value.venue_id, date_from: cForm.value.date_from, date_to: cForm.value.date_to,
       start_time: cForm.value.start_time, end_time: cForm.value.end_time,
+      ...(ids ? { facility_ids: ids.join(',') } : {}),
     } })
+    if (data.facilities && !cFac.value.length) {
+      cFac.value = data.facilities
+      if (!cSelFac.value) cSelFac.value = new Set(data.facilities.map((f) => f.id))
+    }
     cQuote.value = data
     if (cForm.value.price === null || cForm.value.price === '') cForm.value.price = data.suggested_price
   } catch { /* */ }
@@ -86,9 +103,10 @@ watch(() => [cForm.value.venue_id, cForm.value.date_from, cForm.value.date_to, c
 })
 async function submitCreate() {
   if (!cValid()) { cErr.value = 'Lengkapi nama, tanggal, dan jam (selesai > mulai).'; return }
+  if (cSelFac.value && cSelFac.value.size === 0) { cErr.value = 'Pilih minimal 1 lapangan.'; return }
   cSaving.value = true; cErr.value = ''
   try {
-    const { data } = await client.post('/admin/events', { ...cForm.value, price: Number(cForm.value.price) || 0 })
+    const { data } = await client.post('/admin/events', { ...cForm.value, price: Number(cForm.value.price) || 0, facility_ids: cFacIds() })
     showCreate.value = false
     await load()
     flash(`Event dibuat. ${data.conflicts.length} booking bentrok.`)
@@ -201,6 +219,21 @@ async function cancelEvent(e) {
           <div class="grid grid-cols-2 gap-2">
             <div><label class="text-xs text-slate-500">Jam mulai</label><input v-model="cForm.start_time" type="time" class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none" /></div>
             <div><label class="text-xs text-slate-500">Jam selesai</label><input v-model="cForm.end_time" type="time" class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none" /></div>
+          </div>
+          <!-- Pilih lapangan yang dipakai event -->
+          <div v-if="cFac.length" class="border border-slate-200 rounded-lg p-3">
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-xs font-medium text-slate-600">Lapangan dipakai event <span class="text-slate-400">({{ cSelFac ? cSelFac.size : 0 }}/{{ cFac.length }})</span></label>
+              <button type="button" @click="cSelectAllFac" :class="cAllSel ? 'text-slate-300' : 'text-brand-600'" class="text-xs" :disabled="cAllSel">Pilih semua</button>
+            </div>
+            <div class="grid grid-cols-2 gap-1.5 max-h-40 overflow-auto">
+              <label v-for="f in cFac" :key="f.id" class="flex items-center gap-2 text-sm rounded-lg px-2 py-1.5 cursor-pointer"
+                :class="cFacSelected(f.id) ? 'bg-brand-50 text-brand-800' : 'bg-slate-50 text-slate-500'">
+                <input type="checkbox" :checked="cFacSelected(f.id)" @change="cToggleFac(f.id)" class="accent-brand-600" />
+                <span class="truncate">{{ f.name }}</span>
+              </label>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-1.5">Hanya lapangan tercentang yang dikunci event; sisanya tetap bisa dibooking.</p>
           </div>
           <!-- Booking yang akan tertimpa event (dipindah jadwal setelah event dibuat) -->
           <div v-if="cQuote.conflict_count" class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs">

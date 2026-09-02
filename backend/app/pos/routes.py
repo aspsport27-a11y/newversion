@@ -19,7 +19,7 @@ from ..perms import has_perm
 from ..security import verify_password
 from ..stations.models import GameStation
 from . import briapi
-from .models import Attendance, Coach, CoachingRate, Event, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift, coach_declared_available, coaching_price_per_hour, day_type_for_date, facility_booking_price
+from .models import Attendance, Coach, CoachingRate, Event, EventFacility, Facility, FacilityBooking, Order, OrderItem, Payment, PosTerminal, Product, ProductCategory, Shift, coach_declared_available, coaching_price_per_hour, day_type_for_date, facility_booking_price
 from .services import (
     PosError,
     add_cash_movement,
@@ -691,6 +691,7 @@ def pos_facility_bookings(facility_id):
                     Event.venue_id == facility.venue_id, Event.status == "active",
                     Event.date_from <= _d, Event.date_to >= _d,
                 ).all()
+                if e.covers_facility(facility.id)  # hanya event yg mengunci lapangan ini
             ]
         except ValueError:
             pass
@@ -1843,20 +1844,33 @@ def _mins_ev(t, as_end=False):
     return 24 * 60 if (as_end and m == 0) else m
 
 
-def _event_quote(venue_id, date_from, date_to, start_t, end_t):
+def _event_quote(venue_id, date_from, date_to, start_t, end_t, facility_ids=None):
     from .services import event_price_quote
-    return event_price_quote(venue_id, date_from, date_to, start_t, end_t)
+    return event_price_quote(venue_id, date_from, date_to, start_t, end_t, facility_ids=facility_ids)
 
 
-def _event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_event_order_id=None):
+def _event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_event_order_id=None, facility_ids=None):
     from .services import event_conflicts
-    return event_conflicts(venue_id, date_from, date_to, start_t, end_t, exclude_order_id=exclude_event_order_id)
+    return event_conflicts(venue_id, date_from, date_to, start_t, end_t,
+                           exclude_order_id=exclude_event_order_id, facility_ids=facility_ids)
+
+
+def _parse_facility_ids(raw):
+    """Terima 'facility_ids' sbg CSV (query) atau list (JSON). Kosong = None (semua)."""
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, str):
+        ids = [int(x) for x in raw.split(",") if x.strip().isdigit()]
+    else:
+        ids = [int(x) for x in raw if str(x).isdigit()]
+    return ids or None
 
 
 @pos_bp.get("/events/quote")
 @jwt_required()
 def event_quote():
     terminal = _current_terminal()
+    from .services import event_facilities_list
     try:
         df = datetime.strptime(request.args["date_from"], "%Y-%m-%d").date()
         dt = datetime.strptime(request.args["date_to"], "%Y-%m-%d").date()
@@ -1866,10 +1880,12 @@ def event_quote():
         raise PosError("Parameter tanggal/jam tidak lengkap/valid", "bad_params")
     if dt < df:
         raise PosError("Tanggal selesai sebelum tanggal mulai", "bad_range")
-    price, n_fac = _event_quote(terminal.venue_id, df, dt, st, et)
-    conflicts = _event_conflicts(terminal.venue_id, df, dt, st, et)
+    fac_ids = _parse_facility_ids(request.args.get("facility_ids"))
+    price, n_fac = _event_quote(terminal.venue_id, df, dt, st, et, facility_ids=fac_ids)
+    conflicts = _event_conflicts(terminal.venue_id, df, dt, st, et, facility_ids=fac_ids)
     return jsonify(suggested_price=price, facility_count=n_fac,
-                   conflict_count=len(conflicts), conflicts=conflicts), 200
+                   conflict_count=len(conflicts), conflicts=conflicts,
+                   facilities=event_facilities_list(terminal.venue_id)), 200
 
 
 @pos_bp.post("/events")
@@ -1895,6 +1911,13 @@ def event_create():
     price = _D(d.get("price"))
     if price < 0:
         raise PosError("Harga tidak valid", "bad_price")
+    # lapangan terpilih (opsional). Kosong = borong semua lapangan venue.
+    fac_ids = _parse_facility_ids(d.get("facility_ids"))
+    if fac_ids:
+        valid = {f.id for f in Facility.query.filter_by(venue_id=terminal.venue_id, is_active=True).all()}
+        fac_ids = [i for i in fac_ids if i in valid]
+        if not fac_ids:
+            raise PosError("Lapangan terpilih tidak valid", "bad_facility")
 
     venue = db.session.get(Venue, terminal.venue_id)
     uid = int(get_jwt_identity())
@@ -1921,6 +1944,9 @@ def event_create():
         order_id=order.id, status="active", notes=d.get("notes"), created_by=uid,
     )
     db.session.add(ev)
+    db.session.flush()
+    for fid in (fac_ids or []):  # kosong = borong semua (tak ada baris)
+        db.session.add(EventFacility(event_id=ev.id, facility_id=fid))
 
     # pembayaran opsional (DP/lunas). amount 0 / kosong = belum bayar → Pelunasan.
     pay = d.get("payment") or {}
@@ -1936,7 +1962,7 @@ def event_create():
     else:
         db.session.commit()
 
-    conflicts = _event_conflicts(venue.id, df, dto, st, et, exclude_event_order_id=order.id)
+    conflicts = _event_conflicts(venue.id, df, dto, st, et, exclude_event_order_id=order.id, facility_ids=fac_ids)
     return jsonify(event=ev.to_dict(), order=order.to_dict(), conflicts=conflicts), 201
 
 
@@ -1964,7 +1990,7 @@ def event_detail(event_id):
     if not ev:
         raise PosError("Event tidak ditemukan", "not_found", 404)
     conflicts = _event_conflicts(ev.venue_id, ev.date_from, ev.date_to, ev.start_time, ev.end_time,
-                                 exclude_event_order_id=ev.order_id)
+                                 exclude_event_order_id=ev.order_id, facility_ids=list(ev.facility_id_set()) or None)
     return jsonify(event=ev.to_dict(), conflicts=conflicts), 200
 
 
