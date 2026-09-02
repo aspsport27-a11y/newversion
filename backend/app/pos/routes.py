@@ -506,6 +506,52 @@ def report_category_daily():
             if bd and bd > today:
                 advance_booking_total += amt
 
+    # Rincian per METODE bayar (cash-basis): tiap pembayaran (punya metode)
+    # dialokasikan PROPORSIONAL ke item order sesuai porsi line_total-nya, lalu
+    # dikelompokkan per kategori. Dipakai untuk tab Cash/QRIS/Transfer di UI —
+    # "penjualan yang uangnya masuk lewat metode itu".
+    method_groups = {"cash": {}, "qris": {}, "transfer": {}}
+    for p in payments:
+        if not p.order_id:
+            continue
+        order = db.session.get(Order, p.order_id)
+        if not order or not order.items:
+            continue
+        line_sum = sum(float(it.line_total or 0) for it in order.items)
+        if line_sum <= 0:
+            continue
+        pay_amt = float(p.amount or 0)
+        mg = method_groups.setdefault(p.method, {})
+        for item in order.items:
+            share = pay_amt * (float(item.line_total or 0) / line_sum)
+            if not share:
+                continue
+            if item.item_type == "product":
+                label = cat_names.get(product_cat.get(item.product_id), "Tanpa Kategori")
+            else:
+                label = _REPORT_LABELS.get(item.item_type, item.item_type)
+            g = mg.setdefault(label, {"category": label, "amount": 0.0, "items": {}})
+            g["amount"] += share
+            nm = item.name_snapshot or "—"
+            if item.item_type == "booking" and (order.customer_name or "").strip():
+                nm = f"{order.customer_name.strip()} · {nm}"
+            det = g["items"].setdefault(nm, {"name": nm, "amount": 0.0})
+            det["amount"] += share
+    by_method_category = {
+        method: sorted(
+            [{
+                "category": g["category"],
+                "amount": round(g["amount"]),
+                "items": sorted(
+                    [{"name": d["name"], "amount": round(d["amount"])} for d in g["items"].values()],
+                    key=lambda x: -x["amount"],
+                ),
+            } for g in mg.values() if round(g["amount"]) != 0],
+            key=lambda x: -x["amount"],
+        )
+        for method, mg in method_groups.items()
+    }
+
     # Bulatkan ke rupiah UTUH (rupiah tak punya sen).
     # bisa pecahan → dibulatkan biar laporan bersih di semua venue.
     by_category = sorted(
@@ -537,6 +583,7 @@ def report_category_daily():
         total=round(cash_total),                  # uang masuk hari ini (kas)
         by_category=by_category,
         by_method=by_method,
+        by_method_category=by_method_category,  # rincian kategori per metode (tab UI)
     ), 200
 
 
