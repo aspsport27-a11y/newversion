@@ -274,12 +274,21 @@ def budgets_set():
 # Pengajuan (op_requests)
 # ------------------------------------------------------------------
 def _gen_code(venue, year, month):
+    # Ambil nomor urut TERBESAR yg ada (+1), BUKAN count — kalau ada pengajuan
+    # yg dihapus, count turun tapi nomor besar tetap ada → count+1 bisa tabrakan
+    # dgn kode yg masih hidup (UniqueViolation).
     prefix = f"OPS-{venue.code}-{year}{month:02d}-"
-    n = (
-        db.session.query(func.count(OpRequest.id))
-        .filter(OpRequest.code.like(prefix + "%")).scalar() or 0
+    existing = (
+        db.session.query(OpRequest.code)
+        .filter(OpRequest.code.like(prefix + "%")).all()
     )
-    return f"{prefix}{n + 1:03d}"
+    max_seq = 0
+    for (c,) in existing:
+        try:
+            max_seq = max(max_seq, int(c.rsplit("-", 1)[-1]))
+        except (ValueError, IndexError):
+            continue
+    return f"{prefix}{max_seq + 1:03d}"
 
 
 @ops_bp.get("/requests")
