@@ -398,6 +398,58 @@ def request_create():
     return jsonify(request=r.to_dict(_cat_map(), _user_map())), 201
 
 
+@ops_bp.put("/requests/<int:rid>")
+@jwt_required()
+@CREATE
+def request_update(rid):
+    """Edit pengajuan — HANYA saat status masih 'submitted' (belum disetujui).
+    Ganti tanggal/deskripsi/rincian; total & tanda over-budget dihitung ulang."""
+    r = db.session.get(OpRequest, rid)
+    if not r:
+        return _err("Pengajuan tidak ditemukan", "not_found", 404)
+    vids = _scope_vids(_user())
+    if vids is not None and r.venue_id not in vids:
+        return _err("Pengajuan di luar cakupan Anda", "forbidden", 403)
+    if r.status != "submitted":
+        return _err("Hanya pengajuan berstatus Menunggu yang bisa diedit.", "bad_status", 409)
+    d = request.get_json(silent=True) or {}
+    items = d.get("items") or []
+    if not items:
+        return _err("Minimal 1 rincian")
+    if "description" in d:
+        r.description = d.get("description")
+    if d.get("req_date"):
+        try:
+            r.req_date = date.fromisoformat(d["req_date"])
+        except (ValueError, TypeError):
+            return _err("Tanggal pengajuan tidak valid")
+    # ganti seluruh rincian
+    r.items.clear()
+    total = 0.0
+    for it in items:
+        amt = _D(it.get("amount"))
+        if not it.get("category_id") or amt <= 0:
+            return _err("Rincian tidak valid (kategori & jumlah > 0)")
+        cat = db.session.get(ExpenseCategory, it["category_id"])
+        if not cat or (cat.venue_id and cat.venue_id != r.venue_id):
+            return _err("Kategori tidak berlaku untuk venue ini", "bad_category", 400)
+        total += amt
+        r.items.append(OpRequestItem(category_id=it["category_id"], amount=amt, note=it.get("note")))
+    r.total_amount = total
+    plafon = {b.category_id: float(b.amount) for b in Budget.query.filter_by(venue_id=r.venue_id, year=r.period_year, month=r.period_month).all()}
+    used = _used_by_category(r.venue_id, r.period_year, r.period_month)
+    req_by_cat = {}
+    for it in r.items:
+        req_by_cat[it.category_id] = req_by_cat.get(it.category_id, 0.0) + float(it.amount)
+    r.over_budget = any(
+        plafon.get(cid, 0) > 0 and (used.get(cid, 0.0) + amt) > plafon.get(cid, 0) + 1e-6
+        for cid, amt in req_by_cat.items()
+    )
+    r.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(request=r.to_dict(_cat_map(), _user_map())), 200
+
+
 @ops_bp.post("/requests/<int:rid>/approve")
 @jwt_required()
 @APPROVE

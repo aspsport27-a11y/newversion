@@ -113,6 +113,7 @@ async function loadRequests() {
 
 // create
 const showCreate = ref(false)
+const editingId = ref(null)
 const cForm = ref({ description: '', items: [] })
 const cFiles = ref([])
 const cErr = ref('')
@@ -150,12 +151,28 @@ function rowBudget(it) {
 }
 const cHasOver = computed(() => cForm.value.items.some((it) => rowBudget(it)?.over))
 async function openCreate() {
+  editingId.value = null
   const vid = isManager.value ? auth.user?.venue_id : (venueId.value || venues.value[0]?.id)
   cForm.value = { venue_id: vid, req_date: new Date().toISOString().slice(0, 10), description: '', items: [{ category_id: null, amount: null, note: '' }] }
   cFiles.value = []; cErr.value = ''
   await loadCategoriesForVenue(vid)
   cForm.value.items[0].category_id = categories.value[0]?.id
   await loadCreateBudget(vid)
+  showCreate.value = true
+}
+async function openEdit(r) {
+  editingId.value = r.id
+  cForm.value = {
+    venue_id: r.venue_id,
+    req_date: r.req_date || new Date().toISOString().slice(0, 10),
+    description: r.description || '',
+    items: (r.items || []).map((i) => ({ category_id: i.category_id, amount: Number(i.amount), note: i.note || '' })),
+  }
+  if (!cForm.value.items.length) cForm.value.items = [{ category_id: null, amount: null, note: '' }]
+  cFiles.value = []; cErr.value = ''
+  detail.value = null
+  await loadCategoriesForVenue(r.venue_id)
+  await loadCreateBudget(r.venue_id)
   showCreate.value = true
 }
 function addRow() { cForm.value.items.push({ category_id: categories.value[0]?.id, amount: null, note: '' }) }
@@ -170,12 +187,19 @@ async function submitCreate() {
   try {
     const payload = { ...ym(), req_date: cForm.value.req_date || null, description: cForm.value.description, items: cForm.value.items.filter((i) => i.category_id && i.amount > 0) }
     if (!isManager.value) payload.venue_id = cForm.value.venue_id
-    const { data } = await client.post('/ops/requests', payload)
+    let reqId
+    if (editingId.value) {
+      const { data } = await client.put(`/ops/requests/${editingId.value}`, payload)
+      reqId = data.request.id
+    } else {
+      const { data } = await client.post('/ops/requests', payload)
+      reqId = data.request.id
+    }
     for (const f of cFiles.value) {
       const fd = new FormData(); fd.append('file', f)
-      await client.post(`/ops/requests/${data.request.id}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+      await client.post(`/ops/requests/${reqId}/attachment`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
     }
-    showCreate.value = false; await loadRequests(); flash('Pengajuan terkirim')
+    showCreate.value = false; await loadRequests(); flash(editingId.value ? 'Pengajuan diperbarui' : 'Pengajuan terkirim')
   } catch (e) { cErr.value = e?.response?.data?.message || 'Gagal.' } finally { saving.value = false }
 }
 
@@ -643,6 +667,7 @@ watch(statusFilter, loadRequests)
                 <td class="px-4 py-3 text-center"><span :class="statusMap[r.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[r.status]?.[0] }}</span></td>
                 <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
                   <span class="text-brand-600">Detail</span>
+                  <button v-if="r.status === 'submitted'" @click.stop="openEdit(r)" class="text-blue-600 hover:underline ml-3">Edit</button>
                   <button v-if="canDeleteRequest(r)" @click="removeRequest(r, $event)" class="text-red-500 hover:underline ml-3">Hapus</button>
                 </td>
               </tr>
@@ -691,7 +716,7 @@ watch(statusFilter, loadRequests)
     <!-- Create modal -->
     <div v-if="showCreate" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4">
       <div class="bg-white w-full max-w-lg rounded-2xl p-5 max-h-[90vh] overflow-auto">
-        <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">Ajukan Dana Operasional</h3><button @click="showCreate = false" class="text-slate-400 text-xl">✕</button></div>
+        <div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-slate-800">{{ editingId ? 'Edit Pengajuan Dana' : 'Ajukan Dana Operasional' }}</h3><button @click="showCreate = false" class="text-slate-400 text-xl">✕</button></div>
         <p class="text-xs text-slate-400 mb-3">Periode {{ period }}</p>
         <div v-if="!isManager" class="mb-3">
           <label class="block text-xs text-slate-500 mb-1">Venue</label>
@@ -728,7 +753,7 @@ watch(statusFilter, loadRequests)
         <label class="block text-xs text-slate-500 mb-1">Bukti (foto/PDF, boleh &gt;1)</label>
         <input type="file" multiple accept="image/*,.pdf" @change="onFiles" class="w-full text-sm mb-3" />
         <p v-if="cErr" class="text-sm text-red-600 mb-2">{{ cErr }}</p>
-        <button @click="submitCreate" :disabled="saving || !cTotal" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ saving ? 'Mengirim…' : 'Kirim Pengajuan' }}</button>
+        <button @click="submitCreate" :disabled="saving || !cTotal" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">{{ saving ? 'Menyimpan…' : (editingId ? 'Simpan Perubahan' : 'Kirim Pengajuan') }}</button>
       </div>
     </div>
 
@@ -875,8 +900,9 @@ watch(statusFilter, loadRequests)
         <div v-if="detail.status !== 'submitted' && isApprover" class="flex gap-2 pt-2">
           <button @click="revertRequest" :disabled="busy" class="flex-1 py-2 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-medium disabled:opacity-50">↩️ Batal (kembali ke Menunggu)</button>
         </div>
-        <div v-if="canDeleteRequest(detail)" class="flex gap-2 pt-2">
-          <button @click="removeRequest(detail)" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium">Hapus Pengajuan</button>
+        <div v-if="detail.status === 'submitted' || canDeleteRequest(detail)" class="flex gap-2 pt-2">
+          <button v-if="detail.status === 'submitted'" @click="openEdit(detail)" class="flex-1 py-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium">✏️ Edit</button>
+          <button v-if="canDeleteRequest(detail)" @click="removeRequest(detail)" class="flex-1 py-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-medium">Hapus Pengajuan</button>
         </div>
       </div>
     </div>
