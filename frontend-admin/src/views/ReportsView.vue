@@ -87,14 +87,19 @@ function prepOrder(o) {
     ...o,
     _prod: o.items.filter((i) => EDITABLE_TYPES.includes(i.item_type)).map((i) => ({ item_type: i.item_type, product_id: i.product_id || null, name: i.name, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
     _locked: o.items.filter((i) => !EDITABLE_TYPES.includes(i.item_type)),
+    _methodSet: [...new Set((o.payments || []).filter((p) => p.status === 'paid').map((p) => p.method))],
     _methods: [...new Set((o.payments || []).filter((p) => p.status === 'paid').map((p) => p.method))].join(', '),
   }
 }
+const soMethod = ref('all') // filter metode di modal rincian: all|cash|qris|transfer
+const soOrdersShown = computed(() =>
+  soMethod.value === 'all' ? soOrders.value : soOrders.value.filter((o) => (o._methodSet || []).includes(soMethod.value)),
+)
 const soOpening = ref(0)
 const soOpenSaving = ref(false)
 const soProducts = ref([])
 async function openShiftOrders(s) {
-  soShift.value = s; soOrders.value = []; showSO.value = true; soLoading.value = true
+  soShift.value = s; soOrders.value = []; showSO.value = true; soLoading.value = true; soMethod.value = 'all'
   soOpening.value = Number(s.opening_cash) || 0
   soProducts.value = []
   try {
@@ -459,7 +464,7 @@ onMounted(async () => { await loadVenues(); await run() })
           <h3 class="text-lg font-bold text-slate-800">Rincian Transaksi Shift</h3>
           <button @click="showSO = false" class="text-slate-400 text-xl">✕</button>
         </div>
-        <p class="text-xs text-slate-500 mb-2">{{ soShift?.cashier || '—' }} · {{ soShift && soShift.opened_at ? parseUTC(soShift.opened_at).toLocaleString('id-ID') : '—' }} · {{ soOrders.length }} transaksi</p>
+        <p class="text-xs text-slate-500 mb-2">{{ soShift?.cashier || '—' }} · {{ soShift && soShift.opened_at ? parseUTC(soShift.opened_at).toLocaleString('id-ID') : '—' }} · {{ soMethod === 'all' ? soOrders.length : soOrdersShown.length + ' dari ' + soOrders.length }} transaksi<span v-if="soMethod !== 'all'"> (metode {{ soMethod }})</span></p>
         <div class="flex items-center gap-2 mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
           <label class="text-xs text-slate-600">Saldo Awal (modal):</label>
           <input v-model.number="soOpening" type="number" class="w-32 rounded-lg border border-slate-300 px-2 py-1 text-sm text-right outline-none focus:border-brand-500" />
@@ -472,10 +477,17 @@ onMounted(async () => { await loadVenues(); await run() })
         <datalist id="soProductList">
           <option v-for="p in soProducts" :key="p.id" :value="p.name" />
         </datalist>
+        <!-- Filter metode bayar -->
+        <div v-if="soOrders.length" class="flex gap-1 mb-3 bg-slate-100 rounded-lg p-1">
+          <button v-for="mt in [{k:'all',l:'Semua'},{k:'cash',l:'Cash'},{k:'qris',l:'QRIS'},{k:'transfer',l:'Transfer'}]" :key="mt.k"
+            @click="soMethod = mt.k" :class="soMethod === mt.k ? 'bg-white shadow text-brand-700' : 'text-slate-500'"
+            class="flex-1 text-xs font-medium rounded-md py-1.5">{{ mt.l }}</button>
+        </div>
         <div v-if="soLoading" class="text-center text-slate-400 py-8">Memuat…</div>
         <div v-else-if="!soOrders.length" class="text-center text-slate-400 py-8">Tidak ada transaksi di shift ini.</div>
+        <div v-else-if="!soOrdersShown.length" class="text-center text-slate-400 py-8">Tidak ada transaksi dengan metode ini.</div>
         <div v-else class="space-y-3">
-          <div v-for="o in soOrders" :key="o.id" class="border border-slate-200 rounded-xl p-3">
+          <div v-for="o in soOrdersShown" :key="o.id" class="border border-slate-200 rounded-xl p-3">
             <div class="flex justify-between items-center mb-2">
               <div>
                 <span class="font-mono text-xs text-slate-500">{{ o.order_number }}</span>
