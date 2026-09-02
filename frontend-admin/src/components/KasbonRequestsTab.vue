@@ -24,9 +24,10 @@ const loading = ref(false)
 const busy = ref(false)
 async function loadRequests() {
   loading.value = true
-  const params = {}
-  if (!props.isManager && props.venueId) params.venue_id = props.venueId
-  try { const { data } = await client.get('/admin/kasbon-requests', { params }); requests.value = data.requests }
+  // Kasbon = antrian approval lintas venue: SELALU tampilkan seluruh scope (bukan
+  // difilter per venue terpilih), supaya jumlah di lonceng notifikasi = isi tabel.
+  // Kolom "Venue" membedakan asalnya. (Notif menghitung semua submitted dalam scope.)
+  try { const { data } = await client.get('/admin/kasbon-requests'); requests.value = data.requests }
   catch (e) { requests.value = [] } finally { loading.value = false }
 }
 const summary = computed(() => {
