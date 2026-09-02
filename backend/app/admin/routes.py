@@ -1030,6 +1030,41 @@ def kasbon_request_delete(rid):
     return jsonify(ok=True), 200
 
 
+@admin_bp.put("/kasbon-requests/<int:rid>")
+@jwt_required()
+@MANAGE_HR
+def kasbon_request_update(rid):
+    r = db.session.get(KasbonRequest, rid)
+    if not r:
+        return _err("Tidak ditemukan", "not_found", 404)
+    if r.status != "submitted":
+        return _err(f"Status '{r.status}' tak bisa diubah", "bad_status", 409)
+    forced = _forced_venue()
+    if forced is not None and r.venue_id != forced:
+        return _err("Bukan venue Anda", "forbidden", 403)
+    d = request.get_json(silent=True) or {}
+    emp = db.session.get(Employee, d.get("employee_id"))
+    if not emp:
+        return _err("Karyawan tidak ditemukan", "not_found", 404)
+    if forced is not None and emp.venue_id != forced:
+        return _err("Bukan karyawan venue Anda", "forbidden", 403)
+    amount = _D(d.get("amount"))
+    months = int(d.get("months") or 0)
+    if amount <= 0:
+        return _err("Jumlah kasbon harus > 0")
+    if months < 1:
+        return _err("Jumlah bulan cicilan minimal 1")
+    r.employee_id = emp.id
+    r.venue_id = emp.venue_id
+    r.amount = amount
+    r.months = months
+    r.installment = float(math.ceil(amount / months))
+    r.note = d.get("note")
+    r.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(request=r.to_dict(emp.name)), 200
+
+
 @admin_bp.post("/employees/<int:eid>/account")
 @jwt_required()
 @MANAGE_HR

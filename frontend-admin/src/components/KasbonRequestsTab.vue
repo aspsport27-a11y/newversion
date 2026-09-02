@@ -36,8 +36,9 @@ const summary = computed(() => {
   return s
 })
 
-// --- ajukan ---
+// --- ajukan / edit ---
 const showCreate = ref(false)
+const editingId = ref(null)   // null = mode ajukan; berisi id = mode edit
 const employees = ref([])
 const form = ref({ employee_id: '', amount: null, months: 1, note: '' })
 const saving = ref(false)
@@ -46,17 +47,28 @@ const installmentPreview = computed(() => {
   const a = Number(form.value.amount) || 0, m = Number(form.value.months) || 0
   return a > 0 && m > 0 ? Math.ceil(a / m) : 0
 })
-async function openCreate() {
-  if (!props.isManager && !props.venueId) { alert('Pilih venue tertentu dulu (bukan "Semua venue").'); return }
-  cErr.value = ''
-  form.value = { employee_id: '', amount: null, months: 1, note: '' }
-  showCreate.value = true
+async function loadEmployees(venueId) {
   try {
     const params = {}
-    if (!props.isManager && props.venueId) params.venue_id = props.venueId
+    if (!props.isManager && venueId) params.venue_id = venueId
     const { data } = await client.get('/admin/employees', { params })
     employees.value = data.employees.filter((e) => e.status === 'active')
   } catch (e) { employees.value = [] }
+}
+async function openCreate() {
+  if (!props.isManager && !props.venueId) { alert('Pilih venue tertentu dulu (bukan "Semua venue").'); return }
+  editingId.value = null
+  cErr.value = ''
+  form.value = { employee_id: '', amount: null, months: 1, note: '' }
+  showCreate.value = true
+  await loadEmployees(props.venueId)
+}
+async function openEdit(r) {
+  editingId.value = r.id
+  cErr.value = ''
+  form.value = { employee_id: r.employee_id, amount: Number(r.amount), months: r.months, note: r.note || '' }
+  showCreate.value = true
+  await loadEmployees(r.venue_id)   // karyawan sesuai venue pengajuan
 }
 async function submitCreate() {
   cErr.value = ''
@@ -64,14 +76,19 @@ async function submitCreate() {
   if (!(Number(form.value.amount) > 0)) { cErr.value = 'Jumlah kasbon harus > 0'; return }
   if (!(Number(form.value.months) >= 1)) { cErr.value = 'Jumlah bulan minimal 1'; return }
   saving.value = true
+  const payload = {
+    employee_id: form.value.employee_id, amount: Number(form.value.amount),
+    months: Number(form.value.months), note: form.value.note || null,
+  }
   try {
-    await client.post('/admin/kasbon-requests', {
-      employee_id: form.value.employee_id, amount: Number(form.value.amount),
-      months: Number(form.value.months), note: form.value.note || null,
-    })
+    if (editingId.value) {
+      await client.put(`/admin/kasbon-requests/${editingId.value}`, payload)
+    } else {
+      await client.post('/admin/kasbon-requests', payload)
+    }
     showCreate.value = false
-    await loadRequests(); flash('Pengajuan kasbon terkirim')
-  } catch (e) { cErr.value = e?.response?.data?.message || 'Gagal mengirim.' } finally { saving.value = false }
+    await loadRequests(); flash(editingId.value ? 'Pengajuan diperbarui' : 'Pengajuan kasbon terkirim')
+  } catch (e) { cErr.value = e?.response?.data?.message || 'Gagal menyimpan.' } finally { saving.value = false }
 }
 
 async function act(r, action, extra = {}) {
@@ -145,6 +162,7 @@ watch(() => props.venueId, loadRequests)
               <td class="px-4 py-3 text-right" :class="r.debt_balance > 0 ? 'text-amber-600 font-medium' : 'text-emerald-600'">{{ rupiah(r.debt_balance) }}</td>
               <td class="px-4 py-3 text-center"><span :class="statusMap[r.status]?.[1]" class="text-xs rounded-full px-2 py-0.5">{{ statusMap[r.status]?.[0] }}</span></td>
               <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
+                <button v-if="r.status === 'submitted' && canManage" @click="openEdit(r)" :disabled="busy" class="text-blue-600 hover:underline mr-3">Edit</button>
                 <template v-if="r.status === 'submitted' && isApprover">
                   <button @click="approve(r)" :disabled="busy" class="text-emerald-600 hover:underline">Setujui</button>
                   <button @click="reject(r)" :disabled="busy" class="text-red-500 hover:underline ml-3">Tolak</button>
@@ -161,7 +179,7 @@ watch(() => props.venueId, loadRequests)
     <div v-if="showCreate" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" @click.self="showCreate = false">
       <div class="bg-white w-full max-w-md rounded-2xl p-5">
         <div class="flex justify-between items-center mb-4">
-          <h3 class="text-lg font-bold text-slate-800">Ajukan Kasbon</h3>
+          <h3 class="text-lg font-bold text-slate-800">{{ editingId ? 'Edit Pengajuan Kasbon' : 'Ajukan Kasbon' }}</h3>
           <button @click="showCreate = false" class="text-slate-400 text-xl">✕</button>
         </div>
         <label class="block text-xs text-slate-500 mb-1">Karyawan</label>
@@ -185,7 +203,7 @@ watch(() => props.venueId, loadRequests)
         <input v-model="form.note" placeholder="Catatan (opsional)" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm mb-3 outline-none focus:border-brand-500" />
         <p v-if="cErr" class="text-sm text-red-600 mb-2">{{ cErr }}</p>
         <button @click="submitCreate" :disabled="saving" class="w-full py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50">
-          {{ saving ? 'Mengirim…' : 'Ajukan ke HO' }}
+          {{ saving ? 'Menyimpan…' : (editingId ? 'Simpan Perubahan' : 'Ajukan ke HO') }}
         </button>
       </div>
     </div>
