@@ -292,6 +292,38 @@ def setoran_create():
     return jsonify(deposit=dep.to_dict()), 201
 
 
+@treasury_bp.delete("/setoran/<int:did>")
+@jwt_required()
+@MANAGE
+def setoran_cancel(did):
+    """Batalkan 1 setoran kas shift: catatan kas dibalik (keluar lagi dari pool)
+    dan semua shift-nya dilepas (deposit_id kosong) sehingga bisa dibuka kembali
+    lalu disetor ulang. Hanya boleh kalau dananya MASIH utuh di pool — kalau
+    sudah diteruskan ke holding / dipakai opex, tak bisa dibatalkan."""
+    dep = db.session.get(CashDeposit, did)
+    if not dep:
+        return _err("Setoran tidak ditemukan", "not_found", 404)
+    # setoran kas shift = pool tujuan diisi dari kas fisik (from_account_id kosong).
+    # Perpindahan antar-rekening (mis. Kas HO → Holding) tidak dibatalkan di sini.
+    if dep.from_account_id is not None:
+        return _err("Hanya setoran kas shift yang bisa dibatalkan di sini", "not_cash_deposit", 409)
+    amt = float(dep.counted_amount or 0)
+    if account_balance(dep.to_account_id) + 1e-6 < amt:
+        return _err(
+            "Dana setoran ini sudah diteruskan/dipakai — tarik dulu setoran lanjutannya "
+            "sebelum membatalkan.", "funds_used", 409,
+        )
+    shifts = Shift.query.filter(Shift.deposit_id == dep.id).all()
+    # balik catatan kas: keluarkan lagi dari pool (jejak ledger tetap tersimpan)
+    record_tx(dep.to_account_id, "out", amt, "cash_deposit_cancel", "setoran", dep.id,
+              f"Batal setoran {dep.code}", _uid())
+    for s in shifts:
+        s.deposit_id = None
+    db.session.delete(dep)
+    db.session.commit()
+    return jsonify(ok=True, released=len(shifts)), 200
+
+
 @treasury_bp.get("/setoran")
 @jwt_required()
 @MANAGE

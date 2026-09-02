@@ -105,6 +105,15 @@ async function doSetoran() {
     flash(setoranToAccount.value ? 'Setoran tercatat' : 'Kas masuk ke pool Kas Fisik HO')
   } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { busy.value = false }
 }
+async function cancelSetoran(s) {
+  if (!window.confirm(`Batalkan setoran ${s.code} (${rupiah(s.counted_amount)})?\n\nCatatan kas akan dibalik dan semua shift di setoran ini dilepas sehingga bisa dibuka kembali lalu disetor ulang.`)) return
+  busy.value = true
+  try {
+    const { data } = await client.delete(`/treasury/setoran/${s.id}`)
+    await loadSetoran(); await loadAccounts()
+    flash(`Setoran dibatalkan — ${data.released || 0} shift dilepas`)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan setoran.') } finally { busy.value = false }
+}
 
 // setoran final (Kas Fisik HO -> rekening Holding)
 const hoPending = ref({ expected_amount: 0 })
@@ -295,9 +304,9 @@ function switchTab(t) {
 
       <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
         <table class="w-full text-sm">
-          <thead class="bg-slate-50 text-slate-500 text-left"><tr><th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Tanggal</th><th class="px-4 py-3 font-medium">Venue</th><th class="px-4 py-3 font-medium">Tujuan</th><th class="px-4 py-3 font-medium text-right">Seharusnya</th><th class="px-4 py-3 font-medium text-right">Disetor</th><th class="px-4 py-3 font-medium text-right">Selisih</th></tr></thead>
+          <thead class="bg-slate-50 text-slate-500 text-left"><tr><th class="px-4 py-3 font-medium">Kode</th><th class="px-4 py-3 font-medium">Tanggal</th><th class="px-4 py-3 font-medium">Venue</th><th class="px-4 py-3 font-medium">Tujuan</th><th class="px-4 py-3 font-medium text-right">Seharusnya</th><th class="px-4 py-3 font-medium text-right">Disetor</th><th class="px-4 py-3 font-medium text-right">Selisih</th><th class="px-4 py-3"></th></tr></thead>
           <tbody>
-            <tr v-if="!setoranList.length"><td colspan="7" class="px-4 py-6 text-center text-slate-400">Belum ada setoran.</td></tr>
+            <tr v-if="!setoranList.length"><td colspan="8" class="px-4 py-6 text-center text-slate-400">Belum ada setoran.</td></tr>
             <tr v-for="s in setoranList" :key="s.id" class="border-t">
               <td class="px-4 py-2 font-mono text-xs text-slate-500">{{ s.code }}</td>
               <td class="px-4 py-2 text-slate-600">{{ s.deposit_date }}</td>
@@ -306,6 +315,9 @@ function switchTab(t) {
               <td class="px-4 py-2 text-right">{{ rupiah(s.expected_amount) }}</td>
               <td class="px-4 py-2 text-right">{{ rupiah(s.counted_amount) }}</td>
               <td class="px-4 py-2 text-right" :class="s.variance === 0 ? 'text-emerald-600' : 'text-red-600'">{{ rupiah(s.variance) }}</td>
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                <button v-if="s.venues" @click="cancelSetoran(s)" :disabled="busy" class="text-red-500 text-xs hover:underline" title="Batalkan setoran & lepaskan shift agar bisa dibuka kembali">Batal</button>
+              </td>
             </tr>
           </tbody>
         </table>
