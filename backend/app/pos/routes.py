@@ -61,7 +61,15 @@ def _current_terminal() -> PosTerminal:
 
 
 def _current_open_shift(terminal_id: int) -> Shift:
-    shift = Shift.query.filter_by(terminal_id=terminal_id, status="open").first()
+    # Ambil shift terbuka TERBARU (opened_at terbesar). Kalau sebuah shift lama
+    # dibuka-kembali dari admin untuk koreksi, terminal bisa punya >1 shift
+    # terbuka sekaligus; penjualan live harus tetap menempel ke shift yang baru
+    # dibuka kasir, bukan yang lama. (Dulu .first() ambil id terkecil = salah.)
+    shift = (
+        Shift.query.filter_by(terminal_id=terminal_id, status="open")
+        .order_by(Shift.opened_at.desc(), Shift.id.desc())
+        .first()
+    )
     if shift is None:
         raise PosError("Belum ada shift terbuka. Buka shift dulu.", "no_open_shift", 409)
     return shift
@@ -662,7 +670,11 @@ def shift_open():
 @jwt_required()
 def shift_current():
     terminal = _current_terminal()
-    shift = Shift.query.filter_by(terminal_id=terminal.id, status="open").first()
+    shift = (
+        Shift.query.filter_by(terminal_id=terminal.id, status="open")
+        .order_by(Shift.opened_at.desc(), Shift.id.desc())
+        .first()
+    )
     return jsonify(shift=shift.to_dict() if shift else None), 200
 
 
