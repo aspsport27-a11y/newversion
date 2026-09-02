@@ -61,6 +61,7 @@ SETUP_MANAGE = require_perm("setup.manage")
 ORDER_CANCEL = require_perm("order.cancel")
 VIEW = require_perm("master.view")
 REPORT_SALES = require_perm("report.sales")
+TRANSACTIONS_VIEW = require_perm("transactions.view")
 # HR: manager unit juga boleh kelola karyawan (venue-nya sendiri)
 MANAGE_HR = require_perm("hr.manage")
 
@@ -3662,7 +3663,7 @@ def customer_history():
 
 @admin_bp.get("/orders")
 @jwt_required()
-@VIEW
+@TRANSACTIONS_VIEW
 def orders_list():
     """Riwayat transaksi POS — daftar order per venue, dgn tag kategori produk
     per transaksi (utk filter di frontend). manager_unit dipaksa ke venue-nya."""

@@ -11,6 +11,7 @@ from .models import RolePermission
 PERMISSIONS = [
     # Laporan
     ("report.sales", "Lihat Laporan Penjualan", "Laporan"),
+    ("transactions.view", "Lihat Riwayat Transaksi", "Laporan"),
     ("report.business", "Lihat Laporan Bisnis", "Laporan"),
     ("report.management", "Lihat Laporan Manajemen (owner)", "Laporan"),
     ("holding.manage", "Kelola Beban Holding/Owner", "Laporan"),
@@ -59,7 +60,7 @@ EDITABLE_ROLES = [
 DEFAULT_GRANTS = {
     "head_office": PERMISSION_CODES,
     "manager_unit": {
-        "master.view", "report.sales", "hr.manage", "ops.view", "ops.create", "ops.budget", "ops.category",
+        "master.view", "report.sales", "transactions.view", "hr.manage", "ops.view", "ops.create", "ops.budget", "ops.category",
         "proc.view", "proc.create", "payroll.view", "payroll.generate",
         "report.business", "station.manage",
     },
