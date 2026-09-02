@@ -14,7 +14,7 @@ from flask_jwt_extended import (
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Employee, User, Venue
+from ..models import Employee, User, Venue, get_setting
 from ..perms import has_perm
 from ..security import verify_password
 from ..stations.models import GameStation
@@ -318,7 +318,11 @@ def pos_attendance():
 @jwt_required()
 def pos_me():
     terminal = _current_terminal()
-    shift = Shift.query.filter_by(terminal_id=terminal.id, status="open").first()
+    shift = (
+        Shift.query.filter_by(terminal_id=terminal.id, status="open")
+        .order_by(Shift.opened_at.desc(), Shift.id.desc())
+        .first()
+    )
     venue = db.session.get(Venue, terminal.venue_id)
     has_facility = (
         db.session.query(Facility.id)
@@ -333,6 +337,7 @@ def pos_me():
         venue={"id": venue.id, "code": venue.code, "name": venue.name, "type": venue.type} if venue else None,
         booking_enabled=has_facility,  # True = mode booking lapangan; False = mode tiketing
         qris_dynamic=briapi.is_configured(),  # True = QR otomatis via BRIAPI; False = QRIS manual (upload bukti)
+        backdate_enabled=get_setting("pos_backdate_enabled", "false") == "true",  # mode latihan back-date
         open_shift=shift.to_dict() if shift else None,
     ), 200
 
@@ -657,11 +662,23 @@ def pos_facility_bookings(facility_id):
 def shift_open():
     terminal = _current_terminal()
     data = request.get_json(silent=True) or {}
+    # back-date (mode latihan): hanya dihormati kalau saklar global nyala; tanggal
+    # tak boleh di masa depan. Kalau mati / tak dikirim → shift normal hari ini.
+    biz_date = None
+    raw = (data.get("biz_date") or "").strip() if isinstance(data.get("biz_date"), str) else None
+    if raw and get_setting("pos_backdate_enabled", "false") == "true":
+        try:
+            biz_date = datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError:
+            raise PosError("Tanggal shift tidak valid", "bad_date")
+        if biz_date > date.today():
+            raise PosError("Tanggal shift tidak boleh di masa depan", "future_date")
     shift = open_shift(
         terminal_id=terminal.id,
         venue_id=terminal.venue_id,
         cashier_id=int(get_jwt_identity()),
         opening_cash=data.get("opening_cash", 0),
+        biz_date=biz_date,
     )
     return jsonify(shift=shift.to_dict()), 201
 

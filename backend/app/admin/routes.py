@@ -12,7 +12,7 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import func
 
 from ..extensions import db
-from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, ShiftAdjustLog, ShiftReopenLog, Supplier, User, Venue
+from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, ShiftAdjustLog, ShiftReopenLog, Supplier, User, Venue, get_setting, set_setting
 from ..security import (
     ROLE_ADMIN,
     ROLE_ADMIN_UNIT,
@@ -3933,3 +3933,23 @@ def report_outstanding():
             "created_at": o.created_at.isoformat() if o.created_at else None,
         })
     return jsonify(count=len(rows), total_due=round(total_due, 2), orders=rows), 200
+
+
+# ------------------------------------------------------------------
+# Pengaturan global — saklar back-date POS (mode latihan)
+# ------------------------------------------------------------------
+@admin_bp.get("/settings/pos-backdate")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def pos_backdate_get():
+    return jsonify(enabled=get_setting("pos_backdate_enabled", "false") == "true"), 200
+
+
+@admin_bp.post("/settings/pos-backdate")
+@jwt_required()
+@roles_required(ROLE_ADMIN, ROLE_HEAD_OFFICE)
+def pos_backdate_set():
+    d = request.get_json(silent=True) or {}
+    enabled = bool(d.get("enabled"))
+    set_setting("pos_backdate_enabled", "true" if enabled else "false")
+    return jsonify(enabled=enabled), 200

@@ -31,6 +31,8 @@ const showCategoryReport = ref(false)
 const loading = ref(true)
 const openingCash = ref('')
 const openingBusy = ref(false)
+const todayStr = new Date().toLocaleDateString('sv-SE') // YYYY-MM-DD lokal
+const shiftDate = ref(todayStr) // tanggal shift (mode latihan: boleh mundur)
 const showPayment = ref(false)
 const showReceipt = ref(false)
 const showClose = ref(false)
@@ -303,8 +305,11 @@ function flash(msg) {
 async function submitOpenShift() {
   openingBusy.value = true
   try {
-    await pos.doOpenShift(Number(openingCash.value) || 0)
+    // mode latihan: kalau saklar nyala & tanggal dipilih mundur, kirim biz_date
+    const bd = pos.backdateEnabled && shiftDate.value && shiftDate.value < todayStr ? shiftDate.value : null
+    await pos.doOpenShift(Number(openingCash.value) || 0, bd)
     openingCash.value = ''
+    shiftDate.value = todayStr
   } catch (e) {
     flash(e?.response?.data?.message || 'Gagal membuka shift')
   } finally {
@@ -387,8 +392,13 @@ function onKeluar() {
     <AbsenDialog v-if="showAbsen" :terminal-code="pos.terminal?.code || ''" @close="showAbsen = false" />
     <CategoryReportDialog v-if="showCategoryReport" @close="showCategoryReport = false" />
 
+    <!-- Banner: shift ini ber-tanggal mundur (mode latihan) -->
+    <div v-if="pos.openShift?.biz_date" class="bg-amber-500 text-white px-4 py-2 text-sm font-medium text-center">
+      🗓️ MODE LATIHAN — shift ini dicatat pada tanggal <b>{{ pos.openShift.biz_date }}</b> (tanggal mundur). Semua transaksi masuk ke tanggal tersebut.
+    </div>
+
     <!-- Peringatan: shift terlalu lama terbuka -->
-    <div v-if="pos.openShift && shiftTooLong" class="bg-red-600 text-white px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+    <div v-if="pos.openShift && shiftTooLong && !pos.openShift?.biz_date" class="bg-red-600 text-white px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
       <p class="text-sm font-medium">⚠️ Shift sudah terbuka <b>{{ shiftOpenText }}</b> (sejak {{ shiftOpenedLabel }}). Harap <b>tutup shift</b> lalu buka shift baru — biar kas bisa direkonsiliasi harian.</p>
       <button @click="showClose = true" class="text-sm bg-white text-red-700 font-semibold rounded-lg px-3 py-1.5 whitespace-nowrap hover:bg-red-50">Tutup Shift Sekarang</button>
     </div>
@@ -401,6 +411,14 @@ function onKeluar() {
         <div class="text-3xl mb-2">🔓</div>
         <h2 class="text-lg font-bold text-slate-800 mb-1">Mulai Shift</h2>
         <p class="text-sm text-slate-500 mb-4">Tekan tombol di bawah untuk mulai. Tanpa saldo awal — kas dihitung dari penjualan.</p>
+        <!-- Mode latihan (back-date): pilih tanggal shift bila saklar global nyala -->
+        <div v-if="pos.backdateEnabled" class="mb-4 text-left bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <label class="block text-xs font-medium text-amber-800 mb-1">🗓️ Tanggal shift (mode latihan)</label>
+          <input v-model="shiftDate" type="date" :max="todayStr"
+            class="w-full rounded-lg border border-amber-300 px-3 py-2 text-sm outline-none focus:border-amber-500" />
+          <p v-if="shiftDate < todayStr" class="text-[11px] text-amber-700 mt-1">⚠️ Shift & transaksi akan dicatat pada tanggal <b>{{ shiftDate }}</b> (tanggal mundur).</p>
+          <p v-else class="text-[11px] text-slate-400 mt-1">Hari ini (normal). Pilih tanggal lampau untuk latihan back-date.</p>
+        </div>
         <button @click="submitOpenShift" :disabled="openingBusy"
           class="w-full py-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-semibold disabled:opacity-50">
           {{ openingBusy ? 'Membuka…' : 'Mulai Shift' }}

@@ -10,6 +10,7 @@ export const usePosStore = defineStore('pos', {
     venue: null,
     bookingEnabled: true, // false = mode tiketing (venue tanpa lapangan, mis. waterpark)
     qrisDynamic: false, // true = QR otomatis via BRIAPI; false = QRIS manual (upload bukti)
+    backdateEnabled: false, // true = boleh buka shift tanggal mundur (mode latihan, saklar global)
     products: [],
     facilities: [],
     holidays: [], // tanggal libur nasional (ISO) — utk tarif booking 'holiday'
@@ -80,6 +81,7 @@ export const usePosStore = defineStore('pos', {
       this.venue = data.venue
       this.bookingEnabled = data.booking_enabled
       this.qrisDynamic = data.qris_dynamic
+      this.backdateEnabled = data.backdate_enabled
       this.openShift = data.open_shift
     },
     async fetchProducts() {
@@ -180,8 +182,10 @@ export const usePosStore = defineStore('pos', {
       await this.fetchStations()
       return data // { session, order }
     },
-    async doOpenShift(openingCash) {
-      const { data } = await client.post('/shifts/open', { opening_cash: openingCash })
+    async doOpenShift(openingCash, bizDate = null) {
+      const payload = { opening_cash: openingCash }
+      if (bizDate) payload.biz_date = bizDate // mode latihan: buka shift tanggal mundur
+      const { data } = await client.post('/shifts/open', payload)
       this.openShift = data.shift
     },
     async doCloseShift(countedCash, depositAmount, notes) {

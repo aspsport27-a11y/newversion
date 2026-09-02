@@ -641,3 +641,30 @@ class ShiftAdjustLog(db.Model):
             "adjusted_by_name": (users or {}).get(self.adjusted_by),
             "adjusted_at": self.adjusted_at.isoformat() if self.adjusted_at else None,
         }
+
+
+# ============================================================
+# App settings — konfigurasi global sederhana (key/value)
+# ============================================================
+class AppSetting(db.Model):
+    """Pengaturan global sistem (key/value). Mis. saklar back-date POS (latihan)."""
+    __tablename__ = "app_settings"
+
+    key = db.Column(db.String(60), primary_key=True)
+    value = db.Column(db.Text)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+def get_setting(key: str, default=None):
+    row = db.session.get(AppSetting, key)
+    return row.value if row is not None else default
+
+
+def set_setting(key: str, value):
+    row = db.session.get(AppSetting, key)
+    if row is None:
+        row = AppSetting(key=key)
+        db.session.add(row)
+    row.value = str(value)
+    db.session.commit()
+    return row

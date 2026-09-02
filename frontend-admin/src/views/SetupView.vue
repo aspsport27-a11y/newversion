@@ -7,6 +7,23 @@ import { useToastStore } from '../stores/toast'
 const auth = useAuthStore()
 const isManager = computed(() => auth.user?.role === 'manager_unit')
 const isAdminUnit = computed(() => auth.user?.role === 'admin_unit')
+const isAdminOrHO = computed(() => ['admin', 'head_office'].includes(auth.user?.role))
+
+// Saklar global back-date POS (mode latihan) — admin/HO
+const backdate = ref(false)
+const backdateBusy = ref(false)
+async function loadBackdate() {
+  if (!isAdminOrHO.value) return
+  try { const { data } = await client.get('/admin/settings/pos-backdate'); backdate.value = data.enabled } catch { /* */ }
+}
+async function toggleBackdate() {
+  backdateBusy.value = true
+  try {
+    const { data } = await client.post('/admin/settings/pos-backdate', { enabled: !backdate.value })
+    backdate.value = data.enabled
+    flash(backdate.value ? 'Mode latihan back-date DINYALAKAN' : 'Mode latihan back-date DIMATIKAN')
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal.') } finally { backdateBusy.value = false }
+}
 
 const venues = ref([])
 const terminals = ref([])
@@ -46,7 +63,7 @@ async function loadAll() {
   terminals.value = t.data.terminals
   cashiers.value = c.data.cashiers
 }
-onMounted(loadAll)
+onMounted(() => { loadAll(); loadBackdate() })
 
 // ---- Terminal ----
 function openTerminal(t = null) {
@@ -103,6 +120,22 @@ async function resetPin(u) {
   <div>
     <h1 class="text-2xl font-bold text-slate-800 mb-1">Setup Kasir</h1>
     <p class="text-slate-500 mb-4">Kelola terminal POS dan akun kasir per venue.</p>
+
+    <!-- Saklar global: mode latihan back-date POS (admin/HO) -->
+    <div v-if="isAdminOrHO" class="bg-white rounded-xl shadow-sm border p-4 mb-6 flex items-start justify-between gap-4 flex-wrap">
+      <div class="max-w-2xl">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-slate-700">🗓️ Mode Latihan (Back-date POS)</span>
+          <span :class="backdate ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'" class="text-xs rounded-full px-2 py-0.5 font-medium">{{ backdate ? 'AKTIF' : 'Mati' }}</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Saat AKTIF, semua terminal POS bisa membuka shift dengan <b>tanggal mundur</b> — transaksinya tercatat sebagai penjualan asli pada tanggal itu. Berguna agar kasir tiap venue bisa latihan/mengejar entry. <b>Matikan lagi</b> setelah kasir terbiasa agar tak ada salah tanggal. (Berlaku global, semua venue.)</p>
+      </div>
+      <button @click="toggleBackdate" :disabled="backdateBusy"
+        :class="backdate ? 'bg-red-600 hover:bg-red-700' : 'bg-brand-600 hover:bg-brand-700'"
+        class="text-white text-sm rounded-lg px-4 py-2 font-medium disabled:opacity-50 whitespace-nowrap">
+        {{ backdateBusy ? '…' : (backdate ? 'Matikan' : 'Nyalakan') }}
+      </button>
+    </div>
     <div class="flex items-center gap-2 mb-6">
       <label class="text-sm text-slate-500">Filter venue</label>
       <select v-model="filterVenue" class="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500">

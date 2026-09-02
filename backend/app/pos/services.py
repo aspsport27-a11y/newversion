@@ -555,6 +555,7 @@ def create_order(shift: Shift, cashier_id: int, data: dict) -> Order:
         customer_name=(data.get("customer_name") or None),
         customer_phone=(data.get("customer_phone") or None),
         status="open",
+        created_at=_biz_now(shift),  # ikut tanggal shift (back-date bila mode latihan)
     )
 
     subtotal, booking_specs = _build_order_items(order, items_in, shift.venue_id)
@@ -865,6 +866,10 @@ def pay_order(order: Order, shift: Shift, cashier_id: int, data: dict, commit: b
     PROVIDERS[provider](order, payment, data=data)
 
     if payment.status == "paid":
+        # back-date (mode latihan): stempel paid_at ke tanggal shift agar masuk
+        # laporan penjualan pada tanggal tsb (provider set paid_at=utcnow).
+        if getattr(shift, "biz_date", None):
+            payment.paid_at = _biz_now(shift)
         _apply_payment(order, payment, shift, cashier_id)
 
     if commit:
@@ -1158,21 +1163,41 @@ def _deduct_stock(order: Order, cashier_id: int) -> None:
 # ------------------------------------------------------------------
 # Shift
 # ------------------------------------------------------------------
-def open_shift(terminal_id, venue_id, cashier_id, opening_cash) -> Shift:
+def open_shift(terminal_id, venue_id, cashier_id, opening_cash, biz_date=None) -> Shift:
     existing = Shift.query.filter_by(terminal_id=terminal_id, status="open").first()
     if existing:
         raise PosError("Masih ada shift terbuka di terminal ini", "shift_already_open", 409)
+    now = datetime.utcnow()
+    # biz_date (mode latihan back-date): shift dibuka untuk tanggal lampau. opened_at
+    # dipasang ke tanggal itu (jam sekarang) supaya laporan/rekonsiliasi menganggapnya
+    # transaksi tanggal tsb. NULL = shift normal (hari ini).
+    if biz_date is not None and biz_date != now.date():
+        opened = datetime.combine(biz_date, now.time())
+    else:
+        biz_date = None
+        opened = now
     shift = Shift(
         terminal_id=terminal_id,
         venue_id=venue_id,
         cashier_id=cashier_id,
         status="open",
-        opened_at=datetime.utcnow(),
+        opened_at=opened,
+        biz_date=biz_date,
         opening_cash=_D(opening_cash),
     )
     db.session.add(shift)
     db.session.commit()
     return shift
+
+
+def _biz_now(shift) -> datetime:
+    """Timestamp efektif untuk order/pembayaran. Kalau shift di-backdate (biz_date
+    terisi), pakai tanggal itu dengan jam server sekarang; selain itu jam server biasa."""
+    now = datetime.utcnow()
+    bd = getattr(shift, "biz_date", None)
+    if bd:
+        return datetime.combine(bd, now.time())
+    return now
 
 
 def add_cash_movement(shift: Shift, mtype, amount, reason, user_id) -> CashMovement:
