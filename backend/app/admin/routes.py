@@ -3102,7 +3102,8 @@ def admin_event_quote():
         return _err("Tanggal selesai sebelum tanggal mulai")
     price, n = event_price_quote(vid, df, dto, st, et)
     conflicts = event_conflicts(vid, df, dto, st, et)
-    return jsonify(suggested_price=price, facility_count=n, conflict_count=len(conflicts)), 200
+    return jsonify(suggested_price=price, facility_count=n,
+                   conflict_count=len(conflicts), conflicts=conflicts), 200
 
 
 @admin_bp.get("/events")

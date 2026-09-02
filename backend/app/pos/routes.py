@@ -1792,7 +1792,8 @@ def event_quote():
         raise PosError("Tanggal selesai sebelum tanggal mulai", "bad_range")
     price, n_fac = _event_quote(terminal.venue_id, df, dt, st, et)
     conflicts = _event_conflicts(terminal.venue_id, df, dt, st, et)
-    return jsonify(suggested_price=price, facility_count=n_fac, conflict_count=len(conflicts)), 200
+    return jsonify(suggested_price=price, facility_count=n_fac,
+                   conflict_count=len(conflicts), conflicts=conflicts), 200
 
 
 @pos_bp.post("/events")

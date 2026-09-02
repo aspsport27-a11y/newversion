@@ -46,7 +46,7 @@ const payLabel = { paid: 'Lunas', partial: 'DP', open: 'Belum bayar' }
 // ---- Create ----
 const showCreate = ref(false)
 const cForm = ref({})
-const cQuote = ref({ suggested_price: 0, facility_count: 0, conflict_count: 0 })
+const cQuote = ref({ suggested_price: 0, facility_count: 0, conflict_count: 0, conflicts: [] })
 const cSaving = ref(false)
 const cErr = ref('')
 let quoteTimer = null
@@ -56,7 +56,7 @@ function openCreate() {
     name: '', renter: '', phone: '',
     date_from: today, date_to: today, start_time: '08:00', end_time: '17:00', price: null,
   }
-  cQuote.value = { suggested_price: 0, facility_count: 0, conflict_count: 0 }
+  cQuote.value = { suggested_price: 0, facility_count: 0, conflict_count: 0, conflicts: [] }
   cErr.value = ''; showCreate.value = true
   refreshQuote()   // muat jumlah lapangan & harga usulan langsung (tak perlu nama dulu)
 }
@@ -201,6 +201,19 @@ async function cancelEvent(e) {
           <div class="grid grid-cols-2 gap-2">
             <div><label class="text-xs text-slate-500">Jam mulai</label><input v-model="cForm.start_time" type="time" class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none" /></div>
             <div><label class="text-xs text-slate-500">Jam selesai</label><input v-model="cForm.end_time" type="time" class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none" /></div>
+          </div>
+          <!-- Booking yang akan tertimpa event (dipindah jadwal setelah event dibuat) -->
+          <div v-if="cQuote.conflict_count" class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs">
+            <p class="font-medium text-amber-800 mb-2">⚠️ {{ cQuote.conflict_count }} booking tertimpa event — dipindah jadwal (reschedule di POS/Pelunasan) setelah event dibuat:</p>
+            <div class="max-h-40 overflow-auto space-y-1">
+              <div v-for="c in cQuote.conflicts" :key="c.booking_id" class="bg-white rounded px-2 py-1 border border-amber-100">
+                <div class="flex justify-between gap-2">
+                  <span class="text-slate-700 font-medium">{{ c.customer_name || 'Tanpa nama' }}<span v-if="c.is_member" class="ml-1 text-[10px] bg-purple-100 text-purple-700 rounded px-1">member</span></span>
+                  <span class="text-slate-500 whitespace-nowrap">{{ c.start_time }}–{{ c.end_time }}</span>
+                </div>
+                <div class="text-slate-400">{{ c.facility_name }} · {{ c.booking_date }}<span v-if="c.customer_phone"> · {{ c.customer_phone }}</span></div>
+              </div>
+            </div>
           </div>
           <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
             <div class="flex justify-between text-xs text-slate-500 mb-1">
