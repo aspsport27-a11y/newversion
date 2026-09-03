@@ -3867,33 +3867,9 @@ def order_reschedule_admin(order_id):
     return jsonify(order=order.to_dict(), reschedule=info), 200
 
 
-@admin_bp.delete("/orders/<int:order_id>")
-@jwt_required()
-@ORDER_CANCEL
-def order_delete_admin(order_id):
-    """Hapus permanen transaksi yang SUDAH dibatalkan (status void) — utk
-    membersihkan riwayat dari transaksi yang keliru/duplikat. Kalau masih ada
-    payment berstatus 'paid' (harusnya sudah 'void' saat dibatalkan, tapi ada
-    kasus data lama yang tak konsisten), di-void dulu di sini — supaya tidak
-    salah terhitung di laporan manapun. Total shift yang SUDAH ditutup
-    sengaja tidak diubah (kas historis yang sudah direkonsiliasi dibiarkan)."""
-    order = db.session.get(Order, order_id)
-    if not order:
-        return _err("Order tidak ditemukan", "not_found", 404)
-    forced = _forced_venue()
-    if forced is not None and order.venue_id != forced:
-        return _err("Bukan order venue Anda", "forbidden", 403)
-    if order.status != "void":
-        return _err(
-            "Hanya transaksi berstatus Dibatalkan yang bisa dihapus permanen.",
-            "bad_status", 409,
-        )
-    # DP/pendapatan hangus = pembayaran yg masih 'paid' pada order batal (uang
-    # ada di shift yg sudah ditutup). Kebijakan: hapus permanen dipakai utk
-    # KOREKSI (salah input/dobel) → keluarkan dari kas juga supaya semua laporan
-    # konsisten. Maka total shift terkait ikut DIKOREKSI TURUN di sini (bukan
-    # cuma buang baris payment). Shift yg masih buka tak ada di sini karena
-    # payment-nya sudah di-void & totalnya sudah dibalik saat pembatalan.
+def _permanent_delete_order(order, uid):
+    """Koreksi kas + catat audit + hapus order (TANPA commit; caller yang commit).
+    Kembalikan `kept` (uang yg dikeluarkan dari kas). Order harus sudah 'void'."""
     kept = round(sum(float(p.amount) for p in order.payments if p.status == "paid"), 2)
     for p in order.payments:
         if p.status != "paid" or not p.shift_id:
@@ -3913,16 +3889,74 @@ def order_delete_admin(order_id):
         order_number=order.order_number, venue_id=order.venue_id,
         customer_name=order.customer_name, status_before=order.status,
         total_amount=order.total_amount, forfeited_dp=kept,
-        deleted_by=_current_user().id,
+        deleted_by=uid,
         note=("Koreksi: Rp %s dikeluarkan dari kas (total shift ikut dikoreksi)."
               % f"{int(kept):,}".replace(",", ".") if kept > 0 else None),
     ))
     db.session.delete(order)  # order_items & payments ikut terhapus (ondelete=CASCADE)
+    return kept
+
+
+@admin_bp.delete("/orders/<int:order_id>")
+@jwt_required()
+@ORDER_CANCEL
+def order_delete_admin(order_id):
+    """Hapus permanen transaksi yang SUDAH dibatalkan (status void). Kalau masih
+    ada payment 'paid' (data lama), total shift terkait ikut DIKOREKSI TURUN &
+    uangnya keluar dari kas — supaya semua laporan konsisten. Jejak di 'Riwayat Hapus'."""
+    order = db.session.get(Order, order_id)
+    if not order:
+        return _err("Order tidak ditemukan", "not_found", 404)
+    forced = _forced_venue()
+    if forced is not None and order.venue_id != forced:
+        return _err("Bukan order venue Anda", "forbidden", 403)
+    if order.status != "void":
+        return _err(
+            "Hanya transaksi berstatus Dibatalkan yang bisa dihapus permanen.",
+            "bad_status", 409,
+        )
+    kept = _permanent_delete_order(order, _current_user().id)
     db.session.commit()
     msg = "Transaksi dihapus permanen"
     if kept > 0:
         msg = f"Transaksi dihapus permanen — Rp {int(kept):,} dikeluarkan dari kas (koreksi)".replace(",", ".")
     return jsonify(message=msg, forfeited_dp=kept), 200
+
+
+@admin_bp.post("/orders/bulk-delete")
+@jwt_required()
+@ORDER_CANCEL
+def orders_bulk_delete():
+    """Hapus banyak transaksi sekaligus (utk bersih-bersih cepat, mis. data
+    latihan). Untuk tiap order: kalau belum 'void' dibatalkan dulu (uang keluar
+    dari penjualan/kas), lalu dihapus permanen. Scoped ke venue manajer."""
+    from ..pos.services import PosError, cancel_order
+
+    d = request.get_json(silent=True) or {}
+    ids = d.get("order_ids") or []
+    if not isinstance(ids, list) or not ids:
+        return _err("order_ids wajib (daftar id)")
+    if len(ids) > 500:
+        return _err("Maksimal 500 transaksi per sekali hapus")
+    forced = _forced_venue()
+    uid = _current_user().id
+    deleted = 0
+    skipped = 0
+    for oid in ids:
+        order = db.session.get(Order, oid)
+        if not order or (forced is not None and order.venue_id != forced):
+            skipped += 1
+            continue
+        try:
+            if order.status in ("open", "partial", "paid"):
+                cancel_order(order, uid)  # void + koreksi shift (commit di dalam)
+            _permanent_delete_order(order, uid)
+            db.session.commit()
+            deleted += 1
+        except (PosError, Exception):
+            db.session.rollback()
+            skipped += 1
+    return jsonify(deleted=deleted, skipped=skipped), 200
 
 
 @admin_bp.get("/deleted-orders")

@@ -129,6 +129,32 @@ async function openDetail(o) {
 function venueName(id) { const v = venues.value.find((x) => x.id === id); return v ? v.code : '—' }
 
 const busy = ref(false)
+
+// --- seleksi banyak utk hapus massal ---
+const selected = ref(new Set())
+function toggleSel(id, ev) { ev?.stopPropagation(); const s = new Set(selected.value); s.has(id) ? s.delete(id) : s.add(id); selected.value = s }
+const pageAllSelected = computed(() => paged.value.length > 0 && paged.value.every((o) => selected.value.has(o.id)))
+function toggleSelPage(ev) {
+  ev?.stopPropagation()
+  const s = new Set(selected.value)
+  if (pageAllSelected.value) paged.value.forEach((o) => s.delete(o.id))
+  else paged.value.forEach((o) => s.add(o.id))
+  selected.value = s
+}
+function clearSel() { selected.value = new Set() }
+const colCount = computed(() => 9 + (isManager.value ? 0 : 1) + (canCancel.value ? 1 : 0))
+async function bulkDelete() {
+  const ids = [...selected.value]
+  if (!ids.length) return
+  if (!window.confirm(`Hapus PERMANEN ${ids.length} transaksi terpilih?\n\nYang belum dibatalkan akan dibatalkan dulu (uang keluar dari penjualan/kas), lalu dihapus. Tindakan ini TIDAK bisa dibatalkan.`)) return
+  busy.value = true
+  try {
+    const { data } = await client.post('/admin/orders/bulk-delete', { order_ids: ids })
+    clearSel()
+    await loadOrders()
+    flash(`${data.deleted} transaksi dihapus${data.skipped ? `, ${data.skipped} dilewati` : ''}`)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus massal.') } finally { busy.value = false }
+}
 async function cancelOrder(o, ev) {
   ev?.stopPropagation()
   const warn = o.status === 'paid'
@@ -235,10 +261,20 @@ async function deleteOrder(o, ev) {
       </div>
     </div>
 
+    <!-- Bar aksi hapus massal -->
+    <div v-if="canCancel && selected.size" v-show="tab === 'tx'" class="bg-red-50 border border-red-200 rounded-xl p-3 mb-3 flex items-center justify-between gap-3 flex-wrap">
+      <span class="text-sm text-red-700 font-medium">{{ selected.size }} transaksi terpilih</span>
+      <div class="flex gap-2">
+        <button @click="clearSel" class="text-sm text-slate-500 hover:text-slate-700 px-3 py-1.5">Batal pilih</button>
+        <button @click="bulkDelete" :disabled="busy" class="text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg px-4 py-1.5 font-medium disabled:opacity-50">🗑️ Hapus {{ selected.size }} terpilih</button>
+      </div>
+    </div>
+
     <div v-show="tab === 'tx'" class="bg-white rounded-xl shadow-sm border overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+            <th v-if="canCancel" class="px-3 py-3 w-10 text-center"><input type="checkbox" :checked="pageAllSelected" @click="toggleSelPage" class="accent-red-600" title="Pilih semua di halaman ini" /></th>
             <th class="px-4 py-3 font-medium">Kode</th>
             <th v-if="!isManager" class="px-4 py-3 font-medium">Venue</th>
             <th class="px-4 py-3 font-medium">Waktu</th>
@@ -251,10 +287,11 @@ async function deleteOrder(o, ev) {
             <th class="px-4 py-3"></th>
           </tr></thead>
           <tbody>
-            <tr v-if="loading"><td colspan="10" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
-            <tr v-else-if="!orders.length"><td colspan="10" class="px-4 py-8 text-center text-slate-400">Tidak ada transaksi pada periode ini.</td></tr>
-            <tr v-else-if="!filtered.length"><td colspan="10" class="px-4 py-8 text-center text-slate-400">Tidak ada transaksi yang cocok dengan filter.</td></tr>
-            <tr v-for="o in paged" :key="o.id" @click="openDetail(o)" class="border-t hover:bg-slate-50 cursor-pointer">
+            <tr v-if="loading"><td :colspan="colCount" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
+            <tr v-else-if="!orders.length"><td :colspan="colCount" class="px-4 py-8 text-center text-slate-400">Tidak ada transaksi pada periode ini.</td></tr>
+            <tr v-else-if="!filtered.length"><td :colspan="colCount" class="px-4 py-8 text-center text-slate-400">Tidak ada transaksi yang cocok dengan filter.</td></tr>
+            <tr v-for="o in paged" :key="o.id" @click="openDetail(o)" class="border-t hover:bg-slate-50 cursor-pointer" :class="selected.has(o.id) ? 'bg-red-50/60' : ''">
+              <td v-if="canCancel" class="px-3 py-3 text-center" @click.stop><input type="checkbox" :checked="selected.has(o.id)" @click="toggleSel(o.id, $event)" class="accent-red-600" /></td>
               <td class="px-4 py-3 font-mono text-xs text-slate-500">{{ o.order_number }}</td>
               <td v-if="!isManager" class="px-4 py-3 text-slate-600">{{ venueName(o.venue_id) }}</td>
               <td class="px-4 py-3 text-slate-500 whitespace-nowrap">{{ fmtTime(o.created_at) }}</td>
