@@ -143,6 +143,17 @@ const shiftHoursOpen = computed(() => {
 })
 const shiftTooLong = computed(() => shiftHoursOpen.value >= SHIFT_WARN_HOURS)
 const shiftOpenedLabel = computed(() => pos.openShift?.opened_at ? parseUTC(pos.openShift.opened_at).toLocaleString('id-ID') : '')
+// tanggal shift yang sedang berjalan (biz_date kalau back-date, else tgl buka)
+const BULAN_SGL = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+const shiftDateLabel = computed(() => {
+  const s = pos.openShift
+  if (!s) return ''
+  let dt
+  if (s.biz_date) { const [y, m, d] = s.biz_date.split('-').map(Number); dt = new Date(y, m - 1, d) }
+  else if (s.opened_at) dt = parseUTC(s.opened_at)
+  else return ''
+  return `${dt.getDate()} ${BULAN_SGL[dt.getMonth()]} ${dt.getFullYear()}`
+})
 const shiftOpenText = computed(() => {
   const h = Math.floor(shiftHoursOpen.value)
   return h >= 48 ? `${Math.floor(h / 24)} hari` : `${h} jam`
@@ -377,6 +388,11 @@ function onKeluar() {
           <p class="text-sm font-semibold">{{ pos.terminal?.name || 'POS' }}</p>
           <p class="text-[11px] text-brand-100">{{ pos.cashier?.username }} · {{ pos.terminal?.code }}</p>
         </div>
+        <!-- indikator tanggal shift berjalan -->
+        <span v-if="pos.openShift" :class="pos.openShift.biz_date ? 'bg-amber-400 text-amber-900' : 'bg-white/15 text-white'"
+          class="text-[11px] font-semibold rounded-lg px-2.5 py-1 whitespace-nowrap" :title="pos.openShift.biz_date ? 'Mode latihan — shift tanggal mundur' : 'Tanggal shift berjalan'">
+          🗓️ Shift: {{ shiftDateLabel }}<span v-if="pos.openShift.biz_date"> · LATIHAN</span>
+        </span>
       </div>
       <div class="flex items-center gap-2">
         <button @click="showCategoryReport = true"
