@@ -166,6 +166,19 @@ const grouped = computed(() => {
     it.type === 'group' && it.children.length === 1 ? { key: it.key, type: 'single', b: it.children[0] } : it,
   )
 })
+// pagination tab Booking (per 50)
+const bkPage = ref(1)
+const BK_PAGE_SIZE = 50
+const bkTotalPages = computed(() => Math.max(1, Math.ceil(grouped.value.length / BK_PAGE_SIZE)))
+const pagedGrouped = computed(() => {
+  const start = (bkPage.value - 1) * BK_PAGE_SIZE
+  return grouped.value.slice(start, start + BK_PAGE_SIZE)
+})
+watch(() => grouped.value.length, () => { bkPage.value = 1 })
+const bkRangeStart = computed(() => grouped.value.length ? (bkPage.value - 1) * BK_PAGE_SIZE + 1 : 0)
+const bkRangeEnd = computed(() => Math.min(bkPage.value * BK_PAGE_SIZE, grouped.value.length))
+function bkPrev() { if (bkPage.value > 1) bkPage.value-- }
+function bkNext() { if (bkPage.value < bkTotalPages.value) bkPage.value++ }
 function grpDateRange(children) {
   const ds = children.map((c) => c.booking_date).sort()
   const f = (d) => new Date(d + 'T00:00:00').toLocaleDateString('id-ID', { day: '2-digit', month: 'short' })
@@ -789,7 +802,7 @@ onMounted(async () => { await loadVenues(); await run() })
           <tbody>
             <tr v-if="loading"><td :colspan="showCoaching ? 13 : 12" class="px-4 py-8 text-center text-slate-400">Memuat…</td></tr>
             <tr v-else-if="!shown.length"><td :colspan="showCoaching ? 13 : 12" class="px-4 py-8 text-center text-slate-400">Belum ada booking.</td></tr>
-            <template v-for="it in grouped" :key="it.key">
+            <template v-for="it in pagedGrouped" :key="it.key">
               <!-- baris tunggal (order 1 tanggal / booking tanpa order) -->
               <tr v-if="it.type === 'single'" @click="openDetail(it.b)" class="border-t hover:bg-slate-50 cursor-pointer">
                 <td class="px-4 py-3 text-slate-700">{{ fmtDate(it.b.booking_date) }}</td>
@@ -856,6 +869,15 @@ onMounted(async () => { await loadVenues(); await run() })
             </template>
           </tbody>
         </table>
+      </div>
+      <!-- pagination (50 per halaman) -->
+      <div v-if="bkTotalPages > 1" class="flex items-center justify-between gap-3 px-4 py-3 border-t text-sm">
+        <span class="text-slate-500">Menampilkan {{ bkRangeStart }}–{{ bkRangeEnd }} dari {{ grouped.length }}</span>
+        <div class="flex items-center gap-2">
+          <button @click="bkPrev" :disabled="bkPage <= 1" class="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 disabled:opacity-40 hover:bg-slate-50">‹ Sebelumnya</button>
+          <span class="text-slate-600">Hal. {{ bkPage }} / {{ bkTotalPages }}</span>
+          <button @click="bkNext" :disabled="bkPage >= bkTotalPages" class="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 disabled:opacity-40 hover:bg-slate-50">Berikutnya ›</button>
+        </div>
       </div>
     </div>
     </template>
