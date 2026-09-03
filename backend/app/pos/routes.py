@@ -18,6 +18,17 @@ def _wdate(col):
     """Tanggal WITA (UTC+8) dari kolom timestamp UTC — 'hari bisnis' venue."""
     return func.date(col + text("interval '8 hours'"))
 
+
+def _sdate(fallback_ts):
+    """Tanggal 'hari kerja' = tanggal SHIFT dibuka (WITA) / biz_date; sesi malam
+    lewat tengah malam tetap 1 hari. Query harus (outer)join Shift. Fallback ke
+    timestamp WITA kalau tanpa shift."""
+    return func.coalesce(
+        Shift.biz_date,
+        func.date(Shift.opened_at + text("interval '8 hours'")),
+        func.date(fallback_ts + text("interval '8 hours'")),
+    )
+
 from ..extensions import db
 from ..models import Employee, User, Venue, get_setting
 from ..perms import has_perm
@@ -403,10 +414,11 @@ def report_category_daily():
 
     payments = (
         Payment.query.join(Order, Payment.order_id == Order.id)
+        .outerjoin(Shift, Payment.shift_id == Shift.id)
         .filter(
             Order.venue_id == terminal.venue_id,
             Payment.status == "paid",
-            _wdate(Payment.paid_at) == today,  # tanggal WITA
+            _sdate(Payment.paid_at) == today,  # tanggal shift dibuka (sesi)
         )
         .all()
     )

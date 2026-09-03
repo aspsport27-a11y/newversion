@@ -18,6 +18,19 @@ def _wdate(col):
     harus digeser +8 jam supaya cocok dgn tampilan (yg juga WITA)."""
     return func.date(col + text("interval '8 hours'"))
 
+
+def _sdate(fallback_ts):
+    """Tanggal 'hari kerja' transaksi = tanggal SHIFT DIBUKA (WITA) atau biz_date
+    (back-date) — supaya sesi malam yg lewat tengah malam tetap satu hari (tanggal
+    buka shift). Kalau transaksi tanpa shift (mis. event dari portal), fallback ke
+    timestamp WITA. Query HARUS meng-(outer)join Shift dulu."""
+    from ..pos.models import Shift as _S
+    return func.coalesce(
+        _S.biz_date,
+        func.date(_S.opened_at + text("interval '8 hours'")),
+        func.date(fallback_ts + text("interval '8 hours'")),
+    )
+
 from ..extensions import db
 from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, ShiftAdjustLog, ShiftReopenLog, Supplier, User, Venue, get_setting, set_setting
 from ..security import (
@@ -2249,7 +2262,8 @@ def _sales_growth_mom(vids):
         rows = (
             db.session.query(Order.venue_id, func.coalesce(func.sum(Payment.amount), 0))
             .join(Payment, Payment.order_id == Order.id)
-            .filter(Payment.status == "paid", _wdate(Payment.paid_at).between(d_from, d_to))
+            .outerjoin(Shift, Payment.shift_id == Shift.id)
+            .filter(Payment.status == "paid", _sdate(Payment.paid_at).between(d_from, d_to))
             .group_by(Order.venue_id)
             .all()
         )
@@ -2304,20 +2318,23 @@ def dashboard_summary():
     pay_today_q = _scoped(
         db.session.query(func.coalesce(func.sum(Payment.amount), 0))
         .join(Order, Payment.order_id == Order.id)
-        .filter(Payment.status == "paid", _wdate(Payment.paid_at) == today),
+        .outerjoin(Shift, Payment.shift_id == Shift.id)
+        .filter(Payment.status == "paid", _sdate(Payment.paid_at) == today),
         Order,
     )
     pay_yesterday_q = _scoped(
         db.session.query(func.coalesce(func.sum(Payment.amount), 0))
         .join(Order, Payment.order_id == Order.id)
-        .filter(Payment.status == "paid", _wdate(Payment.paid_at) == yesterday),
+        .outerjoin(Shift, Payment.shift_id == Shift.id)
+        .filter(Payment.status == "paid", _sdate(Payment.paid_at) == yesterday),
         Order,
     )
     revenue_today = float(pay_today_q.scalar() or 0)
     revenue_yesterday = float(pay_yesterday_q.scalar() or 0)
 
     order_count_today = _scoped(
-        Order.query.filter(Order.status == "paid", _wdate(Order.created_at) == today),
+        Order.query.outerjoin(Shift, Order.shift_id == Shift.id)
+        .filter(Order.status == "paid", _sdate(Order.created_at) == today),
         Order,
     ).count()
 
@@ -2378,8 +2395,9 @@ def report_sales():
     pay_q = (
         db.session.query(Payment)
         .join(Order, Payment.order_id == Order.id)
+        .outerjoin(Shift, Payment.shift_id == Shift.id)
         .filter(Payment.status == "paid")
-        .filter(_wdate(Payment.paid_at).between(d_from, d_to))
+        .filter(_sdate(Payment.paid_at).between(d_from, d_to))  # tanggal shift (sesi)
     )
     if ids is not None:
         pay_q = pay_q.filter(Order.venue_id.in_(ids)) if ids else pay_q.filter(db.false())
@@ -2398,13 +2416,13 @@ def report_sales():
     daily = [
         {"date": str(day), "revenue": float(a)}
         for day, a in pay_q.with_entities(
-            _wdate(Payment.paid_at), func.coalesce(func.sum(Payment.amount), 0)
-        ).group_by(_wdate(Payment.paid_at)).order_by(_wdate(Payment.paid_at)).all()
+            _sdate(Payment.paid_at), func.coalesce(func.sum(Payment.amount), 0)
+        ).group_by(_sdate(Payment.paid_at)).order_by(_sdate(Payment.paid_at)).all()
     ]
 
-    # --- komposisi jenis: dari order LUNAS dibuat dalam rentang ---
-    ord_q = Order.query.filter(
-        Order.status == "paid", _wdate(Order.created_at).between(d_from, d_to)
+    # --- komposisi jenis: dari order LUNAS pada hari kerja (tanggal shift) ---
+    ord_q = Order.query.outerjoin(Shift, Order.shift_id == Shift.id).filter(
+        Order.status == "paid", _sdate(Order.created_at).between(d_from, d_to)
     )
     if ids is not None:
         ord_q = ord_q.filter(Order.venue_id.in_(ids)) if ids else ord_q.filter(db.false())
@@ -3714,7 +3732,9 @@ def orders_list():
     d_from, d_to = _date_range()
     forced = _forced_venue()
     vid = forced if forced is not None else request.args.get("venue_id", type=int)
-    q = Order.query.filter(_wdate(Order.created_at).between(d_from, d_to))
+    # hari kerja = tanggal shift dibuka (sesi malam yg lewat tengah malam tetap 1 hari)
+    q = (Order.query.outerjoin(Shift, Order.shift_id == Shift.id)
+         .filter(_sdate(Order.created_at).between(d_from, d_to)))
     if vid:
         q = q.filter(Order.venue_id == vid)
     status = request.args.get("status")
