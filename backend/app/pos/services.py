@@ -1103,9 +1103,10 @@ def cancel_order(order: Order, uid: int = None) -> Order:
     - paid: BALIKKAN efeknya — stok yg sudah terjual dikembalikan (dicatat sbg
       penyesuaian, bukan dihapus dr riwayat) & akumulasi shift dikurangi lagi.
       Payment yg sudah 'paid' ditandai 'void' (keluar dari perhitungan laporan
-      manapun, tapi barisnya tetap ada utk audit). DITOLAK kalau shift penerima
-      pembayarannya sudah ditutup (sudah masuk rekonsiliasi kas / disetor —
-      tak aman diubah retroaktif)."""
+      manapun, tapi barisnya tetap ada utk audit). Kebijakan (2026-09): pembatalan
+      SELALU mengeluarkan uang dari penjualan/kas — WALAU shift penerima sudah
+      DITUTUP (total shift historis ikut dikoreksi turun). Admin berwenang penuh;
+      tak ada lagi 'DP hangus tetap jadi pendapatan'."""
     if order.status not in ("open", "partial", "paid"):
         raise PosError("Order sudah dibatalkan/tidak valid", "cannot_cancel", 409)
 
@@ -1123,16 +1124,12 @@ def cancel_order(order: Order, uid: int = None) -> Order:
                         quantity=qty, balance_after=product.stock_qty,
                         reference=order.order_number, created_by=uid,
                     ))
-        # Balikkan efek pembayaran PER-shift:
-        # - shift masih BUKA  → kurangi akumulasi shift & tandai payment 'void'.
-        # - shift sudah DITUTUP → JANGAN diubah (kas historis sudah direkonsiliasi/
-        #   disetor). Pembayaran dibiarkan 'paid' → jadi pendapatan/DP hangus yg
-        #   tetap tercatat; ordernya tetap bisa dibatalkan lalu dihapus permanen
-        #   (jejak DP hangus muncul di tab DP Hangus & Riwayat Hapus).
+        # Balikkan efek pembayaran PER-shift — SELALU (baik shift buka maupun sudah
+        # tutup): kurangi akumulasi shift & tandai payment 'void' supaya keluar dari
+        # semua laporan penjualan. Untuk shift yg sudah ditutup ini koreksi retroaktif
+        # (kewenangan admin) — kas historis ikut turun.
         for p in paid_payments:
             shift = db.session.get(Shift, p.shift_id) if p.shift_id else None
-            if shift and shift.status == "closed":
-                continue  # historis — biarkan apa adanya (pendapatan hangus)
             if shift:
                 amt = Decimal(str(p.amount))
                 shift.total_sales = Decimal(str(shift.total_sales or 0)) - amt
