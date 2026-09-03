@@ -3351,7 +3351,10 @@ def bookings_list():
         .join(Facility, FacilityBooking.facility_id == Facility.id)
         .outerjoin(OrderItem, FacilityBooking.order_item_id == OrderItem.id)
         .outerjoin(Order, OrderItem.order_id == Order.id)
-        .filter(FacilityBooking.booking_date.between(d_from, d_to))
+        .filter(
+            FacilityBooking.booking_date.between(d_from, d_to),
+            FacilityBooking.status != "cancelled",  # booking yg dibatalkan/dihapus tak ditampilkan
+        )
     )
     if vid:
         q = q.filter(FacilityBooking.venue_id == vid)

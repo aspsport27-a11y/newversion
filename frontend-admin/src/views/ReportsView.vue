@@ -86,7 +86,11 @@ function prepOrder(o) {
   return {
     ...o,
     _prod: o.items.filter((i) => EDITABLE_TYPES.includes(i.item_type)).map((i) => ({ item_type: i.item_type, product_id: i.product_id || null, name: i.name, quantity: Number(i.quantity), unit_price: Number(i.unit_price) })),
-    _locked: o.items.filter((i) => !EDITABLE_TYPES.includes(i.item_type)),
+    _locked: o.items.filter((i) => !EDITABLE_TYPES.includes(i.item_type)).map((i) => ({
+      id: i.id, item_type: i.item_type, name: i.name, quantity: Number(i.quantity),
+      unit_price: Number(i.unit_price), line_total: Number(i.line_total),
+      priceEditable: ['booking', 'rental'].includes(i.item_type),
+    })),
     _methodSet: [...new Set((o.payments || []).filter((p) => p.status === 'paid').map((p) => p.method))],
     _methods: [...new Set((o.payments || []).filter((p) => p.status === 'paid').map((p) => p.method))].join(', '),
   }
@@ -137,9 +141,10 @@ async function saveOpeningCash() {
 }
 function soAddLine(o) { o._prod.push({ item_type: 'product', product_id: null, name: '', quantity: 1, unit_price: null }) }
 function soRmLine(o, i) { o._prod.splice(i, 1) }
+function lockedLine(lk) { return lk.priceEditable ? (Number(lk.quantity) || 0) * (Number(lk.unit_price) || 0) : (Number(lk.line_total) || 0) }
 function soOrderTotal(o) {
   const prod = o._prod.reduce((t, i) => t + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0)
-  const locked = o._locked.reduce((t, i) => t + (Number(i.line_total) || 0), 0)
+  const locked = o._locked.reduce((t, i) => t + lockedLine(i), 0)
   return prod + locked - (Number(o.discount_amount) || 0)
 }
 async function saveOrder(o) {
@@ -147,7 +152,11 @@ async function saveOrder(o) {
   try {
     const items = o._prod.filter((i) => i.name?.trim() && Number(i.quantity) > 0)
       .map((i) => ({ item_type: i.item_type || 'product', product_id: i.product_id || null, name: i.name.trim(), quantity: Number(i.quantity), unit_price: Number(i.unit_price) || 0 }))
-    await client.put(`/admin/orders/${o.id}/edit-items`, { items })
+    const lockedPrices = {}
+    for (const lk of o._locked) { if (lk.priceEditable && lk.id != null && Number(lk.unit_price) >= 0) lockedPrices[lk.id] = Number(lk.unit_price) }
+    const body = { items }
+    if (Object.keys(lockedPrices).length) body.locked_prices = lockedPrices
+    await client.put(`/admin/orders/${o.id}/edit-items`, body)
     // muat ulang daftar + tabel shift
     const { data } = await client.get(`/admin/shifts/${soShift.value.id}/orders`)
     soOrders.value = data.orders.map(prepOrder)
@@ -496,12 +505,14 @@ onMounted(async () => { await loadVenues(); await run() })
               </div>
               <span class="text-xs text-slate-400">{{ o.customer_name || '' }}</span>
             </div>
-            <!-- item terkunci (booking/tiket/rental) -->
+            <!-- item terkunci: booking/rental → harga bisa diedit (nego), jam & lapangan tetap -->
             <div v-for="lk in o._locked" :key="'lk'+lk.id" class="flex items-center gap-2 text-sm text-slate-500 mb-1">
               <span class="flex-1">🔒 {{ lk.name }} <span class="text-xs text-slate-400">({{ lk.item_type }})</span></span>
               <span>{{ lk.quantity }} ×</span>
-              <span class="w-24 text-right">{{ rupiah(lk.unit_price) }}</span>
-              <span class="w-24 text-right font-medium">{{ rupiah(lk.line_total) }}</span>
+              <input v-if="lk.priceEditable" v-model.number="lk.unit_price" type="number" min="0" title="Harga booking (nego) — jam & lapangan tetap"
+                class="w-24 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-sm text-right outline-none focus:border-amber-500" />
+              <span v-else class="w-24 text-right">{{ rupiah(lk.unit_price) }}</span>
+              <span class="w-24 text-right font-medium">{{ rupiah(lockedLine(lk)) }}</span>
             </div>
             <!-- item produk yang bisa diedit -->
             <div v-for="(it, i) in o._prod" :key="i" class="flex items-center gap-2 mb-1.5">
