@@ -42,8 +42,13 @@ function openEdit(o) {
   editErr.value = ''
   editItems.value = (o.items || []).filter((i) => EDITABLE.includes(i.item_type))
     .map((i) => ({ item_type: i.item_type, product_id: i.product_id || null, name: i.name, quantity: Number(i.quantity), unit_price: Number(i.unit_price) }))
+  // booking/rental: jam & lapangan terkunci, TAPI harga boleh diedit (nego)
   editLocked.value = (o.items || []).filter((i) => !EDITABLE.includes(i.item_type))
+    .map((i) => ({ id: i.id, item_type: i.item_type, name: i.name, quantity: Number(i.quantity),
+      unit_price: Number(i.unit_price), line_total: Number(i.line_total),
+      priceEditable: ['booking', 'rental'].includes(i.item_type) }))
 }
+function lockedLine(lk) { return lk.priceEditable ? (Number(lk.quantity) || 0) * (Number(lk.unit_price) || 0) : (Number(lk.line_total) || 0) }
 function addEditLine() { editItems.value.push({ item_type: 'product', product_id: null, name: '', quantity: 1, unit_price: null }) }
 // ketik/pilih nama dari daftar produk venue → isi harga, tipe & product_id
 function onPickEdit(it) {
@@ -60,13 +65,18 @@ function onPickEdit(it) {
 function rmEditLine(i) { editItems.value.splice(i, 1) }
 const editTotal = computed(() =>
   editItems.value.reduce((t, i) => t + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0) +
-  editLocked.value.reduce((t, i) => t + (Number(i.line_total) || 0), 0))
+  editLocked.value.reduce((t, i) => t + lockedLine(i), 0))
 async function saveEdit(o) {
   const items = editItems.value.filter((i) => i.name?.trim() && Number(i.quantity) > 0)
     .map((i) => ({ item_type: i.item_type || 'product', product_id: i.product_id || null, name: i.name.trim(), quantity: Number(i.quantity), unit_price: Number(i.unit_price) || 0 }))
+  // harga booking/rental yg diedit → map {id: harga}
+  const lockedPrices = {}
+  for (const lk of editLocked.value) {
+    if (lk.priceEditable && lk.id != null && Number(lk.unit_price) >= 0) lockedPrices[lk.id] = Number(lk.unit_price)
+  }
   savingEdit.value = true; editErr.value = ''
   try {
-    await pos.editOrderItems(o.id, items)
+    await pos.editOrderItems(o.id, items, lockedPrices)
     editingId.value = null
     await load(); emit('changed')
   } catch (e) { editErr.value = e?.response?.data?.message || 'Gagal menyimpan.' }
@@ -130,7 +140,12 @@ async function cancel(o) {
           <div v-else class="mt-2 space-y-1.5">
             <p class="text-xs text-slate-500">Ubah nama/qty/harga item, lalu Simpan. Kas & total ikut menyesuaikan.</p>
             <div v-for="lk in editLocked" :key="'lk'+lk.id" class="flex items-center gap-2 text-xs text-slate-500">
-              <span class="flex-1 truncate">🔒 {{ lk.name }}</span><span>{{ lk.quantity }}×</span><span>{{ rupiah(lk.line_total) }}</span>
+              <span class="flex-1 truncate">🔒 {{ lk.name }}</span>
+              <span>{{ lk.quantity }}×</span>
+              <!-- booking/rental: jam & lapangan terkunci, harga boleh diedit (nego) -->
+              <input v-if="lk.priceEditable" v-model.number="lk.unit_price" type="number" min="0" title="Harga booking (nego) — jam & lapangan tetap"
+                class="w-24 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-sm text-right outline-none focus:border-amber-500" />
+              <span v-else class="w-24 text-right">{{ rupiah(lk.line_total) }}</span>
             </div>
             <datalist id="posEditProducts">
               <option v-for="p in pos.products" :key="p.id" :value="p.name" />

@@ -372,8 +372,10 @@ export const usePosStore = defineStore('pos', {
       const { data } = await client.get('/orders/recent')
       return data.orders
     },
-    async editOrderItems(orderId, items) {
-      const { data } = await client.put(`/orders/${orderId}/edit-items`, { items })
+    async editOrderItems(orderId, items, lockedPrices = null) {
+      const body = { items }
+      if (lockedPrices && Object.keys(lockedPrices).length) body.locked_prices = lockedPrices
+      const { data } = await client.put(`/orders/${orderId}/edit-items`, body)
       return data.order
     },
     async createMemberBooking(payload) {

@@ -997,7 +997,7 @@ def expire_stale_qris(payment: Payment) -> None:
         payment.status = "failed"
 
 
-def edit_order_items_core(order, new_items, cashier_id=None):
+def edit_order_items_core(order, new_items, cashier_id=None, locked_prices=None):
     """Ganti item PRODUK/TIKET sebuah order (nama/qty/harga) + rekonsiliasi:
     total order, pembayaran (paid terakhir disesuaikan), akumulasi shift, & STOK
     (selisih qty per produk). Item booking/rental TAK diubah (pakai
@@ -1020,6 +1020,23 @@ def edit_order_items_core(order, new_items, cashier_id=None):
         parsed.append((itype, it.get("product_id"), name, qty, price))
 
     old_total = float(order.total_amount or 0)
+
+    # Harga item booking/rental boleh diedit (nego) — jam & lapangan TAK diubah.
+    # locked_prices = {order_item_id: harga_baru}. Update unit_price & line_total
+    # item terkunci yg cocok (slot di facility_bookings tak tersentuh).
+    if locked_prices:
+        lp = {str(k): v for k, v in locked_prices.items()}
+        for it in order.items:
+            if it.item_type in ("booking", "rental") and str(it.id) in lp:
+                try:
+                    newp = float(lp[str(it.id)])
+                except (TypeError, ValueError):
+                    continue
+                if newp < 0:
+                    continue
+                it.unit_price = newp
+                it.line_total = round(newp * float(it.quantity or 0), 2)
+
     # qty lama per produk (sebelum diganti) → utk hitung selisih stok
     old_qty_by_prod = {}
     for it in order.items:

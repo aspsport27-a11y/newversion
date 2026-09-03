@@ -2929,7 +2929,8 @@ def order_edit_items(order_id):
         return _err("Transaksi sudah dibatalkan — tak bisa diedit.", "bad_status", 409)
     from ..pos.services import edit_order_items_core
     d = request.get_json(silent=True) or {}
-    err = edit_order_items_core(order, d.get("items") or [], cashier_id=_current_user().id)
+    err = edit_order_items_core(order, d.get("items") or [], cashier_id=_current_user().id,
+                                locked_prices=d.get("locked_prices") or None)
     if err:
         return _err(err[0], err[1], 409)
     db.session.commit()
