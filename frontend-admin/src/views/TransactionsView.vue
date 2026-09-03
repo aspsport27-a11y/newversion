@@ -155,6 +155,18 @@ async function bulkDelete() {
     flash(`${data.deleted} transaksi dihapus${data.skipped ? `, ${data.skipped} dilewati` : ''}`)
   } catch (e) { alert(e?.response?.data?.message || 'Gagal menghapus massal.') } finally { busy.value = false }
 }
+async function bulkCancel() {
+  const ids = [...selected.value]
+  if (!ids.length) return
+  if (!window.confirm(`Batalkan ${ids.length} transaksi terpilih?\n\nUang keluar dari penjualan/kas dan stok dikembalikan. Transaksi TIDAK dihapus (masih ada di riwayat, berstatus Dibatalkan). Lanjutkan?`)) return
+  busy.value = true
+  try {
+    const { data } = await client.post('/admin/orders/bulk-cancel', { order_ids: ids })
+    clearSel()
+    await loadOrders()
+    flash(`${data.cancelled} transaksi dibatalkan${data.skipped ? `, ${data.skipped} dilewati` : ''}`)
+  } catch (e) { alert(e?.response?.data?.message || 'Gagal membatalkan massal.') } finally { busy.value = false }
+}
 async function cancelOrder(o, ev) {
   ev?.stopPropagation()
   const warn = o.status === 'paid'
@@ -266,6 +278,7 @@ async function deleteOrder(o, ev) {
       <span class="text-sm text-red-700 font-medium">{{ selected.size }} transaksi terpilih</span>
       <div class="flex gap-2">
         <button @click="clearSel" class="text-sm text-slate-500 hover:text-slate-700 px-3 py-1.5">Batal pilih</button>
+        <button @click="bulkCancel" :disabled="busy" class="text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-4 py-1.5 font-medium disabled:opacity-50">✖ Batalkan {{ selected.size }} terpilih</button>
         <button @click="bulkDelete" :disabled="busy" class="text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg px-4 py-1.5 font-medium disabled:opacity-50">🗑️ Hapus {{ selected.size }} terpilih</button>
       </div>
     </div>

@@ -3923,6 +3923,41 @@ def order_delete_admin(order_id):
     return jsonify(message=msg, forfeited_dp=kept), 200
 
 
+@admin_bp.post("/orders/bulk-cancel")
+@jwt_required()
+@ORDER_CANCEL
+def orders_bulk_cancel():
+    """Batalkan banyak transaksi sekaligus (jadi 'void' — uang keluar dari
+    penjualan/kas, stok dikembalikan), TANPA menghapus. Scoped ke venue manajer."""
+    from ..pos.services import PosError, cancel_order
+
+    d = request.get_json(silent=True) or {}
+    ids = d.get("order_ids") or []
+    if not isinstance(ids, list) or not ids:
+        return _err("order_ids wajib (daftar id)")
+    if len(ids) > 500:
+        return _err("Maksimal 500 transaksi per sekali batal")
+    forced = _forced_venue()
+    uid = _current_user().id
+    cancelled = 0
+    skipped = 0
+    for oid in ids:
+        order = db.session.get(Order, oid)
+        if not order or (forced is not None and order.venue_id != forced):
+            skipped += 1
+            continue
+        if order.status not in ("open", "partial", "paid"):
+            skipped += 1  # sudah void/tak valid
+            continue
+        try:
+            cancel_order(order, uid)  # commit di dalam
+            cancelled += 1
+        except (PosError, Exception):
+            db.session.rollback()
+            skipped += 1
+    return jsonify(cancelled=cancelled, skipped=skipped), 200
+
+
 @admin_bp.post("/orders/bulk-delete")
 @jwt_required()
 @ORDER_CANCEL
