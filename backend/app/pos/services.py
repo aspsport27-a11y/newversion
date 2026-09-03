@@ -293,7 +293,7 @@ def _D(v) -> Decimal:
 # Order number: {venue_code}-{YYYYMMDD}-{seq4}
 # ------------------------------------------------------------------
 def generate_order_number(venue: Venue) -> str:
-    today = date.today()
+    today = (datetime.utcnow() + timedelta(hours=8)).date()  # WITA (hari bisnis venue)
     prefix = f"{venue.code}-{today:%Y%m%d}-"
     # ambil nomor urut TERBESAR yg sudah ada, BUKAN count — kalau ada order
     # yg dihapus permanen (Hapus Permanen di Riwayat Transaksi), count turun
@@ -1196,11 +1196,13 @@ def open_shift(terminal_id, venue_id, cashier_id, opening_cash, biz_date=None) -
     if existing:
         raise PosError("Masih ada shift terbuka di terminal ini", "shift_already_open", 409)
     now = datetime.utcnow()
-    # biz_date (mode latihan back-date): shift dibuka untuk tanggal lampau. opened_at
-    # dipasang ke tanggal itu (jam sekarang) supaya laporan/rekonsiliasi menganggapnya
-    # transaksi tanggal tsb. NULL = shift normal (hari ini).
-    if biz_date is not None and biz_date != now.date():
-        opened = datetime.combine(biz_date, now.time())
+    wita_today = (now + timedelta(hours=8)).date()
+    # biz_date (mode latihan back-date): shift dibuka untuk tanggal WITA lampau.
+    # Simpan opened_at (UTC) sedemikian rupa hingga tanggal WITA-nya = biz_date
+    # (pakai jam WITA sekarang, lalu −8 jam ke UTC). NULL = shift normal (hari ini).
+    if biz_date is not None and biz_date != wita_today:
+        wita_time = (now + timedelta(hours=8)).time()
+        opened = datetime.combine(biz_date, wita_time) - timedelta(hours=8)
     else:
         biz_date = None
         opened = now
@@ -1219,12 +1221,14 @@ def open_shift(terminal_id, venue_id, cashier_id, opening_cash, biz_date=None) -
 
 
 def _biz_now(shift) -> datetime:
-    """Timestamp efektif untuk order/pembayaran. Kalau shift di-backdate (biz_date
-    terisi), pakai tanggal itu dengan jam server sekarang; selain itu jam server biasa."""
+    """Timestamp UTC efektif untuk order/pembayaran. Kalau shift di-backdate
+    (biz_date terisi), disimpan sedemikian rupa hingga tanggal WITA-nya = biz_date
+    (jam WITA sekarang −8 jam). Selain itu jam server (UTC) biasa."""
     now = datetime.utcnow()
     bd = getattr(shift, "biz_date", None)
     if bd:
-        return datetime.combine(bd, now.time())
+        wita_time = (now + timedelta(hours=8)).time()
+        return datetime.combine(bd, wita_time) - timedelta(hours=8)
     return now
 
 

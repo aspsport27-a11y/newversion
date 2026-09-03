@@ -9,7 +9,14 @@ from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
-from sqlalchemy import func
+from sqlalchemy import func, text
+
+
+def _wdate(col):
+    """Tanggal WITA (UTC+8) dari kolom timestamp UTC — 'hari bisnis' venue.
+    Server & DB pakai UTC; venue beroperasi WITA, jadi filter/laporan per tanggal
+    harus digeser +8 jam supaya cocok dgn tampilan (yg juga WITA)."""
+    return func.date(col + text("interval '8 hours'"))
 
 from ..extensions import db
 from ..models import Area, DeletedOrderLog, Employee, EmployeeDebt, KasbonRequest, ShiftAdjustLog, ShiftReopenLog, Supplier, User, Venue, get_setting, set_setting
@@ -1675,7 +1682,7 @@ def coach_availability_overview():
     elif vids is not None:
         q = q.filter(Coach.venue_id.in_(vids)) if vids else q.filter(db.false())
 
-    today = date.today()
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
     out = []
     for c in q.order_by(Coach.name).all():
         pattern = {}
@@ -2226,7 +2233,7 @@ TRACKED_VENUE_TYPES = {"Waterpark", "Mini Soccer", "Lapangan Bola", "Futsal", "P
 
 
 def _sales_growth_mom(vids):
-    today = date.today()
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
     this_month_start = today.replace(day=1)
     last_month_end = this_month_start - timedelta(days=1)
     last_month_start = last_month_end.replace(day=1)
@@ -2242,7 +2249,7 @@ def _sales_growth_mom(vids):
         rows = (
             db.session.query(Order.venue_id, func.coalesce(func.sum(Payment.amount), 0))
             .join(Payment, Payment.order_id == Order.id)
-            .filter(Payment.status == "paid", func.date(Payment.paid_at).between(d_from, d_to))
+            .filter(Payment.status == "paid", _wdate(Payment.paid_at).between(d_from, d_to))
             .group_by(Order.venue_id)
             .all()
         )
@@ -2291,26 +2298,26 @@ def dashboard_summary():
             return q.filter(db.false())
         return q.filter(model.venue_id.in_(vids))
 
-    today = date.today()
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
     yesterday = today - timedelta(days=1)
 
     pay_today_q = _scoped(
         db.session.query(func.coalesce(func.sum(Payment.amount), 0))
         .join(Order, Payment.order_id == Order.id)
-        .filter(Payment.status == "paid", func.date(Payment.paid_at) == today),
+        .filter(Payment.status == "paid", _wdate(Payment.paid_at) == today),
         Order,
     )
     pay_yesterday_q = _scoped(
         db.session.query(func.coalesce(func.sum(Payment.amount), 0))
         .join(Order, Payment.order_id == Order.id)
-        .filter(Payment.status == "paid", func.date(Payment.paid_at) == yesterday),
+        .filter(Payment.status == "paid", _wdate(Payment.paid_at) == yesterday),
         Order,
     )
     revenue_today = float(pay_today_q.scalar() or 0)
     revenue_yesterday = float(pay_yesterday_q.scalar() or 0)
 
     order_count_today = _scoped(
-        Order.query.filter(Order.status == "paid", func.date(Order.created_at) == today),
+        Order.query.filter(Order.status == "paid", _wdate(Order.created_at) == today),
         Order,
     ).count()
 
@@ -2352,7 +2359,7 @@ def dashboard_summary():
 # REPORTS
 # ==================================================================
 def _date_range():
-    today = date.today().isoformat()
+    today = (datetime.utcnow() + timedelta(hours=8)).date().isoformat()
     d_from = request.args.get("from") or today
     d_to = request.args.get("to") or today
     return d_from, d_to
@@ -2372,7 +2379,7 @@ def report_sales():
         db.session.query(Payment)
         .join(Order, Payment.order_id == Order.id)
         .filter(Payment.status == "paid")
-        .filter(func.date(Payment.paid_at).between(d_from, d_to))
+        .filter(_wdate(Payment.paid_at).between(d_from, d_to))
     )
     if ids is not None:
         pay_q = pay_q.filter(Order.venue_id.in_(ids)) if ids else pay_q.filter(db.false())
@@ -2391,13 +2398,13 @@ def report_sales():
     daily = [
         {"date": str(day), "revenue": float(a)}
         for day, a in pay_q.with_entities(
-            func.date(Payment.paid_at), func.coalesce(func.sum(Payment.amount), 0)
-        ).group_by(func.date(Payment.paid_at)).order_by(func.date(Payment.paid_at)).all()
+            _wdate(Payment.paid_at), func.coalesce(func.sum(Payment.amount), 0)
+        ).group_by(_wdate(Payment.paid_at)).order_by(_wdate(Payment.paid_at)).all()
     ]
 
     # --- komposisi jenis: dari order LUNAS dibuat dalam rentang ---
     ord_q = Order.query.filter(
-        Order.status == "paid", func.date(Order.created_at).between(d_from, d_to)
+        Order.status == "paid", _wdate(Order.created_at).between(d_from, d_to)
     )
     if ids is not None:
         ord_q = ord_q.filter(Order.venue_id.in_(ids)) if ids else ord_q.filter(db.false())
@@ -2457,8 +2464,8 @@ def report_shifts():
     # Muncul kalau shift DIBUKA atau DITUTUP dalam rentang (shift yg dibiarkan
     # terbuka lintas hari tetap terlihat di tanggal tutupnya).
     q = Shift.query.filter(db.or_(
-        func.date(Shift.opened_at).between(d_from, d_to),
-        func.date(Shift.closed_at).between(d_from, d_to),
+        _wdate(Shift.opened_at).between(d_from, d_to),
+        _wdate(Shift.closed_at).between(d_from, d_to),
     ))
     if ids is not None:
         q = q.filter(Shift.venue_id.in_(ids)) if ids else q.filter(db.false())
@@ -3339,7 +3346,7 @@ def bookings_list():
     """Daftar booking lapangan + info order (customer)."""
     from datetime import timedelta
 
-    today = date.today()
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
     d_from = request.args.get("from") or today.isoformat()
     d_to = request.args.get("to") or (today + timedelta(days=90)).isoformat()
     forced = _forced_venue()
@@ -3426,7 +3433,7 @@ def bookings_forfeited_dp():
     di kas (ikut cash shift → setoran), ini cuma pelabelan per venue utk
     visibilitas, TIDAK menambah/mengurangi uang. Difilter per tanggal DP masuk
     (paid_at). Dikelompokkan per order (bukan per booking) supaya tak dobel."""
-    today = date.today()
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
     d_from = request.args.get("from") or today.replace(day=1).isoformat()
     d_to = request.args.get("to") or today.isoformat()
     forced = _forced_venue()
@@ -3485,7 +3492,7 @@ def report_coaching():
     ditanya "berapa jam coach mengajar di periode ini". Beda dgn laporan
     penjualan yg basis kas; ditegaskan di UI supaya tak dikira selisih.
     Sesi batal (booking cancelled / order void) tidak dihitung."""
-    today = date.today()
+    today = (datetime.utcnow() + timedelta(hours=8)).date()
     d_from = request.args.get("from") or today.replace(day=1).isoformat()
     d_to = request.args.get("to") or today.isoformat()
     forced = _forced_venue()
@@ -3707,7 +3714,7 @@ def orders_list():
     d_from, d_to = _date_range()
     forced = _forced_venue()
     vid = forced if forced is not None else request.args.get("venue_id", type=int)
-    q = Order.query.filter(func.date(Order.created_at).between(d_from, d_to))
+    q = Order.query.filter(_wdate(Order.created_at).between(d_from, d_to))
     if vid:
         q = q.filter(Order.venue_id == vid)
     status = request.args.get("status")

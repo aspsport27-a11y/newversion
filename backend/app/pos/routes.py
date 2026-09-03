@@ -11,7 +11,12 @@ from flask_jwt_extended import (
     get_jwt_identity,
     jwt_required,
 )
-from sqlalchemy import func
+from sqlalchemy import func, text
+
+
+def _wdate(col):
+    """Tanggal WITA (UTC+8) dari kolom timestamp UTC — 'hari bisnis' venue."""
+    return func.date(col + text("interval '8 hours'"))
 
 from ..extensions import db
 from ..models import Employee, User, Venue, get_setting
@@ -388,7 +393,7 @@ def report_category_daily():
     campur & baru dibayar sebagian, jumlah pembayaran dialokasikan
     proporsional ke tiap item sesuai porsi line_total-nya."""
     terminal = _current_terminal()
-    today = date.today()
+    today = (datetime.utcnow() + timedelta(hours=8)).date()  # WITA
     d_arg = request.args.get("date")
     if d_arg:
         try:
@@ -401,7 +406,7 @@ def report_category_daily():
         .filter(
             Order.venue_id == terminal.venue_id,
             Payment.status == "paid",
-            func.date(Payment.paid_at) == today,
+            _wdate(Payment.paid_at) == today,  # tanggal WITA
         )
         .all()
     )
@@ -719,7 +724,7 @@ def shift_open():
             biz_date = datetime.strptime(raw, "%Y-%m-%d").date()
         except ValueError:
             raise PosError("Tanggal shift tidak valid", "bad_date")
-        if biz_date > date.today():
+        if biz_date > (datetime.utcnow() + timedelta(hours=8)).date():  # WITA
             raise PosError("Tanggal shift tidak boleh di masa depan", "future_date")
     shift = open_shift(
         terminal_id=terminal.id,
